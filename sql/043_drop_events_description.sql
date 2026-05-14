@@ -1,0 +1,36 @@
+-- Reverts sql/041_events_description.sql.
+--
+-- Why we're dropping it:
+--   sql/041 added `events.description` so the bot could surface raw
+--   prose to the user without re-fetching the source detail page.
+--   In practice no code path reads it — the agent's answers come
+--   from the structured columns (audience, category, tag_ids,
+--   min/max_months) plus on-demand label expansion. The prose body
+--   was only ever written; it never made it to the read side.
+--
+--   Meanwhile the city-API ingestion started populating descriptions
+--   on every rg-muni row (typically 200-800 bytes, occasionally
+--   several KB on umbrella program descriptions). For ~200 active
+--   city rows that's tens of KB of dead weight; at full scale (when
+--   the scraper covers more sources) it would have grown linearly
+--   with no payoff.
+--
+--   The enrichment pipeline still uses the description as input —
+--   `lib/eventEnricher.js` fetches it just-in-time from the source
+--   detail JSON (cityApi.fetchEventDetail) and hands it to Gemini,
+--   then discards the text. Tags derived from the description ARE
+--   persisted (tag_ids[]); the prose itself is not.
+--
+-- Safety:
+--   - DROP COLUMN IF EXISTS keeps the migration idempotent and a
+--     no-op on databases where 041 was never applied.
+--   - No FK / index / view references the column (verified by grep
+--     across the repo at the time of this migration), so the drop
+--     is a pure DDL change.
+--   - Postgres TOAST'd text columns reclaim space lazily; running a
+--     VACUUM after this isn't required for correctness but will
+--     return the storage to the OS sooner. Not part of this
+--     migration so the deploy step stays cheap.
+
+ALTER TABLE public.events
+  DROP COLUMN IF EXISTS description;

@@ -1,0 +1,45 @@
+# Keep the build context small AND avoid leaking host-side secrets /
+# state into the image. Anything ignored here is invisible to
+# `docker build` and to the COPY in Dockerfile.
+
+# Secrets & local config. Railway injects env vars at runtime — the
+# image must never carry a real .env. Keep .env.example so the repo
+# documents the variable set (it's harmless to leave it included, but
+# the bot doesn't read it).
+.env
+.env.*
+!.env.example
+
+# Local install artifacts. We reinstall deps inside the image via
+# `npm ci`, which requires the lockfile but NOT host node_modules
+# (different arch / native bindings).
+node_modules
+npm-debug.log
+yarn-error.log
+
+# VCS / IDE / cursor metadata.
+.git
+.gitignore
+.cursor
+.idea
+.vscode
+
+# Terminal session captures from the Cursor workspace — not source
+# code, not needed at runtime.
+terminals
+
+# WhatsApp scraper session cache (Puppeteer auth). Local-only state,
+# bot doesn't use it. Already in .gitignore but Docker reads its own
+# ignore file.
+.wwebjs_auth
+
+# Build / test scratch.
+*.log
+coverage
+.nyc_output
+
+# Docs & repo metadata — not needed inside the image.
+README.md
+*.md
+Dockerfile
+.dockerignore

@@ -1,0 +1,43 @@
+-- Add 'מפגש' (gathering) and 'ארוחה' (meal) to category_t.
+--
+-- Why:
+--   sql/040 added 'מסיבה' to give Wine & Cheese Night / mixers /
+--   holiday parties a home outside 'אחר'. The prompt update that
+--   followed (eventEnricher.js Rule 9 @ v8) was too greedy: it swept
+--   any "social gathering" — including communal Shabbat dinners —
+--   into 'מסיבה'. The vibe doesn't match: a party-seeker doesn't
+--   want a kosher Friday dinner, and a Shabbat-dinner-seeker
+--   doesn't think they're attending a party.
+--
+--   This migration introduces two more categories so the full
+--   social-gathering spectrum can be classified honestly:
+--
+--     'מסיבה'  — party with party-atmosphere (bar, dancing,
+--                music, rooftop party, DJ).
+--     'ארוחה'  — gathering whose CENTERPIECE is a meal
+--                (Shabbat dinner, community dinner, ארוחת שישי
+--                חברתית, Friday night, potluck).
+--     'מפגש'   — social gathering with no meal centerpiece
+--                (mixer, support group, book club, Wine & Cheese
+--                tasting, ערב הכרויות, mom's circle).
+--
+--   Decision shortcut (matches the user's mental model): a
+--   gathering WITH a meal → 'ארוחה'. Without a meal → 'מפגש'.
+--   Party atmosphere overrides both → 'מסיבה'.
+--
+-- Why three values, not one umbrella 'social':
+--   The three carry different intent. Filtering by category in
+--   the bot's UI ("show me parties tonight" vs "show me a Friday
+--   dinner") would conflate them under a single umbrella. Keeping
+--   them distinct lets users and the agent target precisely.
+--
+-- Migration safety:
+--   ALTER TYPE ADD VALUE cannot run inside a multi-statement
+--   transaction. Each statement below auto-commits independently
+--   in the Supabase SQL editor. If you wrap this file in BEGIN /
+--   COMMIT manually, the second ALTER will fail with
+--   "ALTER TYPE ... ADD cannot run inside a transaction block".
+--   Run them as separate statements (the default).
+
+ALTER TYPE public.category_t ADD VALUE IF NOT EXISTS 'מפגש';
+ALTER TYPE public.category_t ADD VALUE IF NOT EXISTS 'ארוחה';

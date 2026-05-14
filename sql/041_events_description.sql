@@ -1,0 +1,40 @@
+-- Store the raw description text on `events`.
+--
+-- Why:
+--   Today `lib/eventEnricher.js` extracts the prose description from the
+--   event detail page (Smarticket) or city-API payload, feeds it to
+--   Gemini for classification, and then throws it away — only a 32-char
+--   `description_hash` survives. That works for cache deduplication but
+--   leaves the bot blind whenever the user asks anything the canonical
+--   columns can't answer, e.g. "מה ההגבלות?", "למי זה מיועד?", "is
+--   parking included?", "is it kosher?", "what's the dress code?".
+--
+--   Storing the raw text lets the agent surface specifics on demand
+--   without re-fetching the detail page (which is the slow path: 1-3s
+--   per request, often rate-limited by Smarticket's Cloudflare).
+--
+-- Why nullable:
+--   - Existing rows have no captured description (we never stored it).
+--     Backfill happens organically as each event re-enriches under
+--     SCHEMA_VERSION=8 (sql/040 + the v8 prompt changes invalidate the
+--     v7 hash cache, so every row will re-enrich on its next scheduled
+--     pass and pick up its description).
+--   - Some events legitimately have no description on the source page
+--     — we don't want to invent text.
+--
+-- Why TEXT (unlimited) and not VARCHAR(N):
+--   Smarticket descriptions range from one line ("הופעה במופע יחיד")
+--   to ~2000 characters with venue history, accessibility notes, and
+--   eligibility caveats. City-API descriptions can run longer. Picking
+--   a length cap forces an extraction-time truncation decision; TEXT
+--   defers that and Postgres handles the variability gracefully via
+--   TOAST.
+--
+-- Why no index:
+--   We don't filter or join on description text. The agent reads it on
+--   demand for one event at a time. A trigram or FTS index would make
+--   sense if we ever add semantic search over descriptions, but that's
+--   a separate change with its own migration.
+
+ALTER TABLE public.events
+  ADD COLUMN IF NOT EXISTS description TEXT;

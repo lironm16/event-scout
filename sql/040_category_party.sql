@@ -1,0 +1,48 @@
+-- Add 'מסיבה' (party / social mixer) to category_t.
+--
+-- Why:
+--   The original category set (sql/032) — סדנה / הצגה / הופעה /
+--   הפעלה / הרצאה / משחקייה / סיור / ספורט / אחר — has no good
+--   home for social events: wine-and-cheese nights, Hanukkah
+--   parties, community mixers, holiday celebrations. Gemini was
+--   forced to file them under 'אחר' (other), which collapses two
+--   very different intents — "we couldn't classify" and "this is
+--   a party" — into one bucket. That makes the category column
+--   useless for the events that most need a filter ("show me
+--   evening parties this month").
+--
+-- 'מסיבה' covers:
+--   - Adult social events: wine & cheese, mixers, community
+--     dinners, "young adults" nights.
+--   - Holiday parties: מסיבת חנוכה / מסיבת פורים / מסיבת
+--     ל"ג בעומר when the event is celebration-shaped rather
+--     than performance-shaped.
+--   - Birthday-style community celebrations.
+--
+-- What stays in 'אחר':
+--   Real "we don't have a signal" events. The fallback semantics
+--   are unchanged.
+--
+-- Re-classification of existing rows:
+--   This migration only EXTENDS the enum. Existing rows tagged
+--   'אחר' that are actually parties will keep that label until
+--   re-enriched. To re-classify a specific event, NULL its
+--   description_hash and the next enrichment cycle re-runs Gemini
+--   against the updated prompt:
+--
+--     UPDATE public.events SET description_hash = NULL WHERE id = <id>;
+--
+--   Or for a sweep of suspect rows:
+--
+--     UPDATE public.events
+--     SET description_hash = NULL
+--     WHERE category = 'אחר'
+--       AND (name ILIKE '%מסיב%' OR name ILIKE '%wine%' OR name ILIKE '%cheese%' OR name ILIKE '%mixer%');
+--
+-- Postgres semantics:
+--   `ALTER TYPE ... ADD VALUE IF NOT EXISTS` is idempotent — re-running
+--   this migration after a partial apply is safe. The new value cannot
+--   be USED inside the same transaction it's added, but this file does
+--   not reference it, so that restriction doesn't bite us here.
+
+ALTER TYPE public.category_t ADD VALUE IF NOT EXISTS 'מסיבה';
