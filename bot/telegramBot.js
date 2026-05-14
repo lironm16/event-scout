@@ -185,6 +185,69 @@ async function notifyAdminOfError({ traceId, telegramId, inputText, err }) {
 // this number.
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN, { handlerTimeout: 90_000 });
 
+// ──────────────────────────────────────────────────────────────────────────
+// Central RTL anchor for ALL outgoing text
+// ──────────────────────────────────────────────────────────────────────────
+//
+// Telegram's bidi algorithm picks paragraph direction from the FIRST
+// strong-direction character on each line. Hebrew text whose line starts
+// with an English letter, a digit, an emoji-followed-by-Latin, or even
+// just punctuation gets resolved as LTR → left-aligned, regardless of
+// how much Hebrew sits later in the line.
+//
+// The fix is a leading U+200F (RLM) on every line. Historically we did
+// this manually with `rtlLine()` at each call site, which is fragile:
+// every new `ctx.reply(...)` someone adds without remembering the
+// wrapper silently regresses alignment — and we now have 47+ direct
+// reply call sites plus a handful of `bot.telegram.sendMessage(...)`
+// admin broadcasts that bypass the Telegraf context entirely.
+//
+// Patching `bot.telegram` once at boot turns RTL anchoring into a
+// global property of the bot, not a per-handler convention. Every
+// outgoing text path — `ctx.reply`, `ctx.replyWithPhoto` caption,
+// `ctx.editMessageText`, `bot.telegram.sendMessage` direct calls —
+// flows through these five methods. `rtlLine` is idempotent (no-ops
+// when the line already starts with U+200F), so the existing
+// `rtlLine`-wrapping call sites stay correct and don't double-prefix.
+(() => {
+  const wrapText = (s) => {
+    if (typeof s !== "string" || !s) return s;
+    return s.split("\n").map(rtlLine).join("\n");
+  };
+  const wrapCaption = (extra) => {
+    if (extra && typeof extra === "object" && typeof extra.caption === "string") {
+      return { ...extra, caption: wrapText(extra.caption) };
+    }
+    return extra;
+  };
+
+  const tg = bot.telegram;
+
+  const origSendMessage = tg.sendMessage.bind(tg);
+  tg.sendMessage = (chatId, text, extra) =>
+    origSendMessage(chatId, wrapText(text), extra);
+
+  const origSendPhoto = tg.sendPhoto.bind(tg);
+  tg.sendPhoto = (chatId, photo, extra) =>
+    origSendPhoto(chatId, photo, wrapCaption(extra));
+
+  const origSendDocument = tg.sendDocument.bind(tg);
+  tg.sendDocument = (chatId, doc, extra) =>
+    origSendDocument(chatId, doc, wrapCaption(extra));
+
+  // Telegraf's edit signatures keep the chat/message/inline IDs up front
+  // and put text/extra after them. ctx.editMessageText collapses to the
+  // 2-arg form for callbacks, but under the hood Telegraf calls the
+  // 5-arg method here.
+  const origEditText = tg.editMessageText.bind(tg);
+  tg.editMessageText = (chatId, messageId, inlineMessageId, text, extra) =>
+    origEditText(chatId, messageId, inlineMessageId, wrapText(text), extra);
+
+  const origEditCaption = tg.editMessageCaption.bind(tg);
+  tg.editMessageCaption = (chatId, messageId, inlineMessageId, caption, extra) =>
+    origEditCaption(chatId, messageId, inlineMessageId, wrapText(caption), extra);
+})();
+
 // Telegram callback queries have a ~15s TTL. If the bot is busy (slow
 // agent turn, DB query, cache rebuild) and reaches `answerCbQuery`
 // after that, Telegram returns:
