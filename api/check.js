@@ -8,7 +8,7 @@ const { ensureLocationKey, resolvePending } = require("../lib/locationResolver")
 const { formatHebrewDate, formatTimeRange, rtlLine } = require("../lib/eventFormat");
 const { normalizeImageUrl } = require("../lib/imageUrl");
 const { TENANTS, getBookingUrl } = require("../lib/sourceUrls");
-const { classifyAccessForEvent } = require("../lib/access");
+const { classifyAllAccessForEvent } = require("../lib/access");
 const sentry = require("../lib/sentry");
 // Idempotent — early-returns if already initialized by the parent
 // process (the bot). Lets `npm run check` standalone also report.
@@ -498,7 +498,10 @@ async function upsertEvents(events) {
     // the title carries the signal consistently across both Smarticket
     // tenants — verified against the 4 known reservist events on
     // ramat-gan.smarticket.co.il in the 2026-05 cycle.
-    const access = classifyAccessForEvent({ name: e.name });
+    // Returns an array of all matching community scopes (e.g.
+    // ['community-lgbtq', 'community-russian']) or null when the
+    // title carries no community signal (don't overwrite existing).
+    const access = classifyAllAccessForEvent({ name: e.name });
     if (access) row.access = access;
 
     // Preserve the venue FK on existing events. The text itself lives on
@@ -574,8 +577,8 @@ async function upsertEvents(events) {
   // (`true`), supabase-js unions every key seen across all rows in
   // the batch and explicitly sends NULL for any key a row omitted.
   // That breaks the `access` column specifically:
-  //   * `events.access` is `access_t NOT NULL DEFAULT 'open'`
-  //     (sql/039).
+  //   * `events.access` is `access_t[] NOT NULL DEFAULT '{open}'`
+  //     (sql/039 + sql/060).
   //   * We deliberately OMIT `access` from rows where the title-
   //     classifier had no positive signal — the goal is "let the DB
   //     default kick in on INSERT, preserve the existing value on

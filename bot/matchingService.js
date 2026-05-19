@@ -327,18 +327,20 @@ function applyFormatFilter(events, format) {
 // the column doesn't exist and the query fails). The OPTIONAL_COLS
 // probe above tells us which extras are present.
 //
-// `scopes` is the list of `events.access` values to include — at
-// minimum ['open']. Pass additional community values (e.g.
-// ['open', 'community-disabilities']) when the calling user has
-// declared themselves a member of that community via
-// profile.user_context.communities. The single-value case is
-// optimised to `.eq(...)` so the planner uses idx_events_access
-// efficiently.
+// `scopes` is the list of access values the current user is allowed
+// to see — at minimum ['open']. Pass additional community values
+// (e.g. ['open', 'community-disabilities']) when the user is a
+// member of that community via profile.user_context.communities.
+//
+// events.access is now access_t[] (sql/060). An event is visible
+// when ANY element of events.access appears in `scopes`, i.e. the
+// two arrays OVERLAP. PostgREST maps `.overlaps(col, arr)` to the
+// Postgres `&&` operator which is supported by the GIN index
+// idx_events_access_gin — as efficient as the old btree eq/in.
 function withAccessFilter(query, extraCols, scopes) {
   if (!extraCols.includes("access")) return query;
   const list = Array.isArray(scopes) && scopes.length ? scopes : ["open"];
-  if (list.length === 1) return query.eq("access", list[0]);
-  return query.in("access", list);
+  return query.overlaps("access", list);
 }
 
 async function getAvailableEvents({ accessScopes = ["open"] } = {}) {

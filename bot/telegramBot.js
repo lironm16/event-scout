@@ -6356,7 +6356,7 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
         occ.tickets_left === 0
           ? "🚫 אזל"
           : occ.tickets_left != null
-          ? `🎫 ${occ.tickets_left}${lowStock ? " ❗️" : ""}`
+          ? `🎫 ${occ.tickets_left}${lowStock ? "❗️" : ""}`
           : "";
       const meta = [dateStr, timeStr].filter(Boolean).join(" — ");
       const trailing = ticketsStr ? `  ${ticketsStr}` : "";

@@ -31,7 +31,23 @@
 
 require("dotenv").config();
 const supabase = require("../lib/supabase");
-const { classifyAccessFromText } = require("../lib/access");
+const { classifyAllAccessForEvent } = require("../lib/access");
+
+// events.access is now access_t[] (sql/060). This backfill is
+// ADDITIVE-ONLY — it never removes community scopes that were set
+// by other means (umbrella analysis, tag lookup, manual SQL edits).
+//
+// Algorithm per row:
+//   1. Classify the text → get the computed scopes (or [] if 'open').
+//   2. If computed is empty (classifier saw no community signal) → skip.
+//   3. Merge computed INTO the existing array (union, deduplicated).
+//   4. If merged == existing → skip (already up to date).
+//   5. Otherwise update the row.
+//
+// Why additive: events like #3740 "פק״ל קפה וקראש" were tagged
+// community-miluim via label lookup (the title doesn't spell it out),
+// and #83892538 via the umbrella/cluster path. The text classifier
+// won't detect those — if we let it overwrite we'd erase them.
 
 async function main() {
   const { data: rows, error } = await supabase
@@ -45,21 +61,34 @@ async function main() {
 
   const updates = [];
   for (const r of rows) {
-    if (r.access === "community-russian") continue;
-    // Don't downgrade a more-specific community classification.
-    // Only touch `open` or NULL.
-    if (r.access && r.access !== "open") continue;
-    // Concat all the text the live classifier would see. Order
-    // matters only for `classifyAccessFromText`'s first-match
-    // semantics — and within the function we run the same regex
-    // chain, so the order across fields is irrelevant here.
-    const blob = [r.name, r.umbrella_title, r.description]
-      .filter(Boolean)
-      .join(" \n ");
-    if (classifyAccessFromText(blob) === "community-russian") {
-      updates.push({ id: r.id, name: r.name });
-    }
+    const newScopes = classifyAllAccessForEvent({
+      name: r.name,
+      description: [r.umbrella_title, r.description].filter(Boolean).join(" \n "),
+    });
+    // No community signal detected — don't touch this row.
+    if (!newScopes) continue;
+
+    // Normalize existing to an array.
+    const existing = Array.isArray(r.access)
+      ? r.access
+      : [r.access || "open"];
+
+    // Union: add new scopes to existing, keeping all existing ones.
+    const merged = Array.from(new Set([...existing, ...newScopes]));
+    // Remove 'open' when real community scopes are present — an event
+    // can't be both community-gated AND public at the same time.
+    const finalScopes =
+      merged.some((s) => s !== "open")
+        ? merged.filter((s) => s !== "open")
+        : merged;
+
+    const existingKey = [...existing].sort().join(",");
+    const targetKey = [...finalScopes].sort().join(",");
+    if (existingKey === targetKey) continue;
+
+    updates.push({ id: r.id, name: r.name, existing, target: finalScopes });
   }
+
   console.log(`[Backfill] ${updates.length} events to update.`);
   if (!updates.length) return;
 
@@ -68,7 +97,7 @@ async function main() {
   for (const u of updates) {
     const { error: upErr } = await supabase
       .from("events")
-      .update({ access: "community-russian" })
+      .update({ access: u.target })
       .eq("id", u.id);
     if (upErr) {
       console.error(`[Backfill] #${u.id} failed: ${upErr.message}`);
@@ -76,7 +105,7 @@ async function main() {
       continue;
     }
     console.log(
-      `[Backfill] #${u.id} "${(u.name || "").slice(0, 60)}" → community-russian`,
+      `[Backfill] #${u.id} "${(u.name || "").slice(0, 55)}" ${JSON.stringify(u.existing)} → ${JSON.stringify(u.target)}`,
     );
     ok++;
   }
