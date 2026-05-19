@@ -1,3 +1,14 @@
+// Local dev override: .env.local explicitly OVERRIDES anything already
+// in process.env (shell exports from .zshrc, parent processes, etc.).
+// Without `override: true` a `TELEGRAM_TOKEN` already set in your shell
+// would win over .env.local and your local bot would race the
+// production polling. Then load .env as a fallback for everything
+// .env.local didn't cover. Railway has neither file and injects vars
+// directly, so this is a no-op there.
+require("dotenv").config({
+  path: require("path").resolve(__dirname, "..", ".env.local"),
+  override: true,
+});
 require("dotenv").config({ path: require("path").resolve(__dirname, "..", ".env") });
 
 // Sentry must initialize BEFORE we require modules that could throw
@@ -35,7 +46,8 @@ const {
 const { _saveOffer: saveTicketOfferToDb } = require("../lib/agent/tools/ticketOffer");
 const referralService = require("../lib/referralService");
 const { flushDueNotifications } = require("../lib/scheduleService");
-const { formatHebrewDate, formatTimeRange, formatTagLine, getEventIcon, rtlLine } = require("../lib/eventFormat");
+const { formatHebrewDate, formatTimeRange, formatTagLine, formatAdultAgeGate, getEventIcon, rtlLine } = require("../lib/eventFormat");
+const { formatTicketsLine, formatLowStockBadge, buildNavButtons, buildNavPickerLinks } = require("../lib/eventCard");
 const { normalizeImageUrl } = require("../lib/imageUrl");
 const { getBookingUrl } = require("../lib/sourceUrls");
 const { runCleanup } = require("../lib/archiveService");
@@ -45,9 +57,45 @@ const sessionStore = require("../lib/agent/sessionStore");
 const { audienceLabel, AUDIENCE_LABELS } = require("../lib/categories");
 const {
   INTEREST_CATEGORIES,
+  TOPIC_CATEGORIES,
+  AUDIENCE_CATEGORIES,
+  LOCATION_OPTIONS,
   getInterestById,
   getInterestByLabel,
+  getTopicById,
+  getAudienceById,
+  getLocationById,
+  getChipByLabel,
 } = require("../lib/interestCategories");
+const {
+  fetchTopLabelsPage,
+  countAvailableLabels,
+  PAGE_SIZE: TOP_LABELS_PAGE_SIZE,
+} = require("../lib/topLabelsService");
+
+// Hard cap on how many top-label chips can be loaded into the
+// onboarding picker before the "🔁 הצג עוד" button hides itself.
+// Telegram's inline_keyboard practically tops out around 100 rows;
+// with one chip per row (the toplabels step uses single-column
+// layout) + nav row + show-more row we cap at 60 chips so the
+// keyboard stays comfortably under the limit (62 rows total).
+// Without this cap, a user who rapidly paginates through a 363-
+// label catalog hits the limit and the trailing rows (including
+// "💾 שמרי") get silently truncated by Telegram — exactly the
+// bug the user reported. Niche labels past the top-60 by
+// popularity can still be added via free-text chat with the agent.
+const MAX_LOADED_TOP_LABELS = 60;
+
+// Chip rendering for the toplabels picker. We tried `\n` to wrap to
+// two lines but Telegram inline buttons DON'T honor newlines —
+// they're rendered as a stripped space (or nothing), making the
+// single source line longer than before and pushing the trailing
+// count off-screen with the truncation ellipsis. So instead we put
+// the COUNT FIRST in the source string: when Telegram clips the
+// end of a too-long chip, the popularity number survives and the
+// (still-recognisable) leading chars of the label name take the
+// hit. Hebrew compound names read fine from their prefix, e.g.
+// "ר"געים משחקייה התפ…" still parses as the playgroup chip.
 const { enrichPendingEvents } = require("../lib/eventEnricher");
 const {
   recordFeedback,
@@ -195,24 +243,51 @@ const bot = new Telegraf(process.env.TELEGRAM_TOKEN, { handlerTimeout: 90_000 })
 // just punctuation gets resolved as LTR → left-aligned, regardless of
 // how much Hebrew sits later in the line.
 //
-// The fix is a leading U+200F (RLM) on every line. Historically we did
-// this manually with `rtlLine()` at each call site, which is fragile:
-// every new `ctx.reply(...)` someone adds without remembering the
-// wrapper silently regresses alignment — and we now have 47+ direct
-// reply call sites plus a handful of `bot.telegram.sendMessage(...)`
-// admin broadcasts that bypass the Telegraf context entirely.
+// We use a TWO-PRONGED approach because a single technique isn't
+// enough across all Telegram clients:
 //
-// Patching `bot.telegram` once at boot turns RTL anchoring into a
-// global property of the bot, not a per-handler convention. Every
-// outgoing text path — `ctx.reply`, `ctx.replyWithPhoto` caption,
-// `ctx.editMessageText`, `bot.telegram.sendMessage` direct calls —
-// flows through these five methods. `rtlLine` is idempotent (no-ops
-// when the line already starts with U+200F), so the existing
-// `rtlLine`-wrapping call sites stay correct and don't double-prefix.
+//   1. Per-line `\u200F` (RLM) — a strong-RTL "mark" that satisfies the
+//      bidi algorithm's first-strong-character rule. Works in most
+//      desktop+mobile clients for plain message bubbles.
+//
+//   2. Whole-block `\u202B`…`\u202C` (RLE / Right-to-Left Embedding +
+//      PDF / Pop Directional Formatting) wrap — an explicit Unicode
+//      DIRECTIONAL FORMATTING control that forces the entire block
+//      to render as an RTL embedding. RLM is a "hint" the bidi
+//      algorithm can override; RLE is a "command". Telegram Desktop
+//      (and a couple of older mobile builds) have been observed
+//      stripping or ignoring the leading RLM in PHOTO CAPTIONS
+//      specifically, while still honouring RLE+PDF. Belt and
+//      suspenders here is the difference between "almost always
+//      RTL" and "definitely RTL".
+//
+// Idempotent on both layers:
+//   - `rtlLine` no-ops when a line already starts with U+200F.
+//   - The RLE wrap checks for an existing leading U+202B before
+//     adding another pair, so the call-sites that hand-wrapped text
+//     before reaching this layer don't accumulate extra control chars.
+//
+// All five outgoing-text methods on `bot.telegram` are patched once
+// at boot — `ctx.reply` / `ctx.replyWithPhoto` caption / `ctx.editMessageText`
+// / `bot.telegram.sendMessage` direct admin broadcasts / etc. all
+// flow through one of them, so no caller needs to remember the
+// wrapper.
+const RLE = "\u202B";
+const PDF = "\u202C";
+
 (() => {
   const wrapText = (s) => {
     if (typeof s !== "string" || !s) return s;
-    return s.split("\n").map(rtlLine).join("\n");
+    // Idempotency check happens on the RAW input BEFORE the per-line
+    // RLM pass. Otherwise rtlLine would prepend a U+200F in front of
+    // the existing U+202B, the perLine.startsWith(RLE) check below
+    // would fail, and we'd nest another RLE/PDF pair on every
+    // re-entrant wrap. Catching it here keeps the output stable
+    // through any number of re-wraps and keeps the caption length
+    // under the 1024-char Telegram limit predictable.
+    if (s.startsWith(RLE)) return s;
+    const perLine = s.split("\n").map(rtlLine).join("\n");
+    return `${RLE}${perLine}${PDF}`;
   };
   const wrapCaption = (extra) => {
     if (extra && typeof extra === "object" && typeof extra.caption === "string") {
@@ -479,6 +554,20 @@ function humanizeMs(ms) {
 }
 
 async function runScrape() {
+  // Refresh the labelStore name→id cache at the top of every scrape.
+  // Postgres auto-prunes labels whose events_count drops to 0 (sql/050),
+  // and an in-memory cache that outlives that delete would hand back a
+  // dangling id on the next setEventLabels, writing a dead reference
+  // into events.tag_ids. Scrape order (upsert → cleanup → city scrape)
+  // keeps things consistent WITHIN a cycle; this clear closes the gap
+  // BETWEEN cycles. Cheap — the cache rebuilds on first lookup.
+  try {
+    const labelStore = require("../lib/labelStore");
+    labelStore._clearCache();
+  } catch (err) {
+    console.warn("[Scrape] labelStore cache clear failed:", err.message);
+  }
+
   try {
     const check = require("../api/check");
     const result = await check();
@@ -671,7 +760,31 @@ async function sendEventCard(ctx, event, opts = {}) {
   const multiVenue = Boolean(opts.seriesMultiVenue);
 
   const soldOut = event.tickets_left === 0 || event._is_sold_out;
-  const lines = [`${getEventIcon(event)} ${event.name}`];
+  // Two-tier title (May-2026 user request, sql/056 cleanup).
+  //   Primary   = umbrella_title — the "branding" line. For a non-
+  //               umbrella event there's no umbrella, so the event's
+  //               own name is the primary.
+  //   Secondary = name — the date-specific child title, but ONLY
+  //               when this row is under an umbrella AND `name` is
+  //               distinct from `umbrella_title`. For singles (no
+  //               umbrella) and active-garden-style children (name
+  //               echoes the umbrella) the secondary line is
+  //               omitted and we render a single title line.
+  // We keep `event.name` flowing into `getEventIcon` so the icon
+  // picker has the most specific topic signal available.
+  const umbrellaTitleTrim =
+    (typeof event.umbrella_title === "string" && event.umbrella_title.trim())
+      ? event.umbrella_title.trim()
+      : null;
+  const nameTrim =
+    typeof event.name === "string" ? event.name.trim() : "";
+  const primaryTitle = umbrellaTitleTrim || nameTrim;
+  const secondaryTitle =
+    umbrellaTitleTrim && nameTrim && nameTrim !== umbrellaTitleTrim
+      ? nameTrim
+      : null;
+  const lines = [`${getEventIcon(event)} ${primaryTitle}`];
+  if (secondaryTitle) lines.push(secondaryTitle);
   if (event.date) lines.push(`📅 ${formatHebrewDate(event.date)}`);
   const timeStr = formatTimeRange(event.start_time, event.end_time);
   if (timeStr) lines.push(rtlLine(`🕐 ${timeStr}`));
@@ -680,19 +793,20 @@ async function sendEventCard(ctx, event, opts = {}) {
   } else if (event.location) {
     lines.push(`📍 ${event.location}`);
   }
-  // Tickets line:
-  //   - sold out             → loud red marker
-  //   - has a count (smarticket) → "🎫 N כרטיסים"
-  //   - tickets_left is NULL (free/unmetered city events, sql/039)
-  //     → omit the line entirely. Printing "🎫 null כרטיסים" is the
-  //     bug this branch fixes. The user already gets the event title,
-  //     date, venue, and a click-through; a "tickets" field that
-  //     doesn't apply to free events is just noise.
-  if (soldOut) {
-    lines.push(`🚫 אזלו הכרטיסים`);
-  } else if (event.tickets_left != null) {
-    lines.push(`🎫 ${event.tickets_left} כרטיסים`);
-  }
+  // Tickets line — the helper handles all branches:
+  //   sold out         → "🚫 אזלו הכרטיסים"
+  //   low stock (≤10)  → "🎫 N כרטיסים אחרונים ❗️"  (merged, single line)
+  //   has tickets      → "🎫 N כרטיסים"
+  //   free / null      → null (omit the line — printing "🎫 null
+  //                      כרטיסים" was a real bug pre-May-2026)
+  // Note: `soldOut` here also captures `event._is_sold_out` (the
+  // search-time mark for series with at least one open slot
+  // elsewhere), which the helper alone wouldn't catch. We honour it
+  // explicitly so the line still says "אזלו" in that case.
+  const ticketsLine = soldOut
+    ? "🚫 אזלו הכרטיסים"
+    : formatTicketsLine(event.tickets_left);
+  if (ticketsLine) lines.push(ticketsLine);
   if (additionalOccurrences > 0) {
     // Pluralization: 1 = יחיד, 2+ = רבים. Hebrew has no separate dual
     // form for "מופע" so the same suffix works for 2 and N≥2.
@@ -703,8 +817,32 @@ async function sendEventCard(ctx, event, opts = {}) {
     const moadStr = additionalOccurrences === 1 ? "מופע נוסף" : `${additionalOccurrences} מופעים נוספים`;
     lines.push(`🔁 ${moadStr} בטווח`);
   }
+  // Adult-tier age gate (May-2026 user request). For parties / adult
+  // events with a min_months>=216 (18+) we surface the bouncer-policy
+  // line on the card itself — previously this restriction lived only
+  // in the audience-tier filter, invisible to the user. See
+  // `formatAdultAgeGate` for the scope rules; null for events that
+  // don't qualify, which we then skip entirely (no empty line).
+  const ageGate = formatAdultAgeGate(event);
+  if (ageGate) lines.push(ageGate);
   if (event._proximity?.label) lines.push(event._proximity.label);
   if (event._reason) lines.push(`💡 ${event._reason}`);
+
+  // Description (sql/053). Same shape and rules as
+  // `buildConsolidatedEventBlock` for visual parity across surfaces:
+  // dedicated 📝 prefix, normalised whitespace, soft cap at 280 chars.
+  // Surfaced for events with NO external-details URL — children of
+  // umbrellas like shavuot-2026 inherit the parent's marketing page
+  // through `umbrella_slug` but have no per-child detail URL of
+  // their own, so this card is the only place a user can read the
+  // event's blurb. We position it BELOW location/tickets/proximity
+  // and ABOVE the tag line so 🏷️ stays the final "footer" line.
+  if (typeof event.description === "string" && event.description.trim()) {
+    const desc = event.description.replace(/\s+/g, " ").trim();
+    const capped =
+      desc.length > 280 ? desc.slice(0, 280).trimEnd() + "…" : desc;
+    lines.push(`📝 ${capped}`);
+  }
 
   // Tag line — surfaces the topic at-a-glance ("מוזיקה • התפתחות") so
   // the user gets the gist before tapping "פרטים". The renderer uses
@@ -731,7 +869,7 @@ async function sendEventCard(ctx, event, opts = {}) {
     lines.push(v.reason);
   }
 
-  // "🗺️ ניווט" + "🔗 פרטים" share a row when both exist (compact and
+  // "🧭 ניווט" + "🔗 פרטים" share a row when both exist (compact and
   // visually paired — directions next to the event page link). If
   // only one is available it stands alone.
   //
@@ -740,16 +878,57 @@ async function sendEventCard(ctx, event, opts = {}) {
   // text's RTL direction. With Hebrew labels we want the primary
   // action ("פרטים") on the RIGHT — closer to where the eye lands
   // first in an RTL message — so it goes SECOND in the array.
+  //
+  // The nav button is ONE button now (down from Waze + Maps). On
+  // Android the OS shows its app picker when multiple map apps are
+  // installed; on iOS it opens the user's installed map app. See
+  // `lib/eventCard.js#buildNavigateButton` for the rationale.
   const rows = [];
   const detailsBtn = buildDetailsButton(event);
-  const navBtn = buildNavigateButton(event);
-  const topRow = [navBtn, detailsBtn].filter(Boolean);
+  const navBtns = buildNavButtons(event);
+  const topRow = [...navBtns, detailsBtn].filter(Boolean);
   if (topRow.length) rows.push(topRow);
 
-  // "All occurrences" button — only when this card represents a
-  // series (count ≥ 2). The callback ID encodes the representative
-  // event id; the handler resolves it via session.lastShownSeries.
-  if (additionalOccurrences > 0) {
+  // Series / umbrella button — TWO possible behaviours, mutually
+  // exclusive (the user picked one button max for visual restraint):
+  //
+  //   1. UMBRELLA child (sql/054 set umbrella_slug on the row): the
+  //      button shows ALL siblings of the umbrella — different
+  //      titles, venues, times. Example: a Shavuot child card shows
+  //      "📋 כל אירועי שבועות ברמת גן". This matches the user's
+  //      mental model — "show me everything happening as part of
+  //      this Shavuot programme", not "show me other dates of this
+  //      specific puppet show". The seq grouping (same name, age
+  //      range) is genuinely the WRONG view for umbrella children
+  //      whose name is unique per occurrence.
+  //
+  //   2. Recurring SERIES (no umbrella, but ≥2 same-name occurrences):
+  //      the classic "📋 כל המופעים (N)" button. Useful for things
+  //      like "משחקיית רגעים לידה עד שנה" that runs 8× this week.
+  //
+  // Why not both: cards already carry 3-4 buttons; a fifth would
+  // overflow on narrow screens. The umbrella relationship is more
+  // informative when present (it explains "this is part of a larger
+  // programme"), so it wins. For umbrella children that ALSO happen
+  // to have multiple same-name occurrences (rare in practice), the
+  // seq button is silently dropped — users who want that view can
+  // still tap the parent umbrella and find the duplicate dates
+  // surfaced per child anyway.
+  if (event.umbrella_slug) {
+    const rawTitle = event.umbrella_title || "האירועים מתחת לכותרת המלאה";
+    // Telegram inline buttons render comfortably up to ~30 chars
+    // before they wrap on small phones; truncate longer titles with
+    // a Hebrew-friendly ellipsis ("…"). 22 chars body + the 10-char
+    // "📋 כל אירועי " prefix = 32, within budget for typical screens.
+    const truncated =
+      rawTitle.length > 22 ? rawTitle.slice(0, 21) + "…" : rawTitle;
+    rows.push([
+      Markup.button.callback(
+        `📋 כל אירועי ${truncated}`,
+        `umb:${event.umbrella_slug}`,
+      ),
+    ]);
+  } else if (additionalOccurrences > 0) {
     rows.push([
       Markup.button.callback(`📋 כל המופעים (${seriesCount})`, `seq:${event.id}`),
     ]);
@@ -814,8 +993,9 @@ async function sendTicketCard(ctx, ticket) {
 
   const row = [];
   if (ticket.seller_phone) row.push(Markup.button.callback("📞 צרי קשר", `ct:${ticket.id}`));
-  const navBtn = buildNavigateButton(ticket);
-  if (navBtn) row.push(navBtn);
+  // Single "🧭 ניווט" button per May-2026 spec — see sendEventCard
+  // for the rationale on collapsing Waze + Maps into one entry.
+  for (const btn of buildNavButtons(ticket)) row.push(btn);
 
   // RTL anchoring on every line — see sendEventCard for the rationale.
   await ctx.reply(lines.map(rtlLine).join("\n"), row.length ? Markup.inlineKeyboard(row) : undefined);
@@ -832,18 +1012,21 @@ async function sendWatchListCards(ctx, watched) {
     // Same NULL-aware rule as the search card above: free/unmetered
     // events (city source, sql/039 → tickets_left = NULL) omit the
     // line entirely instead of printing "אזלו" or a literal "null".
-    if (event.tickets_left > 0) {
-      lines.push(`✅ ${event.tickets_left} כרטיסים זמינים!`);
-    } else if (event.tickets_left === 0) {
-      lines.push(`🚫 אזלו הכרטיסים`);
-    }
+    // Watchlist uses the shared helper so the low-stock urgency
+    // signal stays consistent ("🎫 N כרטיסים אחרונים ❗️").
+    const watchTicketsLine = formatTicketsLine(event.tickets_left);
+    if (watchTicketsLine) lines.push(watchTicketsLine);
     if (event.tickets_needed != null) lines.push(`📋 מחפשת ${event.tickets_needed} כרטיסים`);
 
     // RTL anchoring on every line — see sendEventCard for the rationale.
     const text = lines.map(rtlLine).join("\n");
     const rows = [];
     const detailsBtn = buildDetailsButton(event);
-    if (detailsBtn) rows.push([detailsBtn]);
+    // Top row: nav + details. Same single-button layout as
+    // sendEventCard so the bot's UI stays consistent across surfaces.
+    const navBtns = buildNavButtons(event);
+    const topRow = [...navBtns, detailsBtn].filter(Boolean);
+    if (topRow.length) rows.push(topRow);
     rows.push([Markup.button.callback("🔕 בטל מעקב", `unw:${event.id}`)]);
     const keyboard = Markup.inlineKeyboard(rows);
     const photoUrl = normalizeImageUrl(event.image, event);
@@ -1068,29 +1251,57 @@ function buildAgentCtx(ctx, { traceId, markResponded } = {}) {
         mark();
         return renderSavePreviewCard(ctx, { editInPlace: false });
       },
-      // Used by `present_interest_picker`. Opens the same chip-toggle
-      // UI as /interests, scoped to the user or their partner.
-      // Resolving the partner name happens inside `openInterestsPicker`
-      // (reads the profile), so the agent doesn't need to thread it
-      // through this call.
+      // Used by `present_interest_picker`. For SELF, opens the new
+      // multi-step onboarding (topics → audiences → location); for
+      // PARTNER, falls back to the legacy single-list picker — that
+      // sub-flow is intentionally simpler since partner-interests is
+      // a one-question interaction.
       renderInterestPicker: async ({ target = "self" } = {}) => {
         mark();
-        let partnerName = null;
-        if (target === "partner") {
-          try {
-            const profile = await getProfile(ctx.from.id);
-            partnerName = profile?.user_context?.partner?.name || null;
-          } catch {
-            // Defensive: if the profile fetch fails we still let the
-            // picker open with a generic header. The save handler will
-            // refuse to commit without a partner name in profile.
-          }
+        if (target === "self") {
+          return openOnboarding(ctx, { triggeredBy: "manual" });
         }
-        return openInterestsPicker(ctx, { target, partnerName });
+        let partnerName = null;
+        try {
+          const profile = await getProfile(ctx.from.id);
+          partnerName = profile?.user_context?.partner?.name || null;
+        } catch {
+          // Defensive: if the profile fetch fails we still let the
+          // picker open with a generic header. The save handler will
+          // refuse to commit without a partner name in profile.
+        }
+        return openInterestsPicker(ctx, { target: "partner", partnerName });
       },
       describeSnapshot: describeSnapshotDetailed,
     },
   };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Gender-aware phrasing helper
+// ──────────────────────────────────────────────────────────────────────────
+//
+// Hardcoded Hebrew UI strings (welcome, onboarding headers, etc.) need to
+// match the user's chosen gender form. `profile.user_context.gender` is
+// the source of truth — set early in /start via the gender-pick prompt,
+// editable later via /profile. Until it's set we fall back to NEUTRAL
+// phrasing ("אפשר לבחור") rather than guessing — guessing-wrong on a
+// stranger's first impression is exactly the bug this helper exists to
+// prevent.
+//
+// `f` = feminine, `m` = masculine, `n` = neutral fallback. Accepts the
+// full profile object, a bare gender string, or null — so call sites
+// can pass whichever shape is in hand without an extra hop.
+function genderForm(profileOrGender, { f, m, n }) {
+  const g =
+    typeof profileOrGender === "string"
+      ? profileOrGender
+      : profileOrGender?.user_context?.gender ||
+        profileOrGender?.gender ||
+        null;
+  if (g === "female") return f;
+  if (g === "male") return m;
+  return n;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1157,20 +1368,42 @@ bot.start(async (ctx) => {
     // Returning user. Keep the reply terse — they know the bot
     // already; the value of /start to them is the session reset
     // we did above. /help is included so they can recall the
-    // feature overview without typing it from memory.
+    // feature overview without typing it from memory. To re-open
+    // the interests picker they can use /help or /interests; we
+    // deliberately don't auto-open it here on every /start.
     await ctx.reply(
       "שיחה חדשה התחילה 🔄\n" +
         "אפשר לכתוב לי על מה לחפש, או לבחור מהתפריט:\n\n" +
-        "/profile · /saved · /watching · /invite · /help",
+        "/profile · /saved · /watching · /interests · /invite · /help",
     );
     return;
   }
 
-  // First-timer. The actual content is in sendWelcome() so /help
-  // can replay it identically for anyone who wants to re-discover
-  // the features later (or for the operator to preview the welcome
-  // without nuking their own profile).
-  await sendWelcome(ctx);
+  // First-timer. Ask which Hebrew gender form to use BEFORE the long
+  // welcome. The welcome + first-touch onboarding picker are hardcoded
+  // with verb forms ("בחרי" / "תוכלי" / "כתבי") and we don't want a
+  // stranger's first impression to be feminine-by-default. Once the
+  // user picks (or skips by typing free text), the `gnd:*` handler
+  // below chains into sendWelcome + openOnboarding with the right
+  // form. Returning users skip this entirely — they already have a
+  // profile and gender resolution is whatever they picked before.
+  await ctx.reply(
+    "👋 שלום! לפני שמתחילים — איך הכי נוח לפנות אליך?",
+    {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "👩 בלשון נקבה", callback_data: "gnd:female" },
+          { text: "👨 בלשון זכר", callback_data: "gnd:male" },
+          { text: "🧑 ניטרלי", callback_data: "gnd:neutral" },
+        ]],
+      },
+    },
+  );
+  // Do NOT call sendWelcome / openOnboarding here — they fire from
+  // the gnd:* handler after the user picks. If the user ignores the
+  // prompt and types free text, the agent handles it; the unanswered
+  // gender keyboard sits harmlessly above and they can still tap it
+  // later (it's just a regular inline keyboard).
 });
 
 // /help — manual trigger for the welcome / feature overview. Useful
@@ -1187,6 +1420,17 @@ bot.start(async (ctx) => {
 // the two stay byte-identical.
 bot.command(["help", "start_help"], async (ctx) => {
   await sendWelcome(ctx);
+  // Mirror the first-touch /start behavior: after the welcome card,
+  // give the user a single-tap path into the picker by auto-opening
+  // it. Picker is "reserved" for /start and /help — no other command
+  // (and no nudge) volunteers it. The 1.2s delay lets Telegram render
+  // the welcome before the picker so they don't stack into a single
+  // visual block.
+  setTimeout(() => {
+    openOnboarding(ctx, { triggeredBy: "manual" }).catch((err) =>
+      console.error("[Bot] /help auto-onboarding failed:", err.message),
+    );
+  }, 1200);
 });
 
 // Centralized welcome renderer. Both bot.start (first-timer branch)
@@ -1212,6 +1456,18 @@ async function sendWelcome(ctx) {
   const firstName = ctx.from?.first_name
     ? `, ${escapeMarkdownStrict(ctx.from.first_name)}`
     : "";
+
+  // Pull the user's chosen gender form so the direct-address lines
+  // below pick the right verb. Defaults to null (→ neutral) when the
+  // profile fetch fails or the user hasn't been through the /start
+  // gender prompt — better than guessing and getting it wrong.
+  const profile = await getProfile(ctx.from.id).catch(() => null);
+  const youCan = genderForm(profile, {
+    f: "תוכלי",
+    m: "תוכל",
+    n: "אפשר",
+  });
+
   const lines = [
     `שלום${firstName}! 🎟️ אני הבוט של Event Scout — עוזרת למצוא אירועים, חוגים וכרטיסים ברמת גן.`,
     "",
@@ -1230,36 +1486,160 @@ async function sendWelcome(ctx) {
     "/interests — לבחור תחומי עניין מהרשימה",
     "/saved — המעקבים השמורים שלך",
     "/watching — האירועים במעקב שלך",
+    // Underscores in command names must be escaped in Markdown v1, or
+    // Telegram parses "_off — להשבית..." as the start of an italic
+    // span that never closes → "can't parse entities: ... byte 1437".
+    "/newsletter\\_preview — תצוגה מקדימה של הניוזלטר \\(מה היית מקבלת ביום חמישי\\)",
+    "/newsletter\\_off — להשבית את הניוזלטר השבועי (/newsletter\\_on להפעיל בחזרה)",
+    "/connect\\_calendar — חיבור Google Calendar (להוספת אירועים מהניוזלטר)",
     "/invite — קישור להזמנת חברים",
     "/help — להציג את התפריט הזה שוב",
     "",
-    "כדי שאוכל לעזור באמת — *אשמח להכיר אותך קצת*: איפה הבית, מי בני המשפחה (וגילאים אם יש ילדים), ועל אילו תחומים מעניין לשמוע?",
+    `*נתחיל מתחומי העניין שלך* — אפתח לך כעת את הפיקר. בסיומו ${youCan} לספר לי על המשפחה (גילאי ילדים, בן/בת זוג) כדי שאתאים את האירועים.`,
   ];
-  // Inline keyboard surfacing the most common first-step a new user
-  // takes — picking interests. Keeps the textual welcome explanatory
-  // while giving a single-tap path into onboarding. The button fires
-  // the same `ip:start_from_welcome` flow as /interests would, so the
-  // experience stays consistent for users who type the slash command
-  // instead.
-  await ctx.reply(lines.join("\n"), {
-    parse_mode: "Markdown",
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "⭐ בחרי תחומי עניין", callback_data: "ip:start_from_welcome" }],
-      ],
-    },
-  });
+  // No inline keyboard — the welcome is followed immediately by
+  // `openOnboarding`, so the picker arrives on its own without
+  // requiring an explicit button tap. /help and /start (first-touch)
+  // both route through here, and both auto-open the picker after
+  // sending this message.
+  await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
 }
 
-// Button on /start welcome — routes to the same picker /interests opens.
+// Button on /start welcome — routes into the multi-step onboarding
+// flow (topics → audiences → location). The callback name still says
+// "ip:" for backwards-compat with older messages that pre-date the
+// onboarding refactor; we don't want to leave dead buttons in user
+// chat histories.
 bot.action("ip:start_from_welcome", async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
   try {
-    await openInterestsPicker(ctx, { target: "self" });
+    await openOnboarding(ctx, { triggeredBy: "manual" });
   } catch (err) {
     console.error("[Bot] ip:start_from_welcome error:", err.message);
   }
+});
+
+// /start first-touch: gender-form picker.
+//
+// Persists the user's chosen Hebrew gender form to the profile and
+// THEN runs the welcome + first-touch onboarding picker (which we
+// deferred until now precisely so they render in the right form).
+//
+// "neutral" is stored as NULL in profile.user_context.gender —
+// VALID_GENDERS in profileService.js only accepts 'female' / 'male',
+// and a missing value naturally routes the rendering helpers to the
+// neutral fallback. No new ENUM value required.
+//
+// Best-effort: if the profile save fails (DB hiccup, geocoder
+// unrelated path that shouldn't trigger but might), we still proceed
+// to the welcome — the worst case is a feminine welcome the user will
+// re-correct later via /profile. Better than dead-ending /start.
+bot.action(/^gnd:(female|male|neutral)$/, async (ctx) => {
+  const choice = ctx.match[1];
+  const genderValue = choice === "neutral" ? null : choice;
+  await ctx.answerCbQuery().catch(() => {});
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+
+  try {
+    await saveProfile(
+      ctx.from.id,
+      {
+        gender: genderValue,
+        first_name: ctx.from?.first_name || undefined,
+      },
+      null,
+    );
+  } catch (err) {
+    console.error(
+      `[Bot] gnd:${choice} persist failed for ${ctx.from?.id}: ${err.message}`,
+    );
+    // Continue anyway — fall through to the age prompt.
+  }
+
+  // Chain into the age-range prompt — the second pre-welcome
+  // question (May-2026). Audience defaults branch on TWO independent
+  // dimensions (`kids[]` + `age_range`), and we want both signals
+  // captured before the welcome+onboarding flow asks about kids /
+  // partner / interests. Buttons:
+  //   18-35 → young_adult     (sees young-adult-tagged events)
+  //   35-60 → mid_adult       (broad mid-adults, no subtype bias)
+  //   60+   → senior          (sees senior-tagged events, hides young)
+  //   skip  → leave NULL      (legacy "no signal" fallback)
+  await ctx.reply(
+    "מצוין. ועוד שאלה קצרה — באיזה טווח גיל את/ה?",
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🧒 18-35", callback_data: "age:young_adult" },
+            { text: "🧑 35-60", callback_data: "age:mid_adult" },
+            { text: "👴 60+", callback_data: "age:senior" },
+          ],
+          [
+            { text: "⏭️ דלגי / מעדיף לא לציין", callback_data: "age:skip" },
+          ],
+        ],
+      },
+    },
+  );
+});
+
+// Second pre-welcome step (May-2026). The `age_range` field powers
+// `deriveDefaultAudienceSet` together with `kids[]`. Like the gender
+// step above, this runs once on first /start; later changes are made
+// via the profile editor (or, for now, by re-running /start after
+// clearing the profile).
+//
+// "skip" stores NULL — legitimately neutral, not a special sentinel.
+// The audience derivation treats unset age_range as "fall back to
+// kids-only logic" (current behaviour pre-May-2026). Users who skip
+// retain the legacy default.
+bot.action(/^age:(young_adult|mid_adult|senior|skip)$/, async (ctx) => {
+  const choice = ctx.match[1];
+  const ageRangeValue = choice === "skip" ? null : choice;
+  await ctx.answerCbQuery().catch(() => {});
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+
+  try {
+    await saveProfile(
+      ctx.from.id,
+      {
+        age_range: ageRangeValue,
+        first_name: ctx.from?.first_name || undefined,
+      },
+      // Pass the existing profile so gender (saved in the gnd: step)
+      // survives this save — without it the sticky-merge in
+      // profileService.js still works (it re-reads existing), but
+      // it's clearer to be explicit here.
+      await getProfile(ctx.from.id).catch(() => null),
+    );
+  } catch (err) {
+    console.error(
+      `[Bot] age:${choice} persist failed for ${ctx.from?.id}: ${err.message}`,
+    );
+    // Continue anyway — fall through to the welcome.
+  }
+
+  try {
+    await sendWelcome(ctx);
+  } catch (err) {
+    console.error("[Bot] age: sendWelcome failed:", err.message);
+  }
+
+  // First-touch onboarding — auto-open the multi-step picker right
+  // after the welcome so the user lands in a guided flow instead of
+  // having to discover the "⭐ ערכי תחומי עניין" button. Triggered
+  // by "auto" so the summary card opens with the celebratory
+  // "✅ הכל מוכן!" header instead of the edit-mode header. A short
+  // delay lets Telegram render the welcome card before the picker
+  // arrives — otherwise both messages stack in the same screen tick
+  // and the user can miss the welcome's content entirely.
+  setTimeout(() => {
+    openOnboarding(ctx, { triggeredBy: "auto" }).catch((err) =>
+      console.error("[Bot] age: auto-onboarding failed:", err.message),
+    );
+  }, 1200);
 });
 
 // /invite — produces the user's personal share-link and shows how
@@ -1406,6 +1786,16 @@ bot.command("profile", async (ctx) => {
     const lines = [`📋 הפרופיל שלך:`];
     if (profile.first_name) lines.push(`👤 ${profile.first_name}`);
     const c = profile.user_context || {};
+    if (c.age_range) {
+      // Hebrew labels mirror the onboarding buttons (May-2026 age_range
+      // step). Unset → don't show a line; legacy behaviour.
+      const ageLabel =
+        c.age_range === "young_adult" ? "18-35"
+        : c.age_range === "mid_adult" ? "35-60"
+        : c.age_range === "senior" ? "60+"
+        : null;
+      if (ageLabel) lines.push(`🎂 טווח גיל: ${ageLabel}`);
+    }
     if (c.kids?.length) {
       lines.push(`👧 ילדים: ${c.kids.map((k) => (k.age ? `${k.name} (${k.age})` : k.name)).join(", ")}`);
     }
@@ -1512,14 +1902,20 @@ function buildInterestsKeyboard(selectedLabels) {
   return { inline_keyboard: rows };
 }
 
-function buildInterestsHeader({ target, partnerName, extraLabels }) {
+function buildInterestsHeader({ target, partnerName, extraLabels, gender }) {
+  const pick = genderForm(gender, { f: "בחרי", m: "בחר", n: "אפשר לבחור" });
+  const youWant = genderForm(gender, {
+    f: "שתרצי",
+    m: "שתרצה",
+    n: "שמעניינים אותך",
+  });
   const lines = [];
   if (target === "partner") {
     lines.push(`⭐ *מה ${partnerName || "בן/בת הזוג"} אוהב/ת?*`);
-    lines.push("בחרי תחומי עניין כדי שאוכל להציע אירועים שמתאימים גם לו/ה.");
+    lines.push(`${pick} תחומי עניין כדי שאוכל להציע אירועים שמתאימים גם לו/ה.`);
   } else {
     lines.push("⭐ *מה מעניין אותך?*");
-    lines.push("בחרי כמה תחומים שתרצי — אשתמש בהם כדי להציע לך אירועים רלוונטיים.");
+    lines.push(`${pick} כמה תחומים ${youWant} — אשתמש בהם כדי להציע לך אירועים רלוונטיים.`);
   }
   if (Array.isArray(extraLabels) && extraLabels.length) {
     // Free-text / legacy entries kept from a previous save. Surface them
@@ -1558,7 +1954,12 @@ async function openInterestsPicker(ctx, { target = "self", partnerName = null } 
     else extraLabels.push(raw.trim());
   }
 
-  const header = buildInterestsHeader({ target, partnerName, extraLabels });
+  const header = buildInterestsHeader({
+    target,
+    partnerName,
+    extraLabels,
+    gender: profile?.user_context?.gender || null,
+  });
   const keyboard = buildInterestsKeyboard(selected);
 
   const sent = await ctx.reply(header, {
@@ -1578,7 +1979,7 @@ async function openInterestsPicker(ctx, { target = "self", partnerName = null } 
 
 bot.command("interests", async (ctx) => {
   try {
-    await openInterestsPicker(ctx, { target: "self" });
+    await openOnboarding(ctx, { triggeredBy: "manual" });
   } catch (err) {
     console.error("[Bot] /interests error:", err.message);
     await ctx.reply("⚠️ שגיאה בפתיחת בחירת תחומי עניין.");
@@ -1753,6 +2154,2269 @@ bot.action("ip:partner:skip", async (ctx) => {
   await ctx.answerCbQuery("👍");
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
   await replyAsCallbackResult(ctx, "אוקיי, אפשר תמיד לחזור לזה אחר כך עם /interests.");
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Onboarding flow — multi-step picker (topics → audiences → location → ✓)
+// ──────────────────────────────────────────────────────────────────────────
+//
+// Replaces the single-shot `openInterestsPicker` for the SELF target. The
+// partner sub-flow (`target: "partner"`) still goes through the legacy
+// picker because it's a one-question interaction by design.
+//
+// State lives on `session.onboarding` (see sessionStore for the shape).
+// Each step is rendered into the SAME Telegram message via
+// editMessageText, so the chat stays clean as the user walks through.
+//
+// Callback prefix is `onb:*`:
+//   onb:tog:toplabels:<id> multi-select toggle on step 1 (popularity-paginated
+//                          tags from the labels dictionary; <id> is numeric)
+//   onb:more:toplabels     load the next page of top labels (appended to
+//                          the already-shown set so previous selections stay
+//                          visible)
+//   onb:tog:topics:<id>    multi-select toggle on step 2 (curated TOPIC list)
+//   onb:tog:audiences:<id> multi-select toggle on step 3 (curated AUDIENCE list)
+//   onb:loc:<id>           single-choice pick on step 4
+//                          (advances automatically; "other" routes to
+//                           free-text capture before advancing)
+//   onb:next               commit current step + advance ("💾 שמרי")
+//   onb:back               return to previous step (selections preserved)
+//   onb:done               final commit from the summary card
+//   onb:cancel             abort the whole flow (saves NOTHING this turn)
+//
+// Legacy: onb:skip and onb:dismiss_toplabels handlers are kept for
+// in-flight messages that still surface those buttons, but neither
+// is generated by the current keyboard builders.
+
+const ONBOARDING_STEPS = ["toplabels", "topics", "audiences", "location"];
+
+function onboardingProgressLabel(step) {
+  const idx = ONBOARDING_STEPS.indexOf(step);
+  if (idx < 0) return "";
+  return `(${idx + 1}/${ONBOARDING_STEPS.length})`;
+}
+
+// Header text for each step. Markdown is fine — the central RTL wrapper
+// runs BEFORE Telegram parses the markdown, and `*bold*` survives a
+// leading RLM (the parser scans for emphasis markers, ignoring leading
+// neutrals/marks).
+function buildOnboardingHeader(step, { extraLabels, triggeredBy, gender } = {}) {
+  const progress = onboardingProgressLabel(step);
+  // Gendered tokens used across the steps — defined once so the per-
+  // step lines below stay readable. Neutral fallbacks lean on "אפשר"
+  // / passive forms so a stranger never sees a gendered verb until
+  // they've explicitly picked one (see /start gender prompt).
+  const pick = genderForm(gender, { f: "בחרי", m: "בחר", n: "אפשר לבחור" });
+  const mark = genderForm(gender, { f: "סמני", m: "סמן", n: "אפשר לסמן" });
+  const write = genderForm(gender, { f: "כתבי", m: "כתוב", n: "אפשר לכתוב" });
+  const youWant = genderForm(gender, {
+    f: "שתרצי",
+    m: "שתרצה",
+    n: "שמעניינים אותך",
+  });
+  const youCan = genderForm(gender, {
+    f: "תוכלי",
+    m: "תוכל",
+    n: "אפשר",
+  });
+  const youAreReady = genderForm(gender, {
+    f: "את מוכנה",
+    m: "אתה מוכן",
+    n: "מוכנים",
+  });
+  const youOrFamily = genderForm(gender, {
+    f: "שאת או המשפחה שלך משויכות",
+    m: "שאתה או המשפחה שלך משויכים",
+    n: "שאתם משויכים",
+  });
+  const lines = [];
+  if (step === "toplabels") {
+    lines.push(`🏷 *תחומי עניין פופולריים* ${progress}`);
+    lines.push("");
+    lines.push(`הנה התגיות הכי נפוצות בקטלוג. ${mark} את מה שמעניין אותך — אפשר "להציג עוד" כדי לראות עוד תגיות, וגם אפשר לחזור לפיקר הזה אחר כך מ‑/interests.`);
+  } else if (step === "topics") {
+    lines.push(`⭐ *מה מעניין אותך?* ${progress}`);
+    lines.push("");
+    lines.push(`${pick} תחומים ${youWant} להתעדכן בהם — אשתמש בהם כדי להציע אירועים רלוונטיים.`);
+  } else if (step === "audiences") {
+    lines.push(`👥 *למי האירועים מתאימים?* ${progress}`);
+    lines.push("");
+    lines.push(`${mark} את הקבוצות ${youOrFamily} אליהן.`);
+    lines.push("");
+    // The 3 access-flagged chips (LGBTQ+ / seniors / disabilities) are
+    // gated by the catalog's access filter — without the explicit flag
+    // those events stay hidden. Surfacing this here makes the consent
+    // visible instead of buried in the agent's prompt.
+    lines.push("_סימון של 🏳️‍🌈 / 🌷 / 🧩 יחשוף אירועים שמוגדרים לקהילות אלה._");
+  } else if (step === "location") {
+    lines.push(`📍 *כמה רחוק מהבית ${youAreReady} ללכת?* ${progress}`);
+    lines.push("");
+    lines.push(`${pick} אפשרות אחת. ${youCan} תמיד לשנות אחר כך מ‑/profile.`);
+  } else if (step === "location_other") {
+    lines.push(`📍 *מרחק מותאם אישית* ${progress}`);
+    lines.push("");
+    lines.push(`${write} כמה דקות הליכה זה רחוק מדי בשבילך (לדוגמה: 20).`);
+  } else if (step === "summary") {
+    lines.push(triggeredBy === "auto" ? "✅ *הכל מוכן!*" : "✅ *עודכן בהצלחה!*");
+  }
+  if (Array.isArray(extraLabels) && extraLabels.length) {
+    lines.push("");
+    lines.push(`_תחומים נוספים שכבר רשומים: ${extraLabels.join(", ")}_`);
+  }
+  return lines.join("\n");
+}
+
+// Shared nav row at the bottom of each step. Step-specific:
+//   - "toplabels" → no back (it's the first); has save.
+//   - "topics" / "audiences" → back + save.
+//   - "location" → back + save.
+// The advance button is labeled "💾 שמרי" on every step — it persists
+// whatever is currently selected (even nothing) and moves on. There's
+// no separate skip affordance; the user can advance with zero
+// selections if they want.
+function buildOnboardingNavRow(step) {
+  const buttons = [];
+  if (prevStepBefore(step)) {
+    // Encode the current step in callback_data so a handler that lands
+    // here AFTER the in-memory session was evicted can rehydrate to
+    // the right step rather than dropping the user at the start of
+    // the flow. Old messages with the bare `onb:back` / `onb:next`
+    // payload still route through the same handlers (regex match) —
+    // they just don't get the precise-step hint.
+    buttons.push({ text: "← הקודם", callback_data: `onb:back:${step}` });
+  }
+  buttons.push({ text: "💾 שמרי", callback_data: `onb:next:${step}` });
+  return buttons;
+}
+
+function buildChipsKeyboard(categories, selectedSet, togglePrefix) {
+  const rows = [];
+  for (let i = 0; i < categories.length; i += 2) {
+    const row = categories.slice(i, i + 2).map((cat) => {
+      const checked = selectedSet.has(cat.label);
+      const prefix = checked ? "✅ " : "";
+      return {
+        text: `${prefix}${cat.emoji} ${cat.label}`,
+        callback_data: `${togglePrefix}:${cat.id}`,
+      };
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+// Chips for the top-labels step. Render one chip per loaded label,
+// ONE PER ROW (full message width) so long Hebrew names + popularity
+// counts always fit on mobile without truncation. Labels in
+// `topLabelsLoaded` are sorted by events_count DESC (the order we
+// fetched them in) — we keep that order so the most-popular tags
+// sit at the top of the keyboard. Selected labels keep their
+// position so a re-render after toggling doesn't jump the chip
+// around under the user's finger.
+//
+// The "🔁 הצג עוד N/M" button sits on its own row, between the chip
+// stack and the standard nav row. Hidden once `hasMore` is false OR
+// the loaded-chips count reaches MAX_LOADED_TOP_LABELS — at that
+// point the standard "💾 שמרי" in the nav row is the only forward
+// affordance.
+// Format the visible text of a single chip. Combines selection
+// indicator, popularity count, and label name in a single line:
+//
+//   "✅ (67) קהילה גאה"   ← selected, popular chip
+//   "(67) קהילה גאה"      ← unselected
+//
+// The count is intentionally PLACED BEFORE the name so it remains
+// visible when Telegram clips an overflowing chip with "…". The
+// name's leading characters survive too (Hebrew labels are
+// recognisable from their first few chars), while the tail —
+// which would have included a tail-positioned count and dropped
+// it — gets the ellipsis.
+function formatChipText(label, checked) {
+  const rawName = String(label?.name || "");
+  const count = Number(label?.events_count || 0);
+  const prefix = checked ? "✅ " : "";
+  if (count > 0) {
+    return `${prefix}(${count}) ${rawName}`;
+  }
+  return `${prefix}${rawName}`;
+}
+
+function buildTopLabelsKeyboard(state) {
+  const selected = state.topLabelNames || new Set();
+  const loaded = Array.isArray(state.topLabelsLoaded) ? state.topLabelsLoaded : [];
+  // Single column so each chip gets the full message width — long
+  // Hebrew names plus the popularity counter (e.g. "ר״געים משחקייה
+  // התפתחותית (201)") simply don't fit in a 2-col grid on mobile
+  // without truncation. The trade-off is more vertical scrolling,
+  // but the loaded-rows cap (MAX_LOADED_TOP_LABELS) keeps things
+  // tight enough to stay well under Telegram's 100-row keyboard
+  // limit even at the maximum.
+  const rows = loaded.map((lbl) => [{
+    text: formatChipText(lbl, selected.has(lbl.name)),
+    callback_data: `onb:tog:toplabels:${lbl.id}`,
+  }]);
+  // Compute "remaining" relative to the total catalog. When the
+  // total is unknown (cache miss / DB hiccup during state hydration)
+  // we fall back to the un-counted label so the user still sees a
+  // meaningful chip; if there's also no `topLabelsHasMore` signal,
+  // the row is hidden entirely.
+  const total = Number(state.topLabelsTotal || 0);
+  const remaining = total > loaded.length ? total - loaded.length : 0;
+  // Hide "show more" once we hit the loaded-rows safety cap — past
+  // this point adding more chips can push the keyboard over
+  // Telegram's row limit and clip our "💾 שמרי" button. The user
+  // can still type missing interests to the agent in chat.
+  const atCap = loaded.length >= MAX_LOADED_TOP_LABELS;
+  if (state.topLabelsHasMore && !atCap) {
+    const batchSize = remaining > 0 && remaining < TOP_LABELS_PAGE_SIZE
+      ? remaining
+      : TOP_LABELS_PAGE_SIZE;
+    const suffix = total > 0 ? `/${remaining}` : "";
+    rows.push([{
+      text: `🔁 הצג עוד ${batchSize}${suffix}`,
+      callback_data: "onb:more:toplabels",
+    }]);
+  }
+  return rows;
+}
+
+function buildLocationChipsRows(selectedId) {
+  // One chip per row — these labels are longer and look better stacked
+  // on narrow phones than crammed into 2 columns.
+  return LOCATION_OPTIONS.map((opt) => [{
+    text: `${selectedId === opt.id ? "✅ " : ""}${opt.emoji} ${opt.label}`,
+    callback_data: `onb:loc:${opt.id}`,
+  }]);
+}
+
+function buildOnboardingKeyboard(state) {
+  const step = state.step;
+  let rows;
+  if (step === "toplabels") {
+    rows = buildTopLabelsKeyboard(state);
+  } else if (step === "topics") {
+    rows = buildChipsKeyboard(TOPIC_CATEGORIES, state.topics, "onb:tog:topics");
+  } else if (step === "audiences") {
+    rows = buildChipsKeyboard(AUDIENCE_CATEGORIES, state.audiences, "onb:tog:audiences");
+  } else if (step === "location") {
+    rows = buildLocationChipsRows(state.location?.id || null);
+  } else if (step === "location_other") {
+    // Free-text capture — only a back/cancel option, no chips.
+    return {
+      inline_keyboard: [
+        [{ text: "← הקודם", callback_data: "onb:back" }],
+        [{ text: "❌ ביטול", callback_data: "onb:cancel" }],
+      ],
+    };
+  } else if (step === "summary") {
+    return {
+      inline_keyboard: [
+        [{ text: "🎯 התחילי לחפש אירועים", callback_data: "onb:done" }],
+        [{ text: "✏️ עריכה מהתחלה", callback_data: "onb:restart" }],
+      ],
+    };
+  }
+  rows.push(buildOnboardingNavRow(step));
+  return { inline_keyboard: rows };
+}
+
+// Build the summary-card text shown on the final step. Mirrors the
+// content of describeSnapshotDetailed in tone — bullets, short lines,
+// emoji column for visual scanning.
+function buildOnboardingSummaryText(state) {
+  const lines = [];
+  lines.push(buildOnboardingHeader("summary", { triggeredBy: state.triggeredBy, gender: state.gender }));
+  lines.push("");
+  const topLabelsList = Array.from(state.topLabelNames || []);
+  const topicsList = Array.from(state.topics);
+  const audiencesList = Array.from(state.audiences);
+  if (topLabelsList.length) {
+    // Truncate at 8 names so the summary stays scannable when the user
+    // toggled an unusually large set; the full list is still in
+    // profile.interests and surfaces on /profile.
+    const head = topLabelsList.slice(0, 8).join(" • ");
+    const more = topLabelsList.length > 8
+      ? ` +${topLabelsList.length - 8} נוספים`
+      : "";
+    lines.push(`🏷 *תגיות:* ${head}${more}`);
+  } else {
+    lines.push("🏷 *תגיות:* _לא נבחרו_");
+  }
+  if (topicsList.length) {
+    lines.push(`🎭 *תחומים:* ${topicsList.join(" • ")}`);
+  } else {
+    lines.push("🎭 *תחומים:* _ללא סינון_");
+  }
+  if (audiencesList.length) {
+    lines.push(`👥 *קהלים:* ${audiencesList.join(" • ")}`);
+  } else {
+    lines.push("👥 *קהלים:* _ללא סינון_");
+  }
+  if (state.location?.preference) {
+    lines.push(`📍 *מיקום:* ${state.location.preference}`);
+  } else {
+    lines.push("📍 *מיקום:* _ללא העדפה_");
+  }
+  if (Array.isArray(state.extraLabels) && state.extraLabels.length) {
+    lines.push("");
+    lines.push(`_תחומים נוספים מההיסטוריה שלך נשארו: ${state.extraLabels.join(", ")}_`);
+  }
+  return lines.join("\n");
+}
+
+// First-time render uses ctx.reply; subsequent renders editMessageText
+// the SAME message so the chat doesn't accumulate step messages. If
+// edit fails (e.g., message too old, or content unchanged), fall back
+// to a fresh reply so the user always sees an actionable card.
+async function renderOnboardingStep(ctx, state) {
+  const text = state.step === "summary"
+    ? buildOnboardingSummaryText(state)
+    : buildOnboardingHeader(state.step, { extraLabels: state.extraLabels, gender: state.gender });
+  const keyboard = buildOnboardingKeyboard(state);
+  const opts = { parse_mode: "Markdown", reply_markup: keyboard };
+
+  if (state.messageId && state.chatId) {
+    try {
+      await ctx.telegram.editMessageText(
+        state.chatId,
+        state.messageId,
+        undefined,
+        text,
+        opts,
+      );
+      return;
+    } catch (err) {
+      // editMessageText throws "message is not modified" when text +
+      // markup are byte-identical to the previous render — that's a
+      // benign no-op (means the user tapped the same toggle twice
+      // fast and nothing actually changed); swallow it. Anything else
+      // (too old / deleted) falls through to a fresh reply.
+      const msg = err?.message || String(err || "");
+      if (!msg.includes("message is not modified")) {
+        console.warn(`[Bot] onb editMessageText fallback: ${msg}`);
+      } else {
+        return;
+      }
+    }
+  }
+  const sent = await ctx.reply(text, opts);
+  sessionStore.updateOnboarding(ctx.from.id, {
+    messageId: sent?.message_id || null,
+    chatId: sent?.chat?.id || null,
+  });
+}
+
+// Hydrate the picker state from the user's existing profile so a
+// re-open pre-selects everything we've already learned about them.
+// Topic / audience labels that match a chip go into the selected sets;
+// everything else (free-text learned from chat, "יין", "ג'אז" etc.)
+// goes into extraLabels so we don't silently drop them on save.
+//
+// Communities: the picker is the canonical source of consent. A
+// COMMUNITY chip is pre-selected when the corresponding flag is
+// 'member' OR when its label appears in interests — covering both
+// pre-existing access flags AND legacy interest entries.
+async function loadOnboardingInitialState(telegramId, triggeredBy) {
+  const profile = await getProfile(telegramId).catch(() => null);
+  const existingInterests = Array.isArray(profile?.user_context?.interests)
+    ? profile.user_context.interests
+    : [];
+  const existingCommunities = profile?.user_context?.communities || {};
+
+  // Pre-load the first page of popular labels — the toplabels step is
+  // the entry point and needs chips to render immediately. Failure is
+  // soft: an empty page makes the step a no-op, the user just hits
+  // "המשך" and moves on to the curated topics step.
+  //
+  // We also fetch the total label count (cached for 60s) so the
+  // "🔁 הצג עוד 12/N" button can show the user how many tags are
+  // left to surface. Running both in parallel — the count is a HEAD
+  // request with no rows transferred, so the extra round-trip is
+  // free vs the labels SELECT.
+  let topLabelsLoaded = [];
+  let topLabelsHasMore = false;
+  let topLabelsTotal = 0;
+  try {
+    const [firstPage, total] = await Promise.all([
+      fetchTopLabelsPage(0),
+      countAvailableLabels().catch(() => 0),
+    ]);
+    topLabelsLoaded = firstPage.labels;
+    topLabelsHasMore = firstPage.hasMore;
+    topLabelsTotal = total;
+  } catch (err) {
+    console.warn("[Bot] onboarding fetchTopLabelsPage failed:", err.message);
+  }
+
+  // Walk existing interests and route each string into one of three
+  // buckets:
+  //   - curated topic chip   → topics
+  //   - curated audience chip → audiences
+  //   - everything else      → topLabelNames (the new toplabels step
+  //                            absorbs both DB-backed tags AND the
+  //                            free-text labels the agent learned from
+  //                            chat; they all round-trip through
+  //                            interests[] identically on save).
+  // A selected top-label name that isn't in `topLabelsLoaded` yet just
+  // stays in `topLabelNames` — it won't render as a chip until the
+  // user paginates to it via "🔁 הצג עוד", but it survives the save
+  // either way because persistOnboardingState reads from the Set.
+  const topLabelNames = new Set();
+  const topics = new Set();
+  const audiences = new Set();
+  const extraLabels = [];  // intentionally unused now; kept on state
+                            // shape for any downstream consumer that
+                            // still references it.
+  for (const raw of existingInterests) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const chip = getChipByLabel(trimmed);
+    if (chip) {
+      if (getTopicById(chip.id)) topics.add(chip.label);
+      else if (getAudienceById(chip.id)) audiences.add(chip.label);
+      continue;
+    }
+    topLabelNames.add(trimmed);
+  }
+  // Backfill audience picks from access flags — a user who set
+  // community-lgbtq:'member' via the agent in a previous turn should
+  // see "קהילה גאה" already checked when re-opening the picker.
+  for (const aud of AUDIENCE_CATEGORIES.filter((a) => a.community)) {
+    if (existingCommunities[aud.community] === "member") {
+      audiences.add(aud.label);
+    }
+  }
+
+  // Existing location preference → preset the matching chip. We
+  // recognise the canonical labels emitted by buildLocationChipsRows;
+  // anything else (legacy free-text like "20 דקות הליכה") stays as
+  // the proximity_preference string and the location step renders
+  // with no chip pre-selected (the user can re-pick if they want to
+  // change, or skip to keep the existing value untouched).
+  const constraints = profile?.user_context?.constraints || {};
+  let location = null;
+  if (constraints.proximity_preference) {
+    const matched = LOCATION_OPTIONS.find(
+      (o) => o.preference && o.preference === constraints.proximity_preference,
+    );
+    if (matched) {
+      location = {
+        id: matched.id,
+        label: matched.label,
+        max_walking_minutes: matched.max_walking_minutes,
+        preference: matched.preference,
+      };
+    }
+  }
+
+  return {
+    step: "toplabels",
+    topLabelNames,
+    topLabelsLoaded,
+    topLabelsHasMore,
+    topLabelsTotal,
+    topics,
+    audiences,
+    location,
+    extraLabels,
+    // Captured once at state-load so re-renders don't re-fetch the
+    // profile. The picker doesn't outlive a /start gender change in
+    // any natural flow (gender is set once, then the picker opens
+    // immediately) — and even if it did, the user can re-pick gender
+    // from /profile and re-open the picker if they want gendered
+    // rendering to refresh.
+    gender: profile?.user_context?.gender || null,
+    messageId: null,
+    chatId: null,
+    startedAt: Date.now(),
+    triggeredBy: triggeredBy || "manual",
+  };
+}
+
+// Restore onboarding state from the user's profile when the in-memory
+// session was evicted. The picker is mostly stateless — every chip
+// can be reconstructed from profile.user_context + a fresh fetch of
+// popular labels — so a missing state isn't a real "expired"
+// condition, just an opportunity to re-hydrate silently. Two ways
+// state goes missing:
+//   1. The 30-min sessionStore TTL passed since the user last tapped.
+//   2. The bot restarted (deploy / crash) — in-memory Map wipes.
+//
+// Either way, the user's tap should "just work" rather than show
+// "⏰ פג תוקף". Callers pass the step they're confident the user was
+// on (e.g. a toplabels-toggle tap → "toplabels"); a missing
+// inferredStep falls back to the first step ("toplabels"), which is
+// the safest default — the user lands at the top of the flow with
+// their previous picks pre-checked.
+//
+// The picker's message id is captured from `ctx.callbackQuery.message`
+// so subsequent re-renders edit the SAME bubble the user just tapped
+// on, rather than spawning a new card.
+async function ensureOnboardingState(ctx, inferredStep) {
+  const telegramId = ctx.from.id;
+  let state = sessionStore.getOnboarding(telegramId);
+  if (state) return state;
+  state = await loadOnboardingInitialState(telegramId, "manual");
+  if (inferredStep) state.step = inferredStep;
+  const msg = ctx.callbackQuery?.message;
+  if (msg) {
+    state.messageId = msg.message_id;
+    state.chatId = msg.chat?.id;
+  }
+  sessionStore.setOnboarding(telegramId, state);
+  return state;
+}
+
+async function openOnboarding(ctx, { triggeredBy = "manual" } = {}) {
+  const telegramId = ctx.from.id;
+  // Wipe any stale picker state from a previous abandoned open. Same
+  // for the legacy single-list picker — we don't want both keyboards
+  // racing for the same message id slot.
+  sessionStore.clearInterestsPicker(telegramId);
+  sessionStore.clearOnboarding(telegramId);
+
+  const state = await loadOnboardingInitialState(telegramId, triggeredBy);
+  sessionStore.setOnboarding(telegramId, state);
+  await renderOnboardingStep(ctx, state);
+}
+
+// Persist the current onboarding state to the profile. Called from
+// "next" and "skip" (per-step incremental save, per user's 2א
+// decision) and from the location step's auto-advance.
+//
+// Strategy: rebuild interests from the picker state (topics + audiences
+// + preserved extraLabels) and only TOUCH community flags / constraints
+// fields that are explicitly represented by the user's current
+// selection — NEVER volunteer a 'not-member' just because the user
+// skipped. The rule for communities is:
+//   - chip CHECKED in state              → flag set to 'member'
+//   - chip UNCHECKED AND was 'member'    → flag set to 'not-member'
+//                                          (user explicitly opted out)
+//   - chip UNCHECKED AND was null/unset  → flag stays null
+// This avoids the failure mode where a user who never engaged with a
+// community chip silently gets opted out of those events forever.
+async function persistOnboardingState(telegramId, state, { touchCommunities, touchLocation, touchTopLabels } = {}) {
+  const existingProfile = await getProfile(telegramId);
+  const existingShape = existingProfile
+    ? profileToBrainShape(existingProfile)
+    : { kids: [], partner: null, constraints: null, interests: [] };
+
+  // Interests = union of all picker selections + preserved free-text
+  // labels, deduped while preserving order (toplabels first because
+  // they're typically the most popular; then curated topics, then
+  // audiences, then any extras carried over from old saves).
+  const interests = Array.from(
+    new Set([
+      ...Array.from(state.topLabelNames || []),
+      ...Array.from(state.topics || []),
+      ...Array.from(state.audiences || []),
+      ...(state.extraLabels || []),
+    ]),
+  );
+
+  let communities;
+  if (touchCommunities) {
+    communities = {};
+    const existingCommunities = existingProfile?.user_context?.communities || {};
+    for (const aud of AUDIENCE_CATEGORIES) {
+      if (!aud.community) continue;
+      const checked = state.audiences.has(aud.label);
+      if (checked) {
+        communities[aud.community] = "member";
+      } else if (existingCommunities[aud.community] === "member") {
+        communities[aud.community] = "not-member";
+      }
+      // else: leave alone (don't volunteer 'not-member')
+    }
+  }
+
+  // Constraints: only touch location-related fields when the location
+  // step has been engaged. Always preserve other constraint fields
+  // (home_address, home_coords, etc.).
+  const constraints = { ...(existingShape.constraints || {}) };
+  if (touchLocation) {
+    if (state.location) {
+      constraints.max_walking_minutes = state.location.max_walking_minutes;
+      constraints.proximity_preference = state.location.preference;
+    } else {
+      // location is null = user picked "no preference" implicitly (e.g.
+      // skipped). Clear the fields so the proximity calculator falls
+      // back to its default 15 min walking budget.
+      constraints.max_walking_minutes = null;
+      constraints.proximity_preference = null;
+    }
+  }
+
+  const merged = {
+    ...existingShape,
+    interests,
+    constraints,
+    // communities is partial-merged by saveProfile's mergeCommunities,
+    // so passing undefined leaves it untouched. Pass only when the
+    // audiences step has been engaged.
+    ...(communities ? { communities } : {}),
+  };
+
+  await saveProfile(telegramId, merged, existingProfile);
+
+  // Stamp the seen-toplabels flag once the user has actually engaged
+  // with the new step (next OR skip on toplabels). Writing this
+  // separately (after saveProfile commits) AND directly on user_context
+  // means it survives even if a future code path goes through
+  // saveProfile again — the preserve-unknown spread in saveProfile
+  // carries it forward. Best-effort: failures don't block the picker.
+  if (touchTopLabels) {
+    try {
+      const supabase = require("../lib/supabase");
+      const fresh = await getProfile(telegramId);
+      if (fresh) {
+        const ctx = fresh.user_context || {};
+        if (!ctx.seen_toplabels) {
+          await supabase
+            .from("profiles")
+            .update({ user_context: { ...ctx, seen_toplabels: true } })
+            .eq("telegram_id", String(telegramId));
+        }
+      }
+    } catch (err) {
+      console.warn("[Bot] mark seen_toplabels failed:", err.message);
+    }
+  }
+}
+
+// Advance to the next step in the linear flow. Final step ("location")
+// transitions to "summary"; nothing past summary.
+function nextStepAfter(step) {
+  if (step === "toplabels") return "topics";
+  if (step === "topics") return "audiences";
+  if (step === "audiences") return "location";
+  if (step === "location" || step === "location_other") return "summary";
+  return null;
+}
+
+function prevStepBefore(step) {
+  if (step === "topics") return "toplabels";
+  if (step === "audiences") return "topics";
+  if (step === "location") return "audiences";
+  if (step === "location_other") return "location";
+  if (step === "summary") return "location";
+  return null;
+}
+
+// onb:open — entry point used by the one-time "✨ כן, בואי נראה"
+// button on returning users' /start. Routes through openOnboarding so
+// the full multi-step flow (toplabels → topics → audiences → location)
+// fires, with the existing profile pre-hydrated.
+bot.action("onb:open", async (ctx) => {
+  try {
+    await ctx.answerCbQuery();
+    await openOnboarding(ctx, { triggeredBy: "manual" });
+  } catch (err) {
+    console.error("[Bot] onb:open error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+// onb:dismiss_toplabels — stamps `seen_toplabels = true` on the
+// profile so the one-time nudge stops appearing, but DOES NOT open
+// the picker. The user can still reach it manually via /interests.
+bot.action("onb:dismiss_toplabels", async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const supabase = require("../lib/supabase");
+    const profile = await getProfile(telegramId).catch(() => null);
+    const ctxJson = profile?.user_context || {};
+    if (!ctxJson.seen_toplabels) {
+      await supabase
+        .from("profiles")
+        .update({ user_context: { ...ctxJson, seen_toplabels: true } })
+        .eq("telegram_id", String(telegramId));
+    }
+    await ctx.answerCbQuery("בסדר, אפשר תמיד דרך /interests");
+    // Remove the prompt's buttons so the chat reads cleanly afterward.
+    try {
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+    } catch (_) {
+      // ignore — message-not-modified / too-old paths are benign here.
+    }
+  } catch (err) {
+    console.error("[Bot] onb:dismiss_toplabels error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+// onb:tog:toplabels:<id> — multi-select toggle on the popularity-paginated
+// labels step. Unlike the curated topics/audiences chips this one keys
+// off the numeric label id (Hebrew names are 2 bytes/char in
+// callback_data and we hit the 64-byte cap fast). We persist the
+// Hebrew NAME — not the id — into interests[], so each toggle
+// looks up the name from the loaded set and adds/removes it from the
+// `topLabelNames` Set.
+bot.action(/^onb:tog:toplabels:(\d+)$/, async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const state = await ensureOnboardingState(ctx, "toplabels");
+    const id = parseInt(ctx.match[1], 10);
+    const loaded = Array.isArray(state.topLabelsLoaded) ? state.topLabelsLoaded : [];
+    let label = loaded.find((l) => l.id === id);
+    // If state was just rehydrated, `loaded` only carries the first
+    // page of popular labels (12 items). The user may have tapped a
+    // chip from a later page — pull that label's name in directly so
+    // the toggle lands on the right entry. One round-trip on the cold
+    // path; warm sessions skip this entirely.
+    if (!label) {
+      const labelStore = require("../lib/labelStore");
+      const dict = await labelStore.fetchLabelDict([id]);
+      const row = dict.get(id);
+      if (!row) {
+        await ctx.answerCbQuery();
+        return;
+      }
+      label = { id, name: row.name, events_count: 0 };
+      const merged = [...loaded, label];
+      sessionStore.updateOnboarding(telegramId, { topLabelsLoaded: merged });
+      state.topLabelsLoaded = merged;
+    }
+    if (!(state.topLabelNames instanceof Set)) {
+      state.topLabelNames = new Set();
+    }
+    if (state.topLabelNames.has(label.name)) {
+      state.topLabelNames.delete(label.name);
+    } else {
+      state.topLabelNames.add(label.name);
+    }
+    sessionStore.updateOnboarding(telegramId, { topLabelNames: state.topLabelNames });
+    await ctx.answerCbQuery();
+    await renderOnboardingStep(ctx, state);
+  } catch (err) {
+    console.error("[Bot] onb:tog:toplabels error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+// onb:more:toplabels — fetch and append the next page of popular
+// labels to `topLabelsLoaded`. Re-render reuses the SAME message so
+// the previously-shown labels and their checked state remain visible
+// above the new ones. When `fetchTopLabelsPage` reports no more
+// pages, `topLabelsHasMore` flips to false and the "🔁 הצג עוד"
+// row vanishes on the next render.
+bot.action("onb:more:toplabels", async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const state = await ensureOnboardingState(ctx, "toplabels");
+    const loaded = Array.isArray(state.topLabelsLoaded) ? state.topLabelsLoaded : [];
+    // Defensive: we should never get here because the keyboard hides
+    // the show-more button at the cap, but a race (rapid double-tap
+    // while the previous render hasn't landed) can still fire this
+    // handler. Just answer the callback and bail.
+    if (loaded.length >= MAX_LOADED_TOP_LABELS) {
+      await ctx.answerCbQuery("הגעת לכמות המקסימלית");
+      return;
+    }
+    const offset = loaded.length;
+    const { labels, hasMore } = await fetchTopLabelsPage(offset);
+    // Dedupe in case of a race — the DB might have just added a new
+    // label that bumped one we already loaded onto a different page.
+    const known = new Set(loaded.map((l) => l.id));
+    const fresh = labels.filter((l) => !known.has(l.id));
+    // Refresh the catalog total opportunistically. If a scrape ran
+    // since the picker opened, the "/N" suffix on the button should
+    // reflect the new total; the service caches this for ~60s so
+    // the extra call is cheap.
+    const total = await countAvailableLabels().catch(
+      () => state.topLabelsTotal || 0,
+    );
+    sessionStore.updateOnboarding(telegramId, {
+      topLabelsLoaded: [...loaded, ...fresh],
+      topLabelsHasMore: hasMore,
+      topLabelsTotal: total,
+    });
+    const next = sessionStore.getOnboarding(telegramId);
+    await ctx.answerCbQuery(fresh.length ? `+${fresh.length}` : "אין עוד");
+    await renderOnboardingStep(ctx, next);
+  } catch (err) {
+    console.error("[Bot] onb:more:toplabels error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+// onb:tog:<group>:<id> — multi-select toggle on topics OR audiences.
+bot.action(/^onb:tog:(topics|audiences):(.+)$/, async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const [, group, id] = ctx.match;
+    const state = await ensureOnboardingState(ctx, group);
+    const cat = group === "topics" ? getTopicById(id) : getAudienceById(id);
+    if (!cat) {
+      await ctx.answerCbQuery();
+      return;
+    }
+    const set = group === "topics" ? state.topics : state.audiences;
+    if (set.has(cat.label)) set.delete(cat.label);
+    else set.add(cat.label);
+    sessionStore.updateOnboarding(telegramId, {
+      topics: state.topics,
+      audiences: state.audiences,
+    });
+    await ctx.answerCbQuery();
+    await renderOnboardingStep(ctx, state);
+  } catch (err) {
+    console.error("[Bot] onb:tog error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+// onb:loc:<id> — single-choice on location step. Auto-advances on
+// non-"other" picks; "other" routes to free-text capture.
+bot.action(/^onb:loc:(.+)$/, async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const state = await ensureOnboardingState(ctx, "location");
+    const id = ctx.match[1];
+    const opt = getLocationById(id);
+    if (!opt) {
+      await ctx.answerCbQuery();
+      return;
+    }
+    if (id === "other") {
+      sessionStore.updateOnboarding(telegramId, { step: "location_other" });
+      const refreshed = sessionStore.getOnboarding(telegramId);
+      await ctx.answerCbQuery();
+      await renderOnboardingStep(ctx, refreshed);
+      return;
+    }
+    state.location = {
+      id: opt.id,
+      label: opt.label,
+      max_walking_minutes: opt.max_walking_minutes,
+      preference: opt.preference,
+    };
+    sessionStore.updateOnboarding(telegramId, { location: state.location });
+    await ctx.answerCbQuery(`✅ ${opt.label}`);
+    // Persist + advance to summary in one move.
+    await persistOnboardingState(telegramId, state, { touchLocation: true });
+    sessionStore.updateOnboarding(telegramId, { step: "summary" });
+    const next = sessionStore.getOnboarding(telegramId);
+    await renderOnboardingStep(ctx, next);
+  } catch (err) {
+    console.error("[Bot] onb:loc error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+// onb:next[:step] — advance + persist the current step's selections.
+// The optional `:step` suffix carries the user's current step when the
+// in-memory state has been evicted; without it we still serve (state
+// gets rehydrated to step 1 → advance to step 2), but a precise hint
+// keeps the navigation accurate. Old messages with the bare
+// `onb:next` payload still route here.
+bot.action(/^onb:next(?::([a-z_]+))?$/, async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const hintedStep = ctx.match?.[1] || null;
+    const state = await ensureOnboardingState(ctx, hintedStep);
+    const persistOpts = {
+      touchCommunities: state.step === "audiences",
+      touchLocation: state.step === "location" || state.step === "location_other",
+      touchTopLabels: state.step === "toplabels",
+    };
+    await persistOnboardingState(telegramId, state, persistOpts);
+    const next = nextStepAfter(state.step);
+    if (!next) {
+      await ctx.answerCbQuery();
+      return;
+    }
+    sessionStore.updateOnboarding(telegramId, { step: next });
+    const updated = sessionStore.getOnboarding(telegramId);
+    await ctx.answerCbQuery("✅");
+    await renderOnboardingStep(ctx, updated);
+  } catch (err) {
+    console.error("[Bot] onb:next error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+// onb:skip[:step] — legacy. The picker no longer renders a skip
+// button (per the UX revision that removed it), but inline buttons in
+// older chat histories may still post this callback. Behavior matches
+// onb:next: save whatever's currently checked + advance.
+bot.action(/^onb:skip(?::([a-z_]+))?$/, async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const hintedStep = ctx.match?.[1] || null;
+    const state = await ensureOnboardingState(ctx, hintedStep);
+    // Saving on skip is intentional. For audiences step we still
+    // touchCommunities so any chip the user explicitly checked before
+    // tapping skip gets persisted. We DO NOT volunteer 'not-member'
+    // for unchecked chips — that rule lives inside
+    // persistOnboardingState. Skipping the toplabels step also stamps
+    // seen_toplabels so we don't keep re-prompting returning users.
+    const persistOpts = {
+      touchCommunities: state.step === "audiences",
+      touchLocation: state.step === "location" || state.step === "location_other",
+      touchTopLabels: state.step === "toplabels",
+    };
+    await persistOnboardingState(telegramId, state, persistOpts);
+    const next = nextStepAfter(state.step);
+    if (!next) {
+      await ctx.answerCbQuery();
+      return;
+    }
+    sessionStore.updateOnboarding(telegramId, { step: next });
+    const updated = sessionStore.getOnboarding(telegramId);
+    await ctx.answerCbQuery("⏭ דילגתי");
+    await renderOnboardingStep(ctx, updated);
+  } catch (err) {
+    console.error("[Bot] onb:skip error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+// onb:back[:step] — return to previous step. No save (selections stay
+// in session memory so the user can re-engage with the previous
+// step). Optional `:step` suffix mirrors onb:next for precise
+// rehydration after session eviction.
+bot.action(/^onb:back(?::([a-z_]+))?$/, async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const hintedStep = ctx.match?.[1] || null;
+    const state = await ensureOnboardingState(ctx, hintedStep);
+    const prev = prevStepBefore(state.step);
+    if (!prev) {
+      await ctx.answerCbQuery();
+      return;
+    }
+    sessionStore.updateOnboarding(telegramId, { step: prev });
+    const updated = sessionStore.getOnboarding(telegramId);
+    await ctx.answerCbQuery();
+    await renderOnboardingStep(ctx, updated);
+  } catch (err) {
+    console.error("[Bot] onb:back error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+// onb:cancel — abort the whole flow. NOTHING is saved; the user's
+// profile is exactly as it was before they opened the picker.
+bot.action("onb:cancel", async (ctx) => {
+  const telegramId = ctx.from.id;
+  sessionStore.clearOnboarding(telegramId);
+  await ctx.answerCbQuery("👍 ביטלתי");
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+  await replyAsCallbackResult(
+    ctx,
+    "👍 לא שיניתי כלום. תוכלי לחזור מתי שתרצי עם /interests.",
+  );
+});
+
+// onb:done — final dismiss from the summary card. State already
+// persisted at the location step (or earlier skip/next); this just
+// closes the picker and unlocks the chat for normal interaction.
+bot.action("onb:done", async (ctx) => {
+  const telegramId = ctx.from.id;
+  sessionStore.clearOnboarding(telegramId);
+  await ctx.answerCbQuery("🎯");
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+  await replyAsCallbackResult(
+    ctx,
+    "מצוין! עכשיו אני מכירה אותך טוב יותר. נסי לכתוב לי מה מעניין אותך השבוע ואני אמצא לך אירועים מתאימים.",
+  );
+});
+
+// onb:restart — re-enter onboarding from step 1 with the just-saved
+// profile as seed. Useful when the user wants to re-do their picks
+// without leaving the summary screen.
+bot.action("onb:restart", async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    await ctx.answerCbQuery();
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+    await openOnboarding(ctx, { triggeredBy: "manual" });
+  } catch (err) {
+    console.error("[Bot] onb:restart error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Newsletter — weekly digest delivery + opt-out commands
+// ──────────────────────────────────────────────────────────────────────────
+//
+// The scheduler (lib/newsletterScheduler.js) fires on a 5-min tick and
+// invokes `renderNewsletterDigest(bot, telegramId, events)` with the
+// per-user filtered event list. We render each event via the same
+// photo-card path search results use, so badge / nav buttons / RTL
+// anchoring are consistent across surfaces.
+//
+// SELECT button + bulk-action footer are added by Phase D (multi-
+// select). For now the cards are read-only; the per-event "❌ לא
+// מתאים" button on each card already gives users a way to suppress
+// individual events even without the bulk path.
+
+async function renderNewsletterDigest(botInstance, telegramId, events) {
+  const { rememberShownEvents } = sessionStore;
+  if (!Array.isArray(events) || !events.length) return;
+
+  const tg = String(telegramId);
+
+  // Single-event flush keeps the photo-card UX — one event is best
+  // shown with its image + the per-card actions (nav / details /
+  // לא מתאים / רישום למעקב). Falling through to the consolidated
+  // path here would strip the photo and the "I know it" feedback
+  // button, which is a regression for the common "one new event"
+  // case the buffer model produces frequently.
+  if (events.length === 1) {
+    await renderSingleEventFlush(botInstance, tg, events[0]);
+    return;
+  }
+
+  // Multi-event consolidated digest (May-2026 redesign): instead of
+  // 1 header + N photo cards + 1 footer (= N+2 separate Telegram
+  // messages, which felt spammy for a "weekly digest"), we ship a
+  // SINGLE text message that lists every event compactly with a
+  // tappable "פרטים" link per event. Tradeoffs the product owner
+  // accepted in exchange for the cleaner inbox:
+  //   - no per-event photo (one image-grid in Telegram caps at 10
+  //     items and clutters the bubble);
+  //   - no per-event ❌/🔔/calendar buttons (those actions move to
+  //     the agent chat — "אני מכירה את האירוע X" etc.);
+  //   - no multi-select session state — no nl:tog / nl:share /
+  //     nl:cal / nl:notrel session footer.
+  // The handler functions for those callbacks still live in this
+  // file for backwards-compat with already-delivered cards in
+  // chat histories, but new digests no longer create them.
+  sessionStore.clearNewsletterState(tg);
+
+  const renderedIds = events.map((e) => e?.id).filter((id) => id != null);
+  try {
+    await sendConsolidatedNewsletter(botInstance, tg, events);
+  } catch (err) {
+    if (isUserBlockedError(err)) {
+      console.warn(`[Newsletter] user ${tg} blocked — skipping`);
+      return;
+    }
+    console.error(
+      `[Newsletter] consolidated send failed for user=${tg}: ${err.message}`,
+    );
+    return;
+  }
+
+  // Remember which events landed so future agent searches (within
+  // session TTL) don't show the same cards back to the user.
+  if (renderedIds.length) {
+    try {
+      rememberShownEvents(tg, renderedIds);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+// ── Consolidated multi-event newsletter ────────────────────────────
+// Renders all events into a single HTML text message (or a small
+// chain of chunks if the body overruns Telegram's 4096-char limit).
+// Each event becomes a 6-9 line "mini-card" block (May-2026 user
+// request — match the regular event card layout):
+//   <icon> <primary_title>
+//   <secondary_title>            (only for umbrella children)
+//   📅 date
+//   🕐 time
+//   📍 <a href=nav>venue</a>     (location → maps deep-link)
+//   🎫 tickets                   (whenever count is known)
+//   🏷️ tag • tag • tag
+//   <description>                (own line(s) when populated)
+// Blocks are separated by blank lines.
+//
+// Why HTML and not Markdown V1 — event titles arrive from the
+// scraper and frequently contain `_` (smarticket slugs), `*` (admin
+// notes like "*הכרטיסים אזלו"), and `[`/`]`. Markdown V1 would
+// either render those as formatting or trip the parser with
+// "can't parse entities" errors. HTML's only reserved chars are
+// `<`, `>`, `&`, which we escape inline.
+const NEWSLETTER_CHUNK_LIMIT = 3800; // a bit under TG's 4096 to leave room for the RTL wrap
+
+function escHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// Build a Google Maps deep-link for the event's venue. Coords win
+// when present (Google Maps `?q=lat,lng` resolves to the exact pin
+// AND lets the OS chooser surface Waze / Apple Maps once tapped).
+// Without coords we fall back to a maps text search — less precise
+// but still routes to a familiar maps app for street addresses.
+function buildLocationNavUrl(event) {
+  const lat = event?._coords?.lat;
+  const lng = event?._coords?.lng;
+  if (lat != null && lng != null) {
+    return `https://www.google.com/maps?q=${lat},${lng}`;
+  }
+  const venue = event?.location;
+  if (venue) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue)}`;
+  }
+  return null;
+}
+
+function buildConsolidatedEventBlock(event) {
+  const lines = [];
+  const icon = getEventIcon(event);
+  // Two-tier title — same logic as sendEventCard (sql/056 cleanup).
+  // Primary is the umbrella's branding (or the event name when not
+  // under an umbrella); secondary is `name` when this row is under
+  // an umbrella AND `name` is distinct from `umbrella_title`. The
+  // primary is the one that gets hyperlinked to the booking URL —
+  // anchoring on the parent is what the user expects from the
+  // umbrella's perspective ("here's the umbrella's page; this child
+  // happens on date X").
+  const umbrellaTitleTrim =
+    (typeof event.umbrella_title === "string" && event.umbrella_title.trim())
+      ? event.umbrella_title.trim()
+      : null;
+  const nameTrim =
+    typeof event.name === "string" ? event.name.trim() : "";
+  const primaryTitle = umbrellaTitleTrim || nameTrim || "ללא שם";
+  const secondaryTitle =
+    umbrellaTitleTrim && nameTrim && nameTrim !== umbrellaTitleTrim
+      ? nameTrim
+      : null;
+  const primaryEsc = escHtml(primaryTitle);
+  const url = getBookingUrl(event);
+  lines.push(
+    url
+      ? `${icon} <b><a href="${escHtml(url)}">${primaryEsc}</a></b>`
+      : `${icon} <b>${primaryEsc}</b>`,
+  );
+  if (secondaryTitle) lines.push(`<b>${escHtml(secondaryTitle)}</b>`);
+
+  // Date + time on their OWN lines (May-2026 request — match the
+  // event card's vertical layout instead of the previously-compact
+  // single meta line).
+  if (event.date) lines.push(`📅 ${escHtml(formatHebrewDate(event.date))}`);
+  const timeStr = formatTimeRange(event.start_time, event.end_time);
+  if (timeStr) lines.push(`🕐 ${escHtml(timeStr)}`);
+
+  // Location → maps deep-link. Mirrors the "🧭 ניווט" button on
+  // the full event card: tapping the hyperlink opens the OS maps
+  // picker (Google → Waze / Apple Maps), pinned to coords when
+  // we have them, falling back to a maps text search by address.
+  if (event.location) {
+    const navUrl = buildLocationNavUrl(event);
+    lines.push(
+      navUrl
+        ? `📍 <a href="${escHtml(navUrl)}">${escHtml(event.location)}</a>`
+        : `📍 ${escHtml(event.location)}`,
+    );
+  }
+
+  // Tickets — show the FULL line whenever count is known (not just
+  // low-stock urgency). The consolidated digest is most users'
+  // "what's worth registering" mailer, so seeing "🎫 11 כרטיסים"
+  // is informative on its own. Sold-out events get the explicit
+  // "🚫 אזלו" line.
+  const ticketsLine =
+    event.tickets_left === 0
+      ? "🚫 אזלו הכרטיסים"
+      : formatTicketsLine(event.tickets_left);
+  if (ticketsLine) lines.push(escHtml(ticketsLine));
+
+  // Adult-tier age gate — same line as the live event card. We mirror
+  // it on the digest block so the newsletter and the card surface the
+  // exact same restriction signal; users who only read the digest
+  // shouldn't be blindsided by "לגילאי 35+ בלבד" at the door.
+  const ageGateLine = formatAdultAgeGate(event);
+  if (ageGateLine) lines.push(escHtml(ageGateLine));
+
+  // Description gets its OWN 📝 prefix (May-2026 user request) so
+  // it visually parallels the date/time/location/tickets/tags
+  // lines — a labeled facet, not an orphan paragraph. Normalised
+  // whitespace + soft cap so a single verbose entry can't blow
+  // past the chunking limit. The cap is per-event;
+  // chunkConsolidatedBody enforces the overall message-size
+  // guarantee.
+  //
+  // Order matters: description comes BEFORE the tag line so 🏷️
+  // remains the final line of the block — the visual "footer"
+  // that summarises the topic at a glance.
+  if (typeof event.description === "string" && event.description.trim()) {
+    const desc = event.description.replace(/\s+/g, " ").trim();
+    const capped =
+      desc.length > 280 ? desc.slice(0, 280).trimEnd() + "…" : desc;
+    lines.push(`📝 ${escHtml(capped)}`);
+  }
+
+  // Tag line — same formatter the event card uses. Without
+  // per-user `highlight`/`searchHits` we just render the plain
+  // sorted line. Falsy when the event has no tags. Always the
+  // LAST line of the block per the May-2026 user request.
+  if (Array.isArray(event.tags) && event.tags.length) {
+    const tagLine = formatTagLine(event.tags, {
+      highlight: [],
+      searchHits: [],
+    });
+    if (tagLine) lines.push(escHtml(tagLine));
+  }
+
+  return lines.join("\n");
+}
+
+// Partition events into two newsletter sections:
+//   - "new": one-time events. An umbrella with N distinct children
+//     counts as N new events (each child has a unique `name` →
+//     `groupIntoSeries` lands each in its own bucket of size 1).
+//   - "recurring": same-name occurrences across dates (Rega'im
+//     playgroup, weekly consultation, active-garden runs). The
+//     series collapses to ONE entry per group — we pick the
+//     soonest occurrence as the representative, so the digest
+//     shows "this is happening, next on <date>" once per series
+//     instead of repeating the same activity 4 times.
+//
+// Why not use `total_occurrences` already attached by search tools:
+// the newsletter pipeline never goes through `searchEventsTool`
+// (it has its own `generateUserNewsletter` filters), so we run the
+// series collapse here. Keeping the grouping local also lets us
+// pick a representative for the recurring section deterministically
+// — newsletter wants the SOONEST date, not whatever Gemini's sort
+// produced.
+function partitionNewsletterEvents(events) {
+  const { groupIntoSeries } = require("../lib/eventSeries");
+  const buckets = groupIntoSeries(events);
+  const newEvents = [];
+  const recurringSeries = [];
+  for (const bucket of buckets) {
+    if (bucket.occurrences.length <= 1) {
+      // One-time event (includes every umbrella child with a unique
+      // chained name). Push the representative — for size-1 buckets
+      // the representative IS the occurrence.
+      newEvents.push(bucket.representative);
+    } else {
+      // Recurring series: pick the soonest occurrence as the row to
+      // render, and stash the series size so the block can say
+      // "🔁 ועוד N מופעים" without re-grouping downstream.
+      const soonest = bucket.occurrences
+        .slice()
+        .sort((a, b) => {
+          const aDate = a.date || "9999-12-31";
+          const bDate = b.date || "9999-12-31";
+          if (aDate !== bDate) return aDate < bDate ? -1 : 1;
+          const aTime = a.start_time || "99:99";
+          const bTime = b.start_time || "99:99";
+          return aTime < bTime ? -1 : aTime > bTime ? 1 : 0;
+        })[0];
+      recurringSeries.push({
+        ...soonest,
+        _seriesSize: bucket.occurrences.length,
+      });
+    }
+  }
+  return { newEvents, recurringSeries };
+}
+
+function buildConsolidatedNewsletterBody(events) {
+  const { newEvents, recurringSeries } = partitionNewsletterEvents(events);
+  const sections = [];
+  if (newEvents.length) {
+    sections.push(
+      `🆕 <b>אירועים חדשים</b>\n\n` +
+        newEvents.map(buildConsolidatedEventBlock).join("\n\n"),
+    );
+  }
+  if (recurringSeries.length) {
+    sections.push(
+      `🔁 <b>אירועים חוזרים</b>\n\n` +
+        recurringSeries.map(buildConsolidatedEventBlock).join("\n\n"),
+    );
+  }
+  // Empty-payload fallback shouldn't normally happen (the scheduler
+  // skips empty digests upstream), but guard so we don't ship a bare
+  // header with nothing under it.
+  if (!sections.length) {
+    return `🆕 <b>אירועים שיכולים לעניין אותך</b>`;
+  }
+  return sections.join("\n\n");
+}
+
+// Telegram message bodies cap at 4096 chars. The consolidated body
+// fits in one message for a "normal" digest (5-15 events), but we
+// chunk defensively at event-block boundaries so a 20-event digest
+// doesn't get truncated mid-event. Each chunk is sent as a separate
+// `sendMessage` with HTML parse mode; the RTL wrapper is applied
+// centrally by the bot.telegram patcher.
+//
+// Section-aware chunking: section headers ("🆕 אירועים חדשים" / "🔁
+// אירועים חוזרים") stay with their first event block. If a section
+// is so long that even its FIRST event tips us over the chunk limit,
+// the header lives alone on the previous chunk — better than
+// dropping the header to fit one extra block.
+function chunkConsolidatedBody(events) {
+  const { newEvents, recurringSeries } = partitionNewsletterEvents(events);
+  const segments = [];
+  if (newEvents.length) {
+    segments.push({
+      header: `🆕 <b>אירועים חדשים</b>`,
+      blocks: newEvents.map(buildConsolidatedEventBlock),
+    });
+  }
+  if (recurringSeries.length) {
+    segments.push({
+      header: `🔁 <b>אירועים חוזרים</b>`,
+      blocks: recurringSeries.map(buildConsolidatedEventBlock),
+    });
+  }
+  if (!segments.length) {
+    return [`🆕 <b>אירועים שיכולים לעניין אותך</b>`];
+  }
+  const chunks = [];
+  let current = "";
+  for (const seg of segments) {
+    // Each section starts on a fresh "line group" — emit the header
+    // first, attached to current if it fits, else flushed.
+    const headerCandidate = current ? `${current}\n\n${seg.header}` : seg.header;
+    if (headerCandidate.length > NEWSLETTER_CHUNK_LIMIT) {
+      if (current) chunks.push(current);
+      current = seg.header;
+    } else {
+      current = headerCandidate;
+    }
+    for (const block of seg.blocks) {
+      const candidate = `${current}\n\n${block}`;
+      if (candidate.length > NEWSLETTER_CHUNK_LIMIT) {
+        chunks.push(current);
+        current = block;
+      } else {
+        current = candidate;
+      }
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+async function sendConsolidatedNewsletter(botInstance, tg, events) {
+  const chunks = chunkConsolidatedBody(events);
+  for (const chunk of chunks) {
+    await botInstance.telegram.sendMessage(tg, chunk, {
+      parse_mode: "HTML",
+      // `disable_web_page_preview: true` would suppress the link
+      // preview Telegram generates for the first http(s) URL it
+      // finds in the body. We embed many event links per chunk; the
+      // preview-of-the-first-one is usually unhelpful (often the
+      // smarticket landing rather than the event itself) and adds
+      // visual clutter that defeats the "compact digest" intent.
+      disable_web_page_preview: true,
+    });
+  }
+}
+
+// Single-event flush — sends a small "🆕 אירוע חדש" lead-in
+// followed by ONE card. No multi-select session state needed (the
+// user can tap "❌ לא מתאים" / "🔁 מכירה" on the card itself, and
+// nav / details buttons cover the immediate actions). When the user
+// wants the bulk-select UX, a later cycle that aggregates 2+ events
+// produces the multi-card path above.
+async function renderSingleEventFlush(botInstance, tg, event) {
+  try {
+    await botInstance.telegram.sendMessage(
+      tg,
+      rtlLine("🆕 אירוע חדש שיכול לעניין אותך"),
+    );
+  } catch (err) {
+    if (isUserBlockedError(err)) {
+      console.warn(`[Newsletter] user ${tg} blocked — skipping single`);
+      return;
+    }
+    // Header failure isn't fatal — try the card anyway.
+    console.warn(`[Newsletter] single header failed for ${tg}: ${err.message}`);
+  }
+  try {
+    const reply_markup = buildSingleEventKeyboard(event);
+    const text = buildNewsletterCardText(event);
+    const photoUrl = normalizeImageUrl(event.image, event);
+    if (photoUrl && text.length <= 1024) {
+      try {
+        await botInstance.telegram.sendPhoto(tg, photoUrl, {
+          caption: text,
+          reply_markup,
+        });
+        return;
+      } catch (err) {
+        if (isUserBlockedError(err)) return;
+        console.warn(`[Newsletter] single photo fallback: ${err.message}`);
+      }
+    }
+    await botInstance.telegram.sendMessage(tg, text, { reply_markup });
+  } catch (err) {
+    if (!isUserBlockedError(err)) {
+      console.error(`[Newsletter] single card failed for ${tg}: ${err.message}`);
+    }
+  }
+}
+
+// Keyboard for a SINGLE-event flush — drops the ☐ בחר button (no
+// batch to select into) and keeps the high-value action set per
+// spec §3: nav (single "🧭 ניווט") + details (acts as
+// "🔗 Register") + ❌ לא מתאים.
+function buildSingleEventKeyboard(event) {
+  const navBtns = buildNavButtons(event);
+  const detailsBtn = buildDetailsButton(event);
+  const topRow = [...navBtns, detailsBtn].filter(Boolean);
+  const rows = [];
+  if (topRow.length) rows.push(topRow);
+  const semRow = buildSemanticMatchRow(event);
+  if (semRow) rows.push(semRow);
+  rows.push([{ text: "❌ לא מתאים", callback_data: `fb:reasons:${event.id}` }]);
+  return { inline_keyboard: rows };
+}
+
+// Footer text + keyboard helpers. The "(N)" counter on each button
+// stays present even when N=0 so the affordance is visible — the
+// callback handlers check N>0 and respond with a toast prompting the
+// user to select at least one event.
+function buildNewsletterFooterText(selectedCount) {
+  if (selectedCount === 0) {
+    return rtlLine("📋 בחרי אירועים בלחיצה על ☐ בחר, ואז בצעי פעולה:");
+  }
+  return rtlLine(`📋 נבחרו ${selectedCount} אירועים — בצעי פעולה:`);
+}
+
+function buildNewsletterFooterKeyboard(selectedCount) {
+  // Three bulk actions: calendar / share / not-relevant. Stacked one
+  // per row on narrow phones — the labels are too long to fit two
+  // across without truncation.
+  return {
+    inline_keyboard: [
+      [{ text: `📅 הוסיפי ליומן (${selectedCount})`, callback_data: "nl:cal" }],
+      [{ text: `📤 שתפי (${selectedCount})`, callback_data: "nl:share" }],
+      [{ text: `❌ סמני כלא רלוונטי (${selectedCount})`, callback_data: "nl:notrel" }],
+    ],
+  };
+}
+
+// Build the per-card select-button label based on whether the card's
+// event id is currently selected on session.
+function buildSelectButton(eventId, selectedSet) {
+  const checked = selectedSet.has(eventId);
+  return {
+    text: checked ? "☑ נבחר" : "☐ בחר",
+    callback_data: `nl:tog:${eventId}`,
+  };
+}
+
+// `user blocked the bot` / `chat not found` errors — both mean we
+// can't deliver to this user this cycle. They're not bugs; abort
+// quietly. Telegraf surfaces them as `TelegramError` with codes 403
+// (Forbidden) and 400 with specific descriptions.
+function isUserBlockedError(err) {
+  const code = err?.code || err?.response?.error_code;
+  if (code === 403) return true;
+  const desc = String(err?.description || err?.message || "").toLowerCase();
+  if (desc.includes("bot was blocked")) return true;
+  if (desc.includes("user is deactivated")) return true;
+  if (desc.includes("chat not found")) return true;
+  return false;
+}
+
+// Standalone card sender — mirrors sendEventCard's text/keyboard
+// layout but takes a raw chatId and uses bot.telegram directly (the
+// scheduler runs outside any Telegraf update context). Returns the
+// Telegram message object so the caller can record message_id for
+// in-place edits on toggle.
+async function sendNewsletterCard(botInstance, chatId, event) {
+  const reply_markup = buildNewsletterCardKeyboard(event, new Set());
+  const text = buildNewsletterCardText(event);
+  const photoUrl = normalizeImageUrl(event.image, event);
+  if (photoUrl && text.length <= 1024) {
+    try {
+      return await botInstance.telegram.sendPhoto(chatId, photoUrl, {
+        caption: text,
+        reply_markup,
+      });
+    } catch (err) {
+      if (isUserBlockedError(err)) throw err;
+      console.warn(
+        `[Newsletter] photo fallback for event ${event.id}: ${err.message}`,
+      );
+    }
+  }
+  return await botInstance.telegram.sendMessage(chatId, text, { reply_markup });
+}
+
+// Text body for a newsletter card — same fields as the agent's
+// sendEventCard but without the proximity/audience-verdict signals
+// (those are search-time concerns).
+//
+// When `event._semanticMatch` is set (the annotator decided this
+// event surfaces a novel label the user hasn't opted into yet), we
+// prepend a "🆕 חדש בקטלוג: <label>" subtitle. The accompanying
+// ➕/📭 buttons live in buildNewsletterCardKeyboard /
+// buildSingleEventKeyboard so the user can opt-in or opt-out
+// without leaving the card.
+function buildNewsletterCardText(event) {
+  const lines = [`${getEventIcon(event)} ${event.name}`];
+  if (event._semanticMatch?.label_name) {
+    lines.push(`🆕 חדש בקטלוג: ${event._semanticMatch.label_name}`);
+  }
+  if (event.date) lines.push(`📅 ${formatHebrewDate(event.date)}`);
+  const timeStr = formatTimeRange(event.start_time, event.end_time);
+  if (timeStr) lines.push(rtlLine(`🕐 ${timeStr}`));
+  if (event.location) lines.push(`📍 ${event.location}`);
+  // Shared ticket-line helper — handles low-stock urgency inline
+  // ("🎫 N כרטיסים אחרונים ❗️") and skips null counts (free
+  // events). Sold-out newsletter events get filtered upstream, so we
+  // don't need a separate "🚫 אזלו" branch here.
+  const ticketsLine = formatTicketsLine(event.tickets_left);
+  if (ticketsLine) lines.push(ticketsLine);
+  if (Array.isArray(event.tags) && event.tags.length) {
+    const tagLine = formatTagLine(event.tags, { highlight: [], searchHits: [] });
+    if (tagLine) lines.push(tagLine);
+  }
+  return lines.map(rtlLine).join("\n");
+}
+
+// Inline-keyboard row for semantic-match events. Shared between the
+// single-event flush and the multi-event newsletter card so both
+// paths surface the same ➕ / 📭 affordance.
+//
+// We pack (event_id, label_id) into callback_data — neither is
+// large enough to risk the 64-byte cap (10-digit each leaves plenty
+// of headroom) and storing the id avoids the awkward Hebrew-in-
+// callback case. The label name itself is resolved server-side
+// from the id when the user taps either button.
+function buildSemanticMatchRow(event) {
+  if (!event?._semanticMatch?.label_id) return null;
+  const { label_id, label_name } = event._semanticMatch;
+  return [
+    {
+      text: `➕ עוד כמו זה (${label_name})`,
+      callback_data: `sem:add:${event.id}:${label_id}`,
+    },
+    {
+      text: "📭 לא רלוונטי",
+      callback_data: `sem:supp:${event.id}:${label_id}`,
+    },
+  ];
+}
+
+// Build keyboard for a newsletter card. Three rows:
+//   1. nav (single "🧭 ניווט") + details
+//   2. ☐ בחר / ☑ נבחר  — selection toggle (Phase D multi-select)
+//   3. ❌ לא מתאים     — per-card feedback opt-out (existing)
+// Selection state lives on session; toggling re-renders just this
+// keyboard via editMessageReplyMarkup so the visual state stays in
+// sync.
+function buildNewsletterCardKeyboard(event, selectedSet) {
+  const navBtns = buildNavButtons(event);
+  const detailsBtn = buildDetailsButton(event);
+  const topRow = [...navBtns, detailsBtn].filter(Boolean);
+  const rows = [];
+  if (topRow.length) rows.push(topRow);
+  rows.push([buildSelectButton(event.id, selectedSet)]);
+  const semRow = buildSemanticMatchRow(event);
+  if (semRow) rows.push(semRow);
+  rows.push([{ text: "❌ לא מתאים", callback_data: `fb:reasons:${event.id}` }]);
+  return { inline_keyboard: rows };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Newsletter multi-select callback handlers — nl:tog, nl:share,
+// nl:notrel, nl:cal (stub until Phase E lands the Calendar service).
+// ──────────────────────────────────────────────────────────────────────────
+
+// sem:add:<eventId>:<labelId>  — "➕ עוד כמו זה" on a semantic-match
+//   card. Adds the surfaced label NAME to profile.user_context.
+//   interests[] so future events tagged with it match strictly (no
+//   Gemini round-trip needed).
+//
+// sem:supp:<eventId>:<labelId> — "📭 לא רלוונטי" on a semantic-match
+//   card. Adds the label NAME to profile.user_context.suppressed_
+//   labels[]. The annotator excludes any label that appears there
+//   when picking the novel surface label — events whose ONLY novel
+//   label is suppressed deliver as plain cards (no +/- row).
+//
+// Both handlers strip the sem-row off the message keyboard so the
+// affordance doesn't reappear. Other rows (nav, details, ☐ בחר,
+// ❌ לא מתאים) survive untouched.
+async function applySemanticAction(ctx, action) {
+  const telegramId = ctx.from.id;
+  try {
+    const eventId = parseInt(ctx.match[1], 10);
+    const labelId = parseInt(ctx.match[2], 10);
+    if (!Number.isFinite(eventId) || !Number.isFinite(labelId)) {
+      await safeAck(ctx, "⚠️");
+      return;
+    }
+    const labelStoreModule = require("../lib/labelStore");
+    const dict = await labelStoreModule.fetchLabelDict([labelId]);
+    const row = dict.get(labelId);
+    if (!row?.name) {
+      await safeAck(ctx, "⚠️ התגית כבר לא קיימת");
+      return;
+    }
+    const labelName = row.name;
+    const profile = await getProfile(telegramId).catch(() => null);
+    const ctxJson = profile?.user_context || {};
+
+    let toast;
+    let nextCtxJson;
+    if (action === "add") {
+      const existing = Array.isArray(ctxJson.interests) ? ctxJson.interests : [];
+      const set = new Set(existing);
+      const wasPresent = set.has(labelName);
+      set.add(labelName);
+      // Also clear it from suppressed_labels — if the user is now
+      // opting in, the earlier opt-out is moot. Easier to keep the
+      // sets disjoint than to special-case the matcher later.
+      const suppressed = Array.isArray(ctxJson.suppressed_labels)
+        ? ctxJson.suppressed_labels.filter((s) => s !== labelName)
+        : [];
+      nextCtxJson = { ...ctxJson, interests: [...set], suppressed_labels: suppressed };
+      toast = wasPresent ? "✓ כבר ברשימה" : `✓ נוסף: ${labelName}`;
+    } else {
+      const existing = Array.isArray(ctxJson.suppressed_labels)
+        ? ctxJson.suppressed_labels
+        : [];
+      const set = new Set(existing);
+      const wasPresent = set.has(labelName);
+      set.add(labelName);
+      // Mirror: drop from interests if present so the matcher won't
+      // strict-match this label anymore. Aggressive but consistent
+      // with the user's "📭 לא רלוונטי" intent.
+      const interests = Array.isArray(ctxJson.interests)
+        ? ctxJson.interests.filter((i) => i !== labelName)
+        : [];
+      nextCtxJson = { ...ctxJson, suppressed_labels: [...set], interests };
+      toast = wasPresent ? "✓ כבר מודחק" : "✓ לא אטריד שוב";
+    }
+
+    const supabase = require("../lib/supabase");
+    await supabase
+      .from("profiles")
+      .update({ user_context: nextCtxJson })
+      .eq("telegram_id", String(telegramId));
+
+    // Drop the annotation off the session-stored copy of this event
+    // so a subsequent `nl:tog` re-render of the same card doesn't
+    // resurrect the sem row from `_semanticMatch`. Best-effort —
+    // single-event flushes don't carry a session at all.
+    try {
+      const nlState = sessionStore.getNewsletterState(telegramId);
+      const ev = nlState?.events?.get?.(eventId);
+      if (ev) delete ev._semanticMatch;
+    } catch {
+      // ignore: state may not exist (single-event flush path)
+    }
+
+    // Strip the sem row from the keyboard. We grab the existing
+    // markup off the callback query rather than rebuilding from
+    // scratch — that way nav/select/details/feedback buttons stay
+    // exactly as they were, regardless of which card path
+    // (single-event vs multi) we landed on.
+    const existingMarkup = ctx.callbackQuery?.message?.reply_markup?.inline_keyboard || [];
+    const filtered = existingMarkup.filter(
+      (kbRow) => !kbRow.some((btn) => typeof btn.callback_data === "string" && btn.callback_data.startsWith("sem:")),
+    );
+    try {
+      await ctx.editMessageReplyMarkup({ inline_keyboard: filtered });
+    } catch (err) {
+      const msg = err?.message || "";
+      if (!msg.includes("message is not modified")) {
+        console.warn(`[Bot] sem:${action} editMarkup failed: ${msg}`);
+      }
+    }
+    await safeAck(ctx, toast);
+  } catch (err) {
+    console.error(`[Bot] sem:${action} error:`, err.message);
+    await safeAck(ctx, "⚠️");
+  }
+}
+
+bot.action(/^sem:add:(\d+):(\d+)$/, (ctx) => applySemanticAction(ctx, "add"));
+bot.action(/^sem:supp:(\d+):(\d+)$/, (ctx) => applySemanticAction(ctx, "supp"));
+
+// nl:tog:<eventId> — toggle selection. Edits the card's keyboard
+// in-place (just the select button label flips) and edits the footer
+// to update the counter and (eventually) enable/disable bulk buttons.
+bot.action(/^nl:tog:(\d+)$/, async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const state = sessionStore.getNewsletterState(telegramId);
+    if (!state) {
+      await safeAck(ctx, "⏰ הניוזלטר הזה כבר לא בתוקף", { show_alert: false });
+      return;
+    }
+    const eventId = parseInt(ctx.match[1], 10);
+    if (!Number.isFinite(eventId) || !state.events.has(eventId)) {
+      await safeAck(ctx, "⚠️ האירוע לא נמצא");
+      return;
+    }
+    if (state.selectedEventIds.has(eventId)) {
+      state.selectedEventIds.delete(eventId);
+    } else {
+      state.selectedEventIds.add(eventId);
+    }
+    // Edit THIS card's keyboard — just flip the select button label.
+    const event = state.events.get(eventId);
+    const cardMarkup = buildNewsletterCardKeyboard(event, state.selectedEventIds);
+    try {
+      // editMessageReplyMarkup works for both text + photo messages.
+      await ctx.editMessageReplyMarkup(cardMarkup);
+    } catch (err) {
+      // Photo cards sometimes 400 with "message can't be edited" if
+      // the message went stale — non-fatal, the next render will fix.
+      const msg = err?.message || String(err || "");
+      if (!msg.includes("message is not modified")) {
+        console.warn(`[Bot] nl:tog editMarkup failed: ${msg}`);
+      }
+    }
+    // Edit the footer to update the counter.
+    const selectedCount = state.selectedEventIds.size;
+    if (state.footerChatId && state.footerMessageId) {
+      try {
+        await ctx.telegram.editMessageText(
+          state.footerChatId,
+          state.footerMessageId,
+          undefined,
+          buildNewsletterFooterText(selectedCount),
+          { reply_markup: buildNewsletterFooterKeyboard(selectedCount) },
+        );
+      } catch (err) {
+        const msg = err?.message || "";
+        if (!msg.includes("message is not modified")) {
+          console.warn(`[Bot] nl:tog editFooter failed: ${msg}`);
+        }
+      }
+    }
+    await safeAck(ctx, state.selectedEventIds.has(eventId) ? "☑ נבחר" : "☐ הוסר");
+  } catch (err) {
+    console.error("[Bot] nl:tog error:", err.message);
+    await safeAck(ctx, "⚠️");
+  }
+});
+
+// nl:share — assemble a Markdown summary of all selected events and
+// send it as a fresh message. The user forwards it to wherever they
+// want (group chat, partner, etc.) — Telegram doesn't expose a
+// programmatic "share" affordance for arbitrary text, the forward
+// button on a regular message IS the share path.
+bot.action("nl:share", async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const state = sessionStore.getNewsletterState(telegramId);
+    if (!state) {
+      await safeAck(ctx, "⏰ הניוזלטר הזה כבר לא בתוקף");
+      return;
+    }
+    if (state.selectedEventIds.size === 0) {
+      await safeAck(ctx, "בחרי לפחות אירוע אחד עם ☐ בחר", { show_alert: true });
+      return;
+    }
+    const selected = [...state.selectedEventIds]
+      .map((id) => state.events.get(id))
+      .filter(Boolean);
+    const text = buildShareText(selected);
+    await safeAck(ctx, "📤 בונה הודעה");
+    await ctx.reply(text, {
+      parse_mode: "Markdown",
+      // Disable preview — the message can contain multiple URLs
+      // (one per event) and Telegram would otherwise render a card
+      // for whichever URL it parses first.
+      link_preview_options: { is_disabled: true },
+    });
+    // Reset selection after the action so the footer counter
+    // immediately reflects "nothing selected" — that's the natural
+    // post-action state.
+    await resetNewsletterSelection(ctx, telegramId);
+  } catch (err) {
+    console.error("[Bot] nl:share error:", err.message);
+    await safeAck(ctx, "⚠️");
+  }
+});
+
+// nl:notrel — bulk "not relevant" mark for all selected events.
+// Writes one `event_feedback` row per event (reason='not_interested')
+// and adds the events' tags / venues to the profile's
+// `disliked_tags` / `disliked_venues` JSONB arrays so the newsletter
+// generator suppresses similar content next time.
+bot.action("nl:notrel", async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const state = sessionStore.getNewsletterState(telegramId);
+    if (!state) {
+      await safeAck(ctx, "⏰ הניוזלטר הזה כבר לא בתוקף");
+      return;
+    }
+    if (state.selectedEventIds.size === 0) {
+      await safeAck(ctx, "בחרי לפחות אירוע אחד עם ☐ בחר", { show_alert: true });
+      return;
+    }
+    const selected = [...state.selectedEventIds]
+      .map((id) => state.events.get(id))
+      .filter(Boolean);
+    await safeAck(ctx, "מעדכנת...");
+
+    // Persist feedback rows — best-effort per event, errors don't
+    // abort the rest of the batch. recordFeedback dedupes a missing
+    // table silently.
+    const { recordFeedback } = require("../lib/feedbackService");
+    for (const event of selected) {
+      try {
+        await recordFeedback({
+          eventId: event.id,
+          telegramId,
+          reason: "not_interested",
+          note: "bulk_newsletter_not_relevant",
+        });
+      } catch (err) {
+        console.warn(`[Bot] nl:notrel feedback event=${event.id}: ${err.message}`);
+      }
+    }
+
+    // Aggregate tags + venues from the selected events into the
+    // profile's disliked_* arrays. FIFO cap of 50 each — beyond that
+    // the signal is degraded ("user doesn't like our recommendations
+    // in general") and we'd rather keep recent dislikes than ancient
+    // ones.
+    try {
+      await learnDislikedSignalsFromEvents(telegramId, selected);
+    } catch (err) {
+      console.warn(`[Bot] nl:notrel learn failed: ${err.message}`);
+    }
+
+    await ctx.reply(
+      rtlLine(
+        `✅ סימנתי ${selected.length} אירועים כלא רלוונטיים. אזהר מתוכן דומה בניוזלטרים הבאים.`,
+      ),
+    );
+    await resetNewsletterSelection(ctx, telegramId);
+  } catch (err) {
+    console.error("[Bot] nl:notrel error:", err.message);
+    await safeAck(ctx, "⚠️");
+  }
+});
+
+// nl:cal — Phase D stub. Without OAuth tokens we can't insert into
+// the user's calendar; route them to /connect_calendar (Phase E).
+bot.action("nl:cal", async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const state = sessionStore.getNewsletterState(telegramId);
+    if (!state) {
+      await safeAck(ctx, "⏰ הניוזלטר הזה כבר לא בתוקף");
+      return;
+    }
+    if (state.selectedEventIds.size === 0) {
+      await safeAck(ctx, "בחרי לפחות אירוע אחד עם ☐ בחר", { show_alert: true });
+      return;
+    }
+    // Phase E replaces this branch with the real Calendar insert
+    // path. Until tokens exist, the action ROUTES the user to the
+    // OAuth flow — without that, every "add to calendar" tap is a
+    // dead-end. The /connect_calendar command (Phase E) renders the
+    // sign-in button.
+    const tokens = await loadGoogleTokens(telegramId).catch(() => null);
+    if (!tokens) {
+      await safeAck(ctx, "🔌 קודם נתחבר ל-Google Calendar");
+      await ctx.reply(
+        rtlLine(
+          "📅 כדי להוסיף אירועים ליומן Google, נתחבר פעם אחת:\n\n" +
+            "השתמשי ב‑/connect_calendar להתחברות.",
+        ),
+      );
+      return;
+    }
+    // Wired in Phase E.
+    const selected = [...state.selectedEventIds]
+      .map((id) => state.events.get(id))
+      .filter(Boolean);
+    await safeAck(ctx, "📅 מוסיפה ליומן...");
+    const { insertEvents } = require("../lib/calendarService");
+    const result = await insertEvents(telegramId, selected);
+    await ctx.reply(
+      rtlLine(
+        result.inserted
+          ? `✅ הוספתי ${result.inserted} אירועים ליומן שלך.`
+          : "⚠️ לא הצלחתי להוסיף אירועים — נסי /connect_calendar שוב.",
+      ),
+    );
+    await resetNewsletterSelection(ctx, telegramId);
+  } catch (err) {
+    console.error("[Bot] nl:cal error:", err.message);
+    await safeAck(ctx, "⚠️");
+  }
+});
+
+// Build the shareable Markdown summary message. Each event gets a
+// compact block with name, date, time, venue, ticket count, and a
+// link to the source. The header makes it clear this is a shared
+// digest (not a personal recommendation) when the user forwards it.
+function buildShareText(events) {
+  const lines = ["*🎟️ אירועים מומלצים*", ""];
+  for (const e of events) {
+    lines.push(`*${e.name}*`);
+    if (e.date) lines.push(`📅 ${formatHebrewDate(e.date)}`);
+    const timeStr = formatTimeRange(e.start_time, e.end_time);
+    if (timeStr) lines.push(`🕐 ${timeStr}`);
+    if (e.location) lines.push(`📍 ${e.location}`);
+    const sharedTicketsLine = formatTicketsLine(e.tickets_left);
+    if (sharedTicketsLine) lines.push(sharedTicketsLine);
+    const url = getBookingUrl(e);
+    if (url) lines.push(url);
+    lines.push("");
+  }
+  // Escape the user-visible body against Markdown control chars
+  // (`_`, `*`, `[`, `]`, `` ` ``) so a venue name with an underscore
+  // doesn't break the parse. We keep our own intentional formatting
+  // (the leading `*` on each event title) by escaping AFTER we
+  // composed the structure — i.e. we trust our own input but
+  // sanitise the data fields. Simpler: just join and let Markdown
+  // surface any oddity as plain text (telegraf falls back). For v1
+  // the bare join is fine; we can tighten if it bites.
+  return lines.join("\n");
+}
+
+// Aggregate tags + location_keys from a set of "not relevant" events
+// into profile.user_context.disliked_tags / disliked_venues.
+// FIFO-capped so the lists stay bounded.
+const DISLIKE_CAP = 50;
+
+async function learnDislikedSignalsFromEvents(telegramId, events) {
+  const existing = await getProfile(telegramId);
+  if (!existing) return;
+  const ctx = existing.user_context || {};
+  const dislikedTags = Array.isArray(ctx.disliked_tags) ? [...ctx.disliked_tags] : [];
+  const dislikedVenues = Array.isArray(ctx.disliked_venues)
+    ? [...ctx.disliked_venues]
+    : [];
+
+  // Bag of newly-introduced strings. We iterate the events oldest-to-
+  // newest so the most recently disliked entries land at the END of
+  // the FIFO (= last to be evicted), which matches user intuition.
+  const newTags = [];
+  const newVenues = [];
+  for (const e of events) {
+    if (Array.isArray(e?.tags)) {
+      for (const t of e.tags) {
+        const s = typeof t === "string" ? t.trim() : null;
+        if (s && !dislikedTags.includes(s) && !newTags.includes(s)) newTags.push(s);
+      }
+    }
+    const v = e?.location_key;
+    if (v && !dislikedVenues.includes(v) && !newVenues.includes(v)) newVenues.push(v);
+  }
+  if (!newTags.length && !newVenues.length) return;
+
+  // FIFO cap: keep the most recent DISLIKE_CAP entries.
+  const mergedTags = [...dislikedTags, ...newTags].slice(-DISLIKE_CAP);
+  const mergedVenues = [...dislikedVenues, ...newVenues].slice(-DISLIKE_CAP);
+
+  // Touch user_context directly — saveProfile expects the brain
+  // shape and we only need to bump two JSONB fields. Lazy require so
+  // this module doesn't pull supabase at top level (matches the rest
+  // of the file's lazy-require pattern for inline DB use).
+  const supabase = require("../lib/supabase");
+  const next_user_context = {
+    ...ctx,
+    disliked_tags: mergedTags,
+    disliked_venues: mergedVenues,
+  };
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ user_context: next_user_context })
+    .eq("telegram_id", String(telegramId));
+  if (error) {
+    throw new Error(`disliked-signals write failed: ${error.message}`);
+  }
+  return data;
+}
+
+// Persist a recurring-series suppressor for a single event_id. The
+// "series" identity is intentionally simple: (name + location_key).
+// That covers the canonical case ("משחקיית רגעים at מתנס X" — same
+// name, same venue, different dates) without needing a stricter
+// equality (e.g. trimming generation suffixes). False positives
+// (two unrelated events that happen to share a name + venue) are
+// unlikely AND recoverable: the user can ask the agent to "show me
+// events" again and ask_clarification will resurface the affected
+// series.
+//
+// Stored as profile.user_context.known_series as an array of
+// strings (one per series) capped FIFO at KNOWN_SERIES_CAP. The
+// match in newsletterService is string-equality, so the cap also
+// keeps the per-event check cheap.
+const KNOWN_SERIES_CAP = 100;
+
+function seriesKeyFor(event) {
+  // Lowercase + collapse whitespace so trivial formatting
+  // differences ("משחקיית רגעים" vs "  משחקיית  רגעים") collapse to
+  // the same identity. location_key is already canonical (FK into
+  // locations), so we don't normalise it further.
+  const name = String(event?.name || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const loc = event?.location_key || "";
+  if (!name) return null;
+  return `${name}::${loc}`;
+}
+
+async function rememberKnownSeries(telegramId, eventId) {
+  const supabase = require("../lib/supabase");
+
+  // Look up the event so we can derive its series identity. We pull
+  // a narrow column set — name + location_key are the only fields
+  // we need.
+  const { data: event, error: evErr } = await supabase
+    .from("events")
+    .select("id, name, location_key")
+    .eq("id", parseInt(eventId, 10))
+    .maybeSingle();
+  if (evErr || !event) {
+    console.warn(
+      `[Bot] rememberKnownSeries: event ${eventId} not found: ${evErr?.message || "no row"}`,
+    );
+    return;
+  }
+  const key = seriesKeyFor(event);
+  if (!key) return;
+
+  const existing = await getProfile(telegramId);
+  if (!existing) return;
+  const ctx = existing.user_context || {};
+  const list = Array.isArray(ctx.known_series) ? [...ctx.known_series] : [];
+  if (list.includes(key)) return; // already suppressed
+
+  // FIFO cap — the most recent suppressions are at the END of the
+  // list, the oldest at the FRONT. .slice(-CAP) keeps the recent
+  // tail when we overflow.
+  list.push(key);
+  const next = list.slice(-KNOWN_SERIES_CAP);
+  const next_user_context = { ...ctx, known_series: next };
+  const { error: upErr } = await supabase
+    .from("profiles")
+    .update({ user_context: next_user_context })
+    .eq("telegram_id", String(telegramId));
+  if (upErr) {
+    throw new Error(`known_series write failed: ${upErr.message}`);
+  }
+}
+
+// Reset selection after a bulk action: clear the set, edit the footer
+// counter back to 0, and (best-effort) flip every selected card's
+// keyboard back to "☐ בחר". The cards' messages stay in chat so
+// the user can re-select if they want to undo.
+async function resetNewsletterSelection(ctx, telegramId) {
+  const state = sessionStore.getNewsletterState(telegramId);
+  if (!state) return;
+  const previouslySelected = [...state.selectedEventIds];
+  state.selectedEventIds.clear();
+  // Flip each previously-selected card's button back to "☐ בחר".
+  for (const id of previouslySelected) {
+    const event = state.events.get(id);
+    const messageId = state.cardMessageIds.get(id);
+    if (!event || !messageId) continue;
+    const cardMarkup = buildNewsletterCardKeyboard(event, state.selectedEventIds);
+    try {
+      await ctx.telegram.editMessageReplyMarkup(
+        ctx.chat?.id || ctx.from.id,
+        messageId,
+        undefined,
+        cardMarkup,
+      );
+    } catch (err) {
+      const msg = err?.message || "";
+      if (!msg.includes("message is not modified")) {
+        // Non-fatal — the card might be too old to edit; we accept
+        // the visual drift since the source-of-truth (session
+        // state) is already correct.
+      }
+    }
+  }
+  // Reset footer counter.
+  if (state.footerChatId && state.footerMessageId) {
+    try {
+      await ctx.telegram.editMessageText(
+        state.footerChatId,
+        state.footerMessageId,
+        undefined,
+        buildNewsletterFooterText(0),
+        { reply_markup: buildNewsletterFooterKeyboard(0) },
+      );
+    } catch (err) {
+      const msg = err?.message || "";
+      if (!msg.includes("message is not modified")) {
+        console.warn(`[Bot] resetNewsletterSelection footer: ${msg}`);
+      }
+    }
+  }
+}
+
+// Lazy loader for Google OAuth tokens — wired by Phase E. Returns
+// null when the table doesn't exist yet OR the user hasn't connected.
+async function loadGoogleTokens(telegramId) {
+  const supabase = require("../lib/supabase");
+  const { data, error } = await supabase
+    .from("google_oauth_tokens")
+    .select("telegram_id, access_token, refresh_token, expires_at, scope")
+    .eq("telegram_id", String(telegramId))
+    .maybeSingle();
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") return null;
+    console.warn(`[Bot] loadGoogleTokens: ${error.message}`);
+    return null;
+  }
+  return data || null;
+}
+
+// /newsletter_off — pause weekly delivery. Reversible via
+// /newsletter_on. We do NOT delete the row so `last_sent_at` survives
+// — a user who re-subscribes after a quiet month picks up where the
+// schedule left off rather than getting flooded with backlog.
+bot.command("newsletter_off", async (ctx) => {
+  try {
+    const { setNewsletterPaused } = require("../lib/newsletterService");
+    await setNewsletterPaused(ctx.from.id, true);
+    await ctx.reply(
+      "👍 השבתתי את הניוזלטר השבועי. תוכלי להפעיל בחזרה עם /newsletter_on.",
+    );
+  } catch (err) {
+    console.error("[Bot] /newsletter_off error:", err.message);
+    await ctx.reply("⚠️ שגיאה בהשבתת הניוזלטר. אפשר לנסות שוב.");
+  }
+});
+
+bot.command("newsletter_on", async (ctx) => {
+  try {
+    const { setNewsletterPaused } = require("../lib/newsletterService");
+    await setNewsletterPaused(ctx.from.id, false);
+    await ctx.reply(
+      "👍 הפעלתי את הניוזלטר השבועי. תקבלי אותו ביום חמישי בערב.",
+    );
+  } catch (err) {
+    console.error("[Bot] /newsletter_on error:", err.message);
+    await ctx.reply("⚠️ שגיאה בהפעלת הניוזלטר. אפשר לנסות שוב.");
+  }
+});
+
+// /newsletter_preview — user-facing manual trigger. Renders the
+// CURRENT pending digest (everything since the user's last_sent_at)
+// as if it were the Thursday delivery, but does NOT advance
+// last_sent_at. Two outcomes the user might see:
+//
+//   - "ok" — N cards delivered, prefixed with a "👀 תצוגה מקדימה"
+//            header so they know it's a preview, not the real
+//            Thursday push.
+//   - "empty" — nothing new since last delivery; we reply with a
+//            friendly note instead of silently doing nothing.
+//
+// Unlike /newsletter_now (admin-only, advances state, used for
+// QA-style "did the copy actually ship?" testing), this command
+// is for any user who wants to see "what would arrive on Thursday".
+// Safe to tap repeatedly.
+bot.command("newsletter_preview", async (ctx) => {
+  try {
+    const { deliverPreview } = require("../lib/newsletterScheduler");
+    // Prefix BEFORE the cards so the user understands the cards
+    // below are a preview, not a "you missed Thursday" delivery.
+    // We send this even when the digest turns out to be empty —
+    // the follow-up "אין כרגע אירועים חדשים" message is enough
+    // closure on its own, and the prefix sets the right
+    // expectation immediately ("she heard me, working on it").
+    await ctx.reply(
+      "👀 תצוגה מקדימה של הניוזלטר — זה מה שהיית מקבלת ביום חמישי הקרוב:",
+    );
+    const result = await deliverPreview(bot, ctx.from.id);
+    if (result.reason === "no_profile") {
+      await ctx.reply(
+        "⚠️ עוד אין לי פרופיל שלך — נסי /start כדי לפתוח את האשף.",
+      );
+      return;
+    }
+    if (result.reason === "renderer_unavailable") {
+      // Shouldn't happen in practice — the scheduler boots at the
+      // same time as the bot — but a clear error beats a silent
+      // "she sent the header and nothing else" UX.
+      await ctx.reply(
+        "⚠️ שירות הניוזלטר עדיין מתעורר, נסי שוב בעוד רגע.",
+      );
+      return;
+    }
+    if (result.reason === "empty") {
+      await ctx.reply(
+        "📭 אין כרגע אירועים חדשים שעוד לא הצגתי לך. " +
+          "תקבלי עדכון ברגע שמתווספים אירועים שמתאימים לפרופיל שלך.",
+      );
+      return;
+    }
+    // Success: cards already rendered by deliverPreview. Closing
+    // toast confirms how many landed so the user can sanity-check
+    // against the cards above (Telegram occasionally batches a
+    // photo card and a text caption into the same screen tick
+    // and the count anchors the meaning).
+    await ctx.reply(
+      `✅ זו תצוגה מקדימה בלבד — הניוזלטר האמיתי יישלח ביום חמישי כרגיל.`,
+    );
+  } catch (err) {
+    console.error("[Bot] /newsletter_preview error:", err.stack || err.message);
+    await ctx.reply("⚠️ שגיאה בהפעלת התצוגה. אפשר לנסות שוב.");
+  }
+});
+
+// /connect_calendar — Phase E. Builds the Google OAuth URL with
+// state=<telegram_id> and sends a one-button inline keyboard. The
+// user taps the button → Google's consent screen → Google redirects
+// to GOOGLE_OAUTH_REDIRECT_URI (handled by lib/oauthServer.js) → we
+// persist the tokens and confirm back in this chat.
+bot.command("connect_calendar", async (ctx) => {
+  try {
+    const { buildAuthUrl } = require("../lib/oauthServer");
+    let url;
+    try {
+      url = buildAuthUrl(ctx.from.id);
+    } catch (err) {
+      // Missing env config — surface to user so they know the feature
+      // isn't fully deployed yet, rather than failing silently.
+      await ctx.reply(
+        rtlLine(
+          "⚠️ אינטגרציית Google Calendar עדיין לא הוגדרה בצד השרת.\n" +
+            "צרי קשר עם המפתחת.",
+        ),
+      );
+      console.warn(`[Bot] /connect_calendar config missing: ${err.message}`);
+      return;
+    }
+    await ctx.reply(
+      rtlLine(
+        "📅 לחיבור Google Calendar — לחצי על הכפתור הבא, אשרי בחלון של Google, " +
+          "ותחזרי לכאן בסיום.",
+      ),
+      {
+        reply_markup: {
+          inline_keyboard: [[{ text: "🔗 התחברות ל‑Google", url }]],
+        },
+      },
+    );
+  } catch (err) {
+    console.error("[Bot] /connect_calendar error:", err.message);
+    await ctx.reply("⚠️ שגיאה בהפעלת ההתחברות. אפשר לנסות שוב.");
+  }
+});
+
+// /newsletter_now — admin-only manual trigger. Generates + delivers
+// the digest to the caller immediately, bypassing the schedule. Used
+// for testing copy + content quality without waiting for Thursday.
+bot.command("newsletter_now", async (ctx) => {
+  if (!ADMIN_CHAT_ID || String(ctx.from.id) !== String(ADMIN_CHAT_ID)) {
+    return; // silent for non-admins
+  }
+  try {
+    const { deliverOne } = require("../lib/newsletterScheduler");
+    await ctx.reply("🛠 מפעילה ניוזלטר עכשיו...");
+    await deliverOne(bot, ctx.from.id);
+    await ctx.reply("✅ נשלח. ה‑last_sent_at עודכן בהתאם.");
+  } catch (err) {
+    console.error("[Bot] /newsletter_now error:", err.message);
+    await ctx.reply(`⚠️ שגיאה: ${err.message}`);
+  }
 });
 
 // Hidden admin-only command for inspecting an execution trace.
@@ -2226,6 +4890,40 @@ bot.on("text", async (ctx) => {
       // reply so the card update animation comes first.
       await renderSavePreviewView(ctx, PSE_VIEWS.MAIN);
       try { await ctx.reply(ack); } catch {}
+      return;
+    }
+
+    // ONBOARDING — when the user tapped "✏️ אחר..." on the location
+    // step, the next text message is parsed as a number of minutes.
+    // Handled BEFORE the agent path so it doesn't get interpreted as
+    // a search query.
+    const onbState = sessionStore.getOnboarding(telegramId);
+    if (onbState && onbState.step === "location_other") {
+      const m = message.match(/(\d+)/); // first integer, anywhere
+      const minutes = m ? parseInt(m[1], 10) : NaN;
+      if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 240) {
+        // Reject implausible input and re-ask. Cap at 240 (=4h walk)
+        // because anything larger probably means the user wanted to
+        // type a category name, not a number.
+        await ctx.reply(
+          "לא הצלחתי לפענח. כתבי מספר בלבד — לדוגמה 20 (= עד 20 דקות הליכה).",
+        );
+        tracing.setOutput(traceId, "[onboarding_other_reject]");
+        return;
+      }
+      onbState.location = {
+        id: "other",
+        label: `${minutes} דקות הליכה`,
+        max_walking_minutes: minutes,
+        preference: `מותאם — עד ${minutes} דק׳ הליכה`,
+      };
+      sessionStore.updateOnboarding(telegramId, { location: onbState.location });
+      await persistOnboardingState(telegramId, onbState, { touchLocation: true });
+      sessionStore.updateOnboarding(telegramId, { step: "summary" });
+      const refreshed = sessionStore.getOnboarding(telegramId);
+      await renderOnboardingStep(ctx, refreshed);
+      tracing.addStep(traceId, "onboarding_other_accepted");
+      tracing.setOutput(traceId, "[onboarding_other_accepted]");
       return;
     }
 
@@ -3278,26 +5976,79 @@ function buildNeededKeyboard(eventId) {
   };
 }
 
+// nav:<lat>,<lng>  — per-app navigation picker. The "🧭 ניווט"
+// button on every event card is a CALLBACK (not a URL) so we can
+// open a follow-up message with three deep-link buttons (Waze /
+// Google Maps / Apple Maps) and let the user pick the app they
+// actually use. Telegram URL buttons require http(s), so we can't
+// just emit a geo: intent — but offering all three deep links
+// effectively gives the user the same "open with" choice.
+//
+// Coords are encoded directly in callback_data (no server-side
+// cache) so the picker keeps working across bot restarts and for
+// arbitrarily old cards in chat history. The regex requires both
+// coords; the URL-button fallback path (events without coords)
+// never reaches this handler.
+bot.action(/^nav:(-?\d+\.\d+),(-?\d+\.\d+)$/, async (ctx) => {
+  try {
+    const lat = ctx.match[1];
+    const lng = ctx.match[2];
+    await safeAck(ctx);
+    const links = buildNavPickerLinks(lat, lng);
+    // We use ctx.reply (a new message) rather than editing the
+    // tapped card's reply_markup — editing would obliterate the
+    // other buttons on the card (פרטים / לא מתאים / שמרי על
+    // מעקב). Sending as a follow-up message keeps the original
+    // card intact, which matters because the user often wants
+    // to come back to it after navigating.
+    await ctx.reply("איך לפתוח את הניווט?", {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🚗 Waze", url: links.waze },
+            { text: "🗺 Google Maps", url: links.gmaps },
+            { text: "🍎 Apple Maps", url: links.apple },
+          ],
+        ],
+      },
+    });
+  } catch (err) {
+    console.error("[Bot] nav action error:", err.stack || err.message);
+    try { await safeAck(ctx, "⚠️"); } catch {}
+  }
+});
+
 bot.action(/^wt:(\d+)(?::(\d+))?$/, async (ctx) => {
   const eventId = ctx.match[1];
   const presetNeeded = ctx.match[2] ? parseInt(ctx.match[2], 10) : null;
+  // Ack the callback FIRST — addWatcher can hit Postgres latency
+  // beyond the ~15s Telegram callback-query TTL, and once that
+  // window closes the answerCbQuery call below throws "query is
+  // too old". The user then sees a silent button with no toast,
+  // even though we DID add their watcher. Ack-first keeps the UI
+  // responsive (toast appears within ~50ms) regardless of how long
+  // the actual side-effect takes.
+  await safeAck(ctx, "🔔 רושמת...");
+  console.log(
+    `[Bot] wt: user=${ctx.from?.id} event=${eventId} preset=${presetNeeded ?? "—"}`,
+  );
   try {
     if (presetNeeded && presetNeeded > 0) {
       await addWatcher(ctx.from.id, eventId, { ticketsNeeded: presetNeeded });
-      await ctx.answerCbQuery(`🔔 במעקב — ${presetNeeded} כרטיסים`);
       await ctx.editMessageReplyMarkup({
         inline_keyboard: [[{ text: "🔕 בטל מעקב", callback_data: `unw:${eventId}` }]],
       });
       return;
     }
     await addWatcher(ctx.from.id, eventId);
-    await ctx.answerCbQuery("🔔 נוספת לרשימת המעקב!");
     await replyAsCallbackResult(ctx, "🎫 כמה כרטיסים את צריכה לאירוע הזה?", {
       reply_markup: buildNeededKeyboard(eventId),
     });
   } catch (err) {
-    console.error("[Bot] wt error:", err.message);
-    await ctx.answerCbQuery("⚠️ שגיאה");
+    console.error(`[Bot] wt error (event=${eventId}):`, err.stack || err.message);
+    // Best-effort follow-up since the initial ack already showed
+    // "🔔 רושמת..." — without this the user thinks it worked.
+    await ctx.reply("⚠️ לא הצלחתי להוסיף למעקב — נסי שוב בעוד רגע").catch(() => {});
   }
 });
 
@@ -3355,13 +6106,14 @@ bot.action(/^bg:(\d+):(\d+)$/, async (ctx) => {
     const supabase = require("../lib/supabase");
     const { data: row } = await supabase
       .from("events")
-      .select("source, external_slug")
+      .select("source, external_slug, external_url")
       .eq("id", eventId)
       .maybeSingle();
     const linkEvent = {
       id: eventId,
       source: row?.source,
       external_slug: row?.external_slug || null,
+      external_url: row?.external_url || null,
     };
 
     await ctx.answerCbQuery(`✅ עודכן — חסרים עוד ${remaining}`);
@@ -3412,7 +6164,7 @@ async function rebuildSeriesPayloadFromDb(seriesId) {
   const { data: rep, error: repErr } = await supabase
     .from("events")
     .select(
-      "id, source, external_slug, name, location_key, min_months, max_months, " +
+      "id, source, external_slug, external_url, name, location_key, min_months, max_months, " +
         "locations:location_key(raw_address, lat, lng, found)"
     )
     .eq("id", seriesId)
@@ -3433,13 +6185,13 @@ async function rebuildSeriesPayloadFromDb(seriesId) {
   const { data: rows, error: occErr } = await supabase
     .from("events")
     .select(
-      "id, source, external_slug, name, date, start_time, end_time, " +
-        "tickets_left, location_key, min_months, max_months, " +
+      "id, source, external_slug, external_url, name, date, start_time, end_time, " +
+        "tickets_left, description, location_key, min_months, max_months, " +
         // Per-occurrence venue join. lat/lng/found feed `venueIdentity`
         // so two rows that resolved the same physical place from
         // different `raw_address` strings still collapse into one
         // bucket — without this the seq handler would say "מתקיים
-        // במספר מיקומים" for what is actually one venue (event 3489).
+        // במופע" for what is actually one venue (event 3489).
         "locations:location_key(raw_address, lat, lng, found)"
     )
     .eq("name", rep.name)
@@ -3463,10 +6215,18 @@ async function rebuildSeriesPayloadFromDb(seriesId) {
       id: r.id,
       source: r.source,
       external_slug: r.external_slug ?? null,
+      external_url: r.external_url ?? null,
       date: r.date,
       start_time: r.start_time,
       end_time: r.end_time,
       tickets_left: r.tickets_left,
+      // Per-occurrence prose blurb (sql/053). Populated only for city
+      // children whose external_url is NULL (the only case where the
+      // local description is the user's sole info source). Surfaced
+      // by the seq: handler below as a third line per row so that two
+      // rows with identical title/time/venue (umbrella siblings under
+      // the same name) still differ visibly in the listing.
+      description: r.description ?? null,
       location_key: r.location_key ?? null,
       location: r.locations?.raw_address || null,
       // Flat lat/lng so `venueIdentity` below (which probes both
@@ -3557,34 +6317,70 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
     // rendering the original way.
     const multiVenue = Boolean(payload.multiVenue);
 
-    const lines = [`📋 כל המופעים — ${payload.name}`];
+    // Resolve every occurrence's booking URL once. Two reasons:
+    //   1. Per-row rendering needs the URL anyway (current behaviour).
+    //   2. We want to detect the "all rows land on the same page"
+    //      case — typical for city umbrella siblings where every
+    //      child has external_url=NULL and resolves to the parent
+    //      slug page. In that case repeating the link on every row
+    //      makes a list of distinct children LOOK like duplicates
+    //      (the original May-2026 user complaint). We collapse the
+    //      link to a single anchor in the header instead.
+    const occsWithUrl = payload.occurrences.map((occ) => ({
+      occ,
+      url: getBookingUrl(occ),
+    }));
+    const uniqueUrls = new Set(occsWithUrl.map((x) => x.url));
+    const sharedUrl = uniqueUrls.size === 1 ? [...uniqueUrls][0] : null;
+
+    const nameEsc = escHtml(payload.name);
+    const lines = [
+      sharedUrl
+        ? `📋 כל המופעים — <a href="${sharedUrl}">${nameEsc}</a>`
+        : `📋 כל המופעים — ${nameEsc}`,
+    ];
     if (!multiVenue && payload.location) lines.push(`📍 ${payload.location}`);
     lines.push("");
 
-    for (const occ of payload.occurrences) {
+    for (const { occ, url } of occsWithUrl) {
       const dateStr = occ.date ? formatHebrewDate(occ.date) : "";
       const timeStr = formatTimeRange(occ.start_time, occ.end_time);
+      // Compact per-occurrence ticket marker. The full
+      // "🎫 N כרטיסים אחרונים ❗️" line doesn't fit on a one-line
+      // occurrence row, so low-stock collapses to a trailing ❗️
+      // glyph after the count — matches the May-2026 single-line
+      // urgency style without breaking the dense layout.
+      const lowStock =
+        occ.tickets_left != null && occ.tickets_left > 0 && occ.tickets_left <= 10;
       const ticketsStr =
         occ.tickets_left === 0
           ? "🚫 אזל"
           : occ.tickets_left != null
-          ? `🎫 ${occ.tickets_left}`
+          ? `🎫 ${occ.tickets_left}${lowStock ? " ❗️" : ""}`
           : "";
-      // Each occurrence gets its own Smarticket detail link via inline
-      // markdown. Telegram renders "📅 שני 4.5 — 09:00" as a clickable
-      // text link. Falling back to plain text if URL lib breaks is
-      // overkill here — the link format is well-tested.
-      const url = getBookingUrl(occ);
       const meta = [dateStr, timeStr].filter(Boolean).join(" — ");
       const trailing = ticketsStr ? `  ${ticketsStr}` : "";
-      // When the series spans venues, every line carries its own
-      // venue so the user can pick by location. Two lines per
-      // occurrence reads cleanly enough at the typical N=2-8 series
-      // size — and it's the actionable piece they're looking for
-      // ("which one is near me?").
-      lines.push(`• <a href="${url}">${meta}</a>${trailing}`);
+      // Per-row link suppressed when the header already carries the
+      // shared anchor; otherwise the date+time is hyperlinked as
+      // before (one-tap booking for each Smarticket occurrence).
+      const metaEsc = escHtml(meta);
+      const bullet = sharedUrl
+        ? `• ${metaEsc}`
+        : `• <a href="${url}">${metaEsc}</a>`;
+      lines.push(`${bullet}${trailing}`);
       if (multiVenue && occ.location) {
         lines.push(`   📍 ${occ.location}`);
+      }
+      // Per-occurrence description (only the DB-rebuild path populates
+      // this; the in-memory cached payload from rememberShownSeries
+      // lacks the field and silently skips). Same compact treatment
+      // as the umb: handler — normalise whitespace, cap at 220 chars,
+      // tap-through for the rest.
+      if (typeof occ.description === "string" && occ.description.trim()) {
+        const desc = occ.description.replace(/\s+/g, " ").trim();
+        const capped =
+          desc.length > 220 ? desc.slice(0, 220).trimEnd() + "…" : desc;
+        lines.push(`   ${escHtml(capped)}`);
       }
     }
 
@@ -3616,6 +6412,274 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
     console.error("[Bot] seq error:", err.message);
     // Best-effort error toast. Use safeAck so we don't loop on a
     // stale ack failure inside the catch.
+    try { await safeAck(ctx, "⚠️ שגיאה"); } catch {}
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Umbrella expansion — "📋 כל אירועי <umbrella>" button
+// ──────────────────────────────────────────────────────────────────────────
+//
+// Companion to the `seq:` handler above, with a different grouping
+// concept: instead of "all dates of the same recurring event", this
+// shows "all sibling events in the umbrella programme". Triggered by
+// the umb:<slug> callback that the card keyboard renders when
+// `event.umbrella_slug` is populated (sql/054).
+//
+// Why a separate handler from seq:
+//   - seq groups by series fingerprint (name + age range), excluding
+//     location_key. Two rows with the same name = one series.
+//   - umb groups by umbrella_slug, regardless of name. The Shavuot
+//     umbrella has 27 children with 27 different names — seq would
+//     give each its own card, umb collapses them under one heading.
+//
+// Lookup goes straight to Postgres (no session cache): the umbrella
+// relationship is small enough to query on demand (typically 5-30
+// rows per umbrella), and rebuilding from a synthetic-slug child is
+// awkward anyway since the parent row was deleted at scrape time.
+bot.action(/^umb:(.+)$/, async (ctx) => {
+  const slug = ctx.match[1];
+  try {
+    const today = DateTime.now().setZone("Asia/Jerusalem").toISODate();
+    const supabase = require("../lib/supabase");
+    const labelStore = require("../lib/labelStore");
+    // The user explicitly opted for "all events in the umbrella, not
+    // just this week" — past-date filter only, no future cap. Each
+    // sibling renders as a multi-line "mini-card" (May-2026 user
+    // request: same shape as a regular event card, sans buttons).
+    // Pulled fields are everything that feeds the card body — title,
+    // date/time, venue + coords for the nav hyperlink, tickets,
+    // tag_ids for the tag line, and description. After sql/056 the
+    // child's own title lives in `name` (with `umbrella_title`
+    // carrying the parent), so no extra column is needed for the
+    // per-row title.
+    const { data: rows, error } = await supabase
+      .from("events")
+      .select(
+        "id, source, external_slug, external_url, umbrella_title, name, date, start_time, end_time, tickets_left, description, tag_ids, location_key, locations:location_key(raw_address, lat, lng)",
+      )
+      .eq("umbrella_slug", slug)
+      .eq("archived", false)
+      .gte("date", today)
+      .order("date", { ascending: true })
+      .order("start_time", { ascending: true });
+    if (error) {
+      console.error(`[Bot] umb fetch failed for slug=${slug}: ${error.message}`);
+      await safeAck(ctx, "⚠️ שגיאה בטעינה", { show_alert: true });
+      return;
+    }
+    if (!rows || rows.length === 0) {
+      // Either the umbrella was archived in full, or this is an old
+      // child whose siblings are all in the past. Honest empty-state
+      // beats a confusing "loading" toast that never resolves.
+      await safeAck(ctx, "אין כרגע אירועים פעילים בקטגוריה הזו 🙏", {
+        show_alert: true,
+      });
+      return;
+    }
+    await safeAck(ctx, "📋 שלחתי לך את כל האירועים למטה ⬇️");
+
+    // Header line uses the umbrella_title from the FIRST row (every
+    // sibling has the same value, so any row works; first is just
+    // deterministic). Falling back to the raw slug if titles are
+    // missing keeps the header non-empty.
+    const umbrellaTitle = rows[0]?.umbrella_title || slug;
+
+    // Expand tag_ids → tag names across the whole batch in one round
+    // trip. The mini-card render below reads `event.tags` (names)
+    // exactly like the event-card renderer does — formatTagLine and
+    // getEventIcon both operate on names.
+    const allTagIds = new Set();
+    for (const r of rows) for (const id of r.tag_ids || []) allTagIds.add(id);
+    const tagDict = await labelStore.fetchLabelDict([...allTagIds]);
+
+    // Resolve every sibling's booking URL once up-front. We need the
+    // result both for per-row rendering AND to decide whether to
+    // collapse the (otherwise repeated) link into a single header
+    // anchor. Same routing logic the card keyboard uses (external_url
+    // wins, else city slug page, else smarticket).
+    const occsWithUrl = rows.map((occ) => ({
+      occ,
+      url: getBookingUrl({
+        source: occ.source,
+        external_slug: occ.external_slug,
+        external_url: occ.external_url,
+      }),
+    }));
+    // "Shared URL" case: when every sibling lands on the same page
+    // (the umbrella's parent slug page, typical when none of the
+    // children have an external_url), the booking link appears
+    // ONCE at the top — not repeated on every row, which previously
+    // made the list look like duplicates. When some children have
+    // their own registration provider (paykal / bina / ...) the URLs
+    // diverge and per-row title hyperlinks come back.
+    const uniqueUrls = new Set(occsWithUrl.map((x) => x.url));
+    const sharedUrl = uniqueUrls.size === 1 ? [...uniqueUrls][0] : null;
+
+    const umbrellaTitleEsc = escHtml(umbrellaTitle);
+    const lines = [];
+    if (sharedUrl) {
+      lines.push(
+        `📋 כל אירועי <a href="${sharedUrl}">${umbrellaTitleEsc}</a>`,
+      );
+    } else {
+      lines.push(`📋 כל אירועי ${umbrellaTitleEsc}`);
+    }
+    lines.push("");
+
+    // Per-row title resolution. After sql/056 the child's
+    // distinguishing title is `name` itself; the only case where we
+    // fall back to the umbrella title is the active-garden pattern,
+    // where every child echoes the parent and `name === umbrella`.
+    function resolveChildTitle(occ) {
+      const n = (occ.name || "").trim();
+      if (!n || n === umbrellaTitle) return "";
+      return n;
+    }
+
+    for (let i = 0; i < occsWithUrl.length; i++) {
+      const { occ, url: occUrl } = occsWithUrl[i];
+      // Visual separator BETWEEN events. Blank line — no bullets, no
+      // horizontal rules. Skipping for the first event preserves the
+      // 1-line gap after the umbrella header.
+      if (i > 0) lines.push("");
+
+      // ── Title line ──────────────────────────────────────────────
+      // Icon picked from the same TOPIC_RULES the regular card uses;
+      // it reads tags + name, so we feed it the expanded shape.
+      const tagsForRow = (occ.tag_ids || [])
+        .map((id) => tagDict.get(id)?.name)
+        .filter(Boolean);
+      const iconEventShape = { name: occ.name, tags: tagsForRow };
+      const icon = getEventIcon(iconEventShape);
+      const childTitle = resolveChildTitle(occ);
+      const titleText = childTitle || umbrellaTitle;
+      const titleEsc = escHtml(titleText);
+      // Title is hyperlinked to the per-row booking URL only when
+      // the umbrella's URLs diverge across siblings. With sharedUrl
+      // the header already carries the one link to the umbrella
+      // page, so per-row anchors would just repeat it.
+      lines.push(
+        sharedUrl
+          ? `${icon} <b>${titleEsc}</b>`
+          : `${icon} <b><a href="${occUrl}">${titleEsc}</a></b>`,
+      );
+
+      // ── Date ──
+      if (occ.date) {
+        lines.push(`📅 ${escHtml(formatHebrewDate(occ.date))}`);
+      }
+      // ── Time ──
+      const timeStr = formatTimeRange(occ.start_time, occ.end_time);
+      if (timeStr) {
+        lines.push(`🕐 ${escHtml(timeStr)}`);
+      }
+      // ── Location (hyperlinked to navigation) ──
+      // Coords win when present (Google Maps `?q=lat,lng` resolves
+      // to the exact pin and lets the user pick Waze / Apple Maps /
+      // Google Maps via the OS picker once they tap it). Without
+      // coords we fall back to a maps text search of the address —
+      // less precise but still routes correctly for well-known
+      // street addresses.
+      const venue = occ.locations?.raw_address || "";
+      if (venue) {
+        const lat = occ.locations?.lat;
+        const lng = occ.locations?.lng;
+        const navUrl =
+          lat != null && lng != null
+            ? `https://www.google.com/maps?q=${lat},${lng}`
+            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue)}`;
+        lines.push(`📍 <a href="${escHtml(navUrl)}">${escHtml(venue)}</a>`);
+      }
+      // ── Tickets ──
+      // Same formatter the event card uses — emits "🎫 N כרטיסים"
+      // / "🎫 N כרטיסים אחרונים ❗️" / "🚫 אזלו הכרטיסים" / null
+      // (free events). The null path silently skips the line.
+      const ticketsLine =
+        occ.tickets_left === 0
+          ? "🚫 אזלו הכרטיסים"
+          : formatTicketsLine(occ.tickets_left);
+      if (ticketsLine) lines.push(escHtml(ticketsLine));
+      // ── Description ──
+      // Per-child blurb (sql/053). Gets its own 📝 prefix so the
+      // line slots into the labeled-facet grid (📅/🕐/📍/🎫/📝/🏷️)
+      // instead of looking like a stray paragraph. Normalised
+      // whitespace + soft cap so a verbose umbrella doesn't blow
+      // past Telegram's 4096-char message limit. The cap is
+      // per-event; the chunking guarantee below handles totals.
+      if (typeof occ.description === "string" && occ.description.trim()) {
+        const desc = occ.description.replace(/\s+/g, " ").trim();
+        const capped =
+          desc.length > 280 ? desc.slice(0, 280).trimEnd() + "…" : desc;
+        lines.push(`📝 ${escHtml(capped)}`);
+      }
+      // ── Tags ── (ALWAYS last line — May-2026 user request).
+      // The 🏷️ row is the visual "footer" that summarises the
+      // topic at a glance, so it must sit below the description.
+      if (tagsForRow.length) {
+        const tagLine = formatTagLine(tagsForRow, {
+          highlight: [],
+          searchHits: [],
+        });
+        if (tagLine) lines.push(escHtml(tagLine));
+      }
+    }
+
+    // Telegram caps single-message bodies at 4096 chars. For umbrellas
+    // with ~10 children the rendered body sits at ~2-3KB, but a 20-
+    // child Shavuot blob crosses the limit. Chunk on event-block
+    // boundaries (any blank line preceded by the umbrella header or
+    // an event title — i.e. between events) so we never split a
+    // single event across messages.
+    const bodyText = lines.map(rtlLine).join("\n");
+    const MAX_CHUNK = 3800;
+    let chunks;
+    if (bodyText.length <= MAX_CHUNK) {
+      chunks = [bodyText];
+    } else {
+      // Walk the lines array re-applying rtlLine at chunk boundaries;
+      // we already produced an RTL-anchored bodyText so splitting
+      // here uses the SAME RLM-prefixed lines.
+      const rtlLines = lines.map(rtlLine);
+      chunks = [];
+      let current = "";
+      for (let li = 0; li < rtlLines.length; li++) {
+        const ln = rtlLines[li];
+        const candidate = current ? `${current}\n${ln}` : ln;
+        if (candidate.length > MAX_CHUNK && current) {
+          chunks.push(current);
+          current = ln;
+        } else {
+          current = candidate;
+        }
+      }
+      if (current) chunks.push(current);
+    }
+
+    // First chunk replies to the card the user tapped; follow-up
+    // chunks are plain sendMessage so they queue up beneath, without
+    // re-quoting the card.
+    let firstSent = false;
+    for (const chunk of chunks) {
+      if (!firstSent) {
+        await replyAsCallbackResult(ctx, chunk, {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+        });
+        firstSent = true;
+      } else {
+        await ctx.telegram.sendMessage(ctx.chat.id, chunk, {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+        });
+      }
+    }
+  } catch (err) {
+    if (isStaleCallbackQuery(err)) {
+      console.warn(`[Bot] umb stale ack (user ${ctx.from?.id || "?"}): ${err.message}`);
+      return;
+    }
+    console.error("[Bot] umb error:", err.stack || err.message);
     try { await safeAck(ctx, "⚠️ שגיאה"); } catch {}
   }
 });
@@ -3684,6 +6748,7 @@ bot.action(/^pgn:next$/, async (ctx) => {
               id: o.id,
               source: o.source,
               external_slug: o.external_slug ?? null,
+              external_url: o.external_url ?? null,
               date: o.date,
               start_time: o.start_time,
               end_time: o.end_time,
@@ -3848,7 +6913,20 @@ bot.action(/^sa:(.+)$/, async (ctx) => {
 // the user sees in subsequent searches. This is on purpose: someone
 // flagging "too far" tells us about THEIR proximity preference, not about
 // the event itself, and we already have explicit proximity filters.
-const REASON_KEYS = ["wrong_audience", "too_far", "wrong_time", "not_interested", "already_seen", "other"];
+// Order matters — this is the picker's vertical layout.
+// `already_known` sits ABOVE `already_seen` because it's the more
+// impactful click (suppresses an entire recurring series) and the
+// most-frequent reason a user wants to silence the משחקיית רגעים-
+// style "I know about this, stop reminding me" pattern.
+const REASON_KEYS = [
+  "already_known",
+  "wrong_audience",
+  "too_far",
+  "wrong_time",
+  "not_interested",
+  "already_seen",
+  "other",
+];
 
 bot.action(/^fb:reasons:(\d+)$/, async (ctx) => {
   const eventId = ctx.match[1];
@@ -3857,11 +6935,26 @@ bot.action(/^fb:reasons:(\d+)$/, async (ctx) => {
   // run. We still want to render the reasons keyboard — the ack is
   // cosmetic, the keyboard is the feature.
   await safeAck(ctx);
-  const rows = REASON_KEYS.map((k) => [
-    Markup.button.callback(REASON_LABELS[k], `fb:save:${eventId}:${k}`),
-  ]);
-  rows.push([Markup.button.callback("↩️ חזרה", `fb:cancel:${eventId}`)]);
-  await replyAsCallbackResult(ctx, "מה הסיבה? (זה עוזר לי ללמוד)", Markup.inlineKeyboard(rows));
+  console.log(`[Bot] fb:reasons: user=${ctx.from?.id} event=${eventId}`);
+  try {
+    const rows = REASON_KEYS.map((k) => [
+      Markup.button.callback(REASON_LABELS[k], `fb:save:${eventId}:${k}`),
+    ]);
+    rows.push([Markup.button.callback("↩️ חזרה", `fb:cancel:${eventId}`)]);
+    await replyAsCallbackResult(
+      ctx,
+      "מה הסיבה? (זה עוזר לי ללמוד)",
+      Markup.inlineKeyboard(rows),
+    );
+  } catch (err) {
+    // Without this catch the error bubbles to bot.catch and the
+    // user sees… nothing. We'd rather log the cause AND fall back
+    // to a plain reply (no keyboard) so the click registers
+    // visibly even when something exotic breaks the keyboard
+    // render path.
+    console.error(`[Bot] fb:reasons error (event=${eventId}):`, err.stack || err.message);
+    await ctx.reply("⚠️ אופס — נסי שוב בעוד רגע").catch(() => {});
+  }
 });
 
 bot.action(/^fb:cancel:(\d+)$/, async (ctx) => {
@@ -3905,6 +6998,25 @@ bot.action(/^fb:save:(\d+):([a-z_]+)$/, async (ctx) => {
     await ctx.answerCbQuery("⚠️ לא הצלחתי לשמור");
     return;
   }
+
+  // `already_known` is the SERIES-level suppressor. The feedback
+  // row above stops this specific event from re-surfacing, but
+  // recurring events (משחקיית רגעים every Shabbat is the canonical
+  // example) get new event_ids per occurrence — so per-event dedup
+  // alone wouldn't silence the series. We extract the series
+  // identity (name + location_key) and append it to
+  // profile.user_context.known_series; newsletterService filters
+  // against that list on every send.
+  if (reason === "already_known") {
+    try {
+      await rememberKnownSeries(ctx.from.id, eventId);
+    } catch (err) {
+      // Non-fatal — the user got the toast, and per-event dedup
+      // still suppresses THIS specific row. Log for ops insight.
+      console.warn(`[Bot] rememberKnownSeries failed: ${err.message}`);
+    }
+  }
+
   const ack = ACK_LABELS[reason] || "✅ תודה";
   await ctx.answerCbQuery(ack);
   // Best-effort UI cleanup. If the edit fails we already toasted the
@@ -4195,8 +7307,50 @@ runCleanup()
   })
   .catch((err) => console.warn("[Bot] Boot cleanup warning:", err.message))
   .finally(() => {
-    bot.launch()
-      .then(() => console.log("[Bot] Running"))
+    // Telegraf 4.x quirk: for long-polling, bot.launch() returns a
+    // promise that resolves only when the polling loop STOPS (i.e.
+    // on bot.stop()). The old code did `bot.launch().then(...)` and
+    // therefore never ran the side-services — the newsletter
+    // scheduler and OAuth server stayed unstarted for the bot's
+    // entire lifetime, which surfaced as "renderer_unavailable"
+    // from /newsletter_preview.
+    //
+    // Fix: use the second-arg `onLaunch` callback that telegraf
+    // fires AFTER getMe() succeeds but BEFORE the polling loop
+    // starts. We start the side-services from there, and only
+    // `.catch()` on the outer promise so launch failures still
+    // crash visibly.
+    bot
+      .launch({}, () => {
+        console.log("[Bot] Running");
+        try {
+          const newsletterScheduler = require("../lib/newsletterScheduler");
+          newsletterScheduler.start({
+            bot,
+            renderUserDigest: renderNewsletterDigest,
+          });
+        } catch (err) {
+          console.error("[Bot] Newsletter scheduler failed to start:", err.message);
+        }
+        // OAuth callback server — only starts when Google credentials
+        // are configured. On Railway the worker service type already
+        // exposes $PORT; locally we default to 3000 inside the server.
+        // The bot polls Telegram regardless; the server just adds the
+        // single `/oauth/google/callback` route for the Calendar flow.
+        if (process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_REDIRECT_URI) {
+          try {
+            const oauthServer = require("../lib/oauthServer");
+            oauthServer.start({ bot });
+          } catch (err) {
+            console.error("[Bot] OAuth server failed to start:", err.message);
+          }
+        } else {
+          console.log(
+            "[Bot] Google OAuth not configured — /connect_calendar disabled. " +
+              "Set GOOGLE_OAUTH_CLIENT_ID + _REDIRECT_URI + _CLIENT_SECRET to enable.",
+          );
+        }
+      })
       .catch((err) => {
         console.error("[Bot] Failed to start:", err.message);
         process.exit(1);

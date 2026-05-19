@@ -8,6 +8,7 @@ const { ensureLocationKey, resolvePending } = require("../lib/locationResolver")
 const { formatHebrewDate, formatTimeRange, rtlLine } = require("../lib/eventFormat");
 const { normalizeImageUrl } = require("../lib/imageUrl");
 const { TENANTS, getBookingUrl } = require("../lib/sourceUrls");
+const { classifyAccessForEvent } = require("../lib/access");
 const sentry = require("../lib/sentry");
 // Idempotent — early-returns if already initialized by the parent
 // process (the bot). Lets `npm run check` standalone also report.
@@ -480,6 +481,26 @@ async function upsertEvents(events) {
       last_updated: now,
     };
 
+    // Community-access classification (title-driven). Only emit a
+    // value when the classifier has a POSITIVE signal — null means
+    // "I have no opinion, don't touch the column". This preserves:
+    //   * Manual classifications set via the SQL console.
+    //   * Prior cycle's positive classification when the title was
+    //     temporarily edited / shortened (Smarticket titles do drift
+    //     and we don't want a brief edit to clear `community-miluim`).
+    // First-insert still gets the right value because the row is
+    // brand-new, the DB default 'open' kicks in, and the classifier's
+    // hit (when there is one) overrides it on the same upsert.
+    //
+    // We classify off the title only here (description isn't part of
+    // the calendar JSON we just fetched; the enricher pulls it from
+    // detail pages separately). For miluim/pride/disabilities events
+    // the title carries the signal consistently across both Smarticket
+    // tenants — verified against the 4 known reservist events on
+    // ramat-gan.smarticket.co.il in the 2026-05 cycle.
+    const access = classifyAccessForEvent({ name: e.name });
+    if (access) row.access = access;
+
     // Preserve the venue FK on existing events. The text itself lives on
     // locations.raw_address — we never write venue text to events anymore.
     if (e._location_key) {
@@ -549,8 +570,32 @@ async function upsertEvents(events) {
     (existing || []).map((r) => [r.id, r.tickets_left]),
   );
 
+  // `defaultToNull: false` is REQUIRED here. With the default
+  // (`true`), supabase-js unions every key seen across all rows in
+  // the batch and explicitly sends NULL for any key a row omitted.
+  // That breaks the `access` column specifically:
+  //   * `events.access` is `access_t NOT NULL DEFAULT 'open'`
+  //     (sql/039).
+  //   * We deliberately OMIT `access` from rows where the title-
+  //     classifier had no positive signal — the goal is "let the DB
+  //     default kick in on INSERT, preserve the existing value on
+  //     UPDATE" (see the rationale on line 484 above).
+  //   * Once ANY row in the batch carries a community-* value
+  //     (e.g. a 'community-miluim' miluim party), the batch
+  //     suddenly serialises EVERY OTHER row's missing access as
+  //     `NULL`, the DB rejects it with `null value in column
+  //     "access" of relation "events" violates not-null
+  //     constraint`, and the whole scrape cycle fails.
+  // `defaultToNull: false` switches the serialiser to omit missing
+  // columns — INSERT gets the DB default, UPDATE keeps the prior
+  // value, exactly what the comment further up promises.
+  //
+  // Same pattern protects any FUTURE per-row optional column we
+  // add (image, min_months, audience, …): omitting a column from a
+  // single row no longer leaks NULL across the batch.
   const { error } = await supabase.from("events").upsert(rows, {
     onConflict: "id",
+    defaultToNull: false,
   });
   if (error) throw new Error(`Supabase upsert failed: ${error.message}`);
 
@@ -626,6 +671,34 @@ async function check() {
     }
   }
 
+  // Low-stock urgency push — per May-2026 spec, fire immediately
+  // when an event crosses to ≤10 tickets (transition, not steady-
+  // state). Deduped per (event_id, telegram_id) via
+  // low_stock_notifications. Audience: per-event watchers + saved-
+  // search topic matches. Broader profile-interest matches fall to
+  // the weekly newsletter (lib/newsletterScheduler.js) instead, to
+  // keep these urgent alerts narrowly targeted.
+  if (bot) {
+    try {
+      const {
+        detectLowStockTransitions,
+        notifyLowStockMatchesFor,
+      } = require("../lib/lowStockNotifier");
+      const lowStock = detectLowStockTransitions(events, stored);
+      if (lowStock.length) {
+        console.log(`\nLow-stock transitions: ${lowStock.length} event(s)`);
+        const stats = await notifyLowStockMatchesFor(lowStock, bot.telegram);
+        if (stats.matched) {
+          console.log(
+            `[LowStock] ${stats.notified}/${stats.matched} push(es) sent.`,
+          );
+        }
+      }
+    } catch (err) {
+      console.error("[LowStock] notifier error:", err.message);
+    }
+  }
+
   const upserted = await upsertEvents(events);
   console.log(`Synced ${upserted} events to Supabase`);
 
@@ -663,23 +736,36 @@ async function check() {
     );
   }
 
-  // Saved-search notifier: fan out to anyone who saved a topic that matches
-  // any of these candidates. Runs AFTER upsert + locations resolve so the
-  // proximity / format filters have the freshest data to work with.
-  if (bot && (backInStock.length || newWithStock.length)) {
+  // Newsletter enqueue — May-2026 v2 spec replaced the weekly
+  // digest with an immediate-with-5-min-buffer model. After every
+  // scrape (Smarticket + city) completes, we ask the scheduler to
+  // pull newly-arrived events (events.first_seen_at within the
+  // lookback window) and enqueue each for any qualifying user.
+  // The scheduler's own 30s flush tick then delivers buffers whose
+  // 5-min window has elapsed.
+  //
+  // Low-stock pushes (above) bypass this — they fire IMMEDIATELY
+  // with no buffer wait, per the spec's "low-stock = priority"
+  // requirement.
+  if (bot) {
     try {
-      const { notifySavedSearchMatchesFor } = require("../lib/savedSearchNotifier");
-      const candidates = [...backInStock, ...newWithStock];
-      const stats = await notifySavedSearchMatchesFor(candidates, bot.telegram);
-      if (stats.matched) {
-        console.log(
-          `[SavedSearch] ${stats.notified}/${stats.matched} notifications sent across ${candidates.length} candidate event(s).`,
-        );
-      }
+      const scheduler = require("../lib/newsletterScheduler");
+      await scheduler.enqueueAfterScrape();
     } catch (err) {
-      console.error("[SavedSearch] notifier error:", err.message);
+      console.error("[Newsletter] enqueue error:", err.message);
     }
   }
+
+  // Saved-search LIVE push was REMOVED in the May-2026 newsletter
+  // redesign — saved-search topics now drive the buffered delivery
+  // above. The `saved_searches` rows themselves are still used by:
+  //   - lib/savedSearchNotifier.js#notifySavedSearchMatchesForTicket
+  //     (WhatsApp 2nd-hand ticket matches — different domain, kept live)
+  //   - lib/lowStockNotifier.js (low-stock urgency push — bypasses
+  //     the buffer for ≤10-ticket events)
+  // notifyWatchers (already invoked above) still fires live for
+  // per-EVENT subscriptions — those are explicit one-event opt-ins,
+  // not topic-level digests.
 
   return { synced: upserted, backInStock, newWithStock, cleanup };
 }

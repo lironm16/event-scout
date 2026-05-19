@@ -1,0 +1,63 @@
+-- Re-add `events.description` (reverses sql/043_drop_events_description.sql).
+--
+-- Context (what changed since the 043 drop):
+--   sql/043 dropped the column on the grounds that "no code path reads
+--   the description — Gemini consumes it just-in-time and we discard
+--   the text after." That was true for SINGLES (one row = one city
+--   slug; the enricher re-fetches the detail JSON whenever it needs
+--   the prose).
+--
+--   It broke quietly when the city-API ingest started fanning out
+--   UMBRELLA pages into per-child rows (e.g. shavuot-2026 → 27
+--   children, each with its own slug like
+--   `shavuot-2026__2026-05-18__1716__1700`). Child slugs are SYNTHETIC
+--   — they don't resolve to any real URL on the city CMS — so the
+--   enricher's `cityApi.fetchEventDetail(external_slug)` call can't
+--   reach them. The fallback path fetches the PARENT's slug, which
+--   gives the umbrella's overall description ("הצטרפו לאירועי שבועות
+--   ברחבי העיר!") instead of the child-specific text ("סדנת יצירה |
+--   דחליל קש | דוכני אוכל…"). The richer per-child blurb in
+--   `parent.cluster[].eventInfo` was never read.
+--
+--   The visible symptom: a Shavuot child event tagged ONLY with
+--   "שבועות 2026", missing tags like "יצירה" that are clearly
+--   present in its description. User report (May 2026).
+--
+-- Fix shape:
+--   1. Persist `events.description` at scrape time (this migration).
+--   2. Scraper writes:
+--        - singles → `detailJson.content.description`
+--        - children → `child.eventInfo` (per-child blurb)
+--   3. Enricher reads `row.description` first, only re-fetches the
+--      city detail JSON when the column is NULL (back-compat path
+--      for rows ingested before this change is deployed).
+--
+-- Storage note (narrower scope than sql/041):
+--   sql/041 persisted descriptions for EVERY city row; sql/043
+--   dropped them on "tens of KB of dead weight" grounds (the read
+--   side never materialised). This iteration takes a more surgical
+--   approach: store the description ONLY when there's no external
+--   registration URL.
+--
+--   The product reasoning: if an event has an external_url
+--   (smarticket / paykal / bina), the user's "פרטים" button takes
+--   them off-site where the real description lives — keeping our
+--   short city blurb on top of that is redundant. If an event has
+--   NO external_url, the small city blurb is the only info source
+--   the user gets in the bot, so we MUST persist it (both for
+--   surface display and for the enricher to read).
+--
+--   This narrower rule:
+--     - Singles WITH external_url     → description = NULL
+--     - Singles WITHOUT external_url  → description = city blurb
+--     - Children WITH external_url    → description = NULL
+--     - Children WITHOUT external_url → description = child eventInfo
+--
+--   Net effect on storage vs. sql/041 era: roughly half the rows
+--   carry text, and the rows that do are the ones the bot actually
+--   needs prose for.
+
+ALTER TABLE public.events
+  ADD COLUMN IF NOT EXISTS description TEXT;
+
+COMMENT ON COLUMN public.events.description IS 'Source prose description, persisted only when this event has no external_url (i.e. when the small city blurb is the only info source the user gets in the bot). Singles without external_url: copied from detailJson.content.description. Children without external_url: copied from parent.cluster[].eventInfo. Smarticket events and any rg-muni event with external_url leave this column NULL — the third-party registration page is the canonical description source for those.';

@@ -3,6 +3,19 @@ const { geocodeAddress } = require("../lib/geocoding");
 
 const VALID_GENDERS = new Set(["female", "male"]);
 
+// User's own life-stage / age tier. Used (alongside `kids[]`) by
+// `deriveDefaultAudienceSet` to decide WHICH audience tiers to show
+// by default. A 28-year-old parent maps to {kids:true, age_range:
+// 'young_adult'} → sees family/kids events AND young-adult-tagged
+// adults events; senior-leaning adults events are filtered. Without
+// this dimension a single binary "kids vs no kids" can't represent
+// a young parent who also wants their own age-tier content.
+//
+// Stored as a string under `user_context.age_range`. Optional —
+// when unset, audience derivation falls back to the legacy
+// kids-only logic for backward compatibility.
+const VALID_AGE_RANGES = new Set(["young_adult", "mid_adult", "senior"]);
+
 // `communities` is a sub-object of user_context that records the
 // user's community membership / non-membership, keyed by the same
 // `access_t` ENUM values that appear on `events.access` (sql/039).
@@ -44,6 +57,17 @@ function mergeCommunities(incoming, existing) {
 function normalizeGender(incoming, existing) {
   if (incoming && VALID_GENDERS.has(incoming)) return incoming;
   if (existing && VALID_GENDERS.has(existing)) return existing;
+  return null;
+}
+
+// Sticky age_range — same semantics as gender. The user picks it
+// during onboarding (after the gender step); once stored, only an
+// explicit re-pick changes it. Unrecognised incoming values fall
+// back to the existing stored value, and an existing-only invalid
+// value (legacy or corrupted) resolves to null.
+function normalizeAgeRange(incoming, existing) {
+  if (incoming && VALID_AGE_RANGES.has(incoming)) return incoming;
+  if (existing && VALID_AGE_RANGES.has(existing)) return existing;
   return null;
 }
 
@@ -97,8 +121,19 @@ async function saveProfile(telegramId, updatedProfile, existing = null) {
     }
   }
 
+  // Spread the existing user_context FIRST so any field this function
+  // doesn't explicitly manage (disliked_tags, disliked_venues,
+  // known_series, seen_toplabels, future flags…) survives the round-
+  // trip. The explicit assignments below override the managed fields.
   const user_context = {
+    ...(existing?.user_context && typeof existing.user_context === "object"
+      ? existing.user_context
+      : {}),
     gender: normalizeGender(updatedProfile.gender, existing?.user_context?.gender),
+    // User's own life-stage tier — separate from `kids[]`. A young
+    // parent gets both signals set, which is the whole point of the
+    // independent dimension. See `deriveDefaultAudienceSet`.
+    age_range: normalizeAgeRange(updatedProfile.age_range, existing?.user_context?.age_range),
     kids: updatedProfile.kids || [],
     // `partner` is a single OBJECT (not an array) — most households
     // have at most one. Preserve existing when the caller doesn't pass
@@ -138,6 +173,7 @@ function profileToBrainShape(profile) {
     return {
       first_name: null,
       gender: null,
+      age_range: null,
       kids: [],
       partner: null,
       constraints: null,
@@ -151,6 +187,7 @@ function profileToBrainShape(profile) {
   return {
     first_name: profile.first_name || null,
     gender: ctx.gender || null,
+    age_range: VALID_AGE_RANGES.has(ctx.age_range) ? ctx.age_range : null,
     kids: ctx.kids || [],
     partner: ctx.partner && typeof ctx.partner === "object" && ctx.partner.name
       ? {

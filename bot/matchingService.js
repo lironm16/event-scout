@@ -2,6 +2,7 @@ const { GoogleGenerativeAI, SchemaType } = require("@google/generative-ai");
 const { createClient } = require("@supabase/supabase-js");
 const { todayISO, todayHumanEN, isAdminEntry, isEventInPast, currentTimeHHMM } = require("../lib/timeContext");
 const { formatHebrewDate, formatTimeRange, getEventIcon, rtlLine } = require("../lib/eventFormat");
+const { formatTicketsLine } = require("../lib/eventCard");
 const labelStore = require("../lib/labelStore");
 const { normalizeImageUrl } = require("../lib/imageUrl");
 const { getBookingUrl } = require("../lib/sourceUrls");
@@ -176,6 +177,12 @@ const OPTIONAL_COLS = [
   // no-op — the matcher behaves exactly like before sql/039,
   // returning every event regardless of community scope.
   { col: "access",     migration: "sql/039_events_access.sql" },
+  // Per-event blurb (sql/053). Populated only for city singles +
+  // umbrella children without an external_url; absent on smarticket
+  // and on city events that route to a third-party registration page.
+  // The consolidated newsletter renderer reads this when present so
+  // a digest entry can carry a sentence of context.
+  { col: "description", migration: "sql/053_events_description.sql" },
 ];
 let _availableColsCache = null;
 
@@ -210,7 +217,7 @@ async function getAvailableExtraCols() {
 // without it, getBookingUrl throws ("requires event.external_slug") and
 // every render of a city event card fails.
 const BASE_COLS =
-  "id, source, external_slug, name, date, start_time, end_time, image, tickets_left, location_key";
+  "id, source, external_slug, external_url, umbrella_slug, umbrella_title, name, date, start_time, end_time, image, tickets_left, location_key";
 const LOCATION_JOIN =
   "locations:location_key(raw_address, lat, lng, found, kind)";
 
@@ -235,6 +242,21 @@ function flattenEvent(row) {
     // fall back to the mbe-rg default.
     source: row.source || null,
     external_slug: row.external_slug || null,
+    // City events with a third-party registration URL (sql/052)
+    // surface that URL in their "🔗 פרטים" button instead of the
+    // generic city slug page. NULL on Smarticket rows and on
+    // city rows without a captured registerLink.
+    external_url: row.external_url || null,
+    // Umbrella relationship (sql/054). When set, the card renders a
+    // "📋 כל אירועי <umbrella_title>" button INSTEAD of the regular
+    // "כל המופעים" series button — these children are siblings of an
+    // umbrella, not occurrences of the same recurring show.
+    umbrella_slug: row.umbrella_slug || null,
+    umbrella_title: row.umbrella_title || null,
+    // Per-event blurb (sql/053). Optional column — pass it through
+    // when populated so the consolidated newsletter and umb: handler
+    // can surface a one-line context tail without re-fetching.
+    description: row.description || null,
     name: row.name,
     date: row.date,
     start_time: row.start_time,
@@ -336,7 +358,7 @@ async function getAvailableEvents({ accessScopes = ["open"] } = {}) {
   if (error) throw new Error(`Events fetch failed: ${error.message}`);
   const flattened = (data || [])
     .map(flattenEvent)
-    .filter((e) => !isAdminEntry(e.name) && !isEventInPast(e.date, e.start_time));
+    .filter((e) => !isAdminEntry(e.name) && !isEventInPast(e.date, e.start_time, e.end_time));
   return await expandLabels(flattened);
 }
 
@@ -383,7 +405,7 @@ async function getAllEvents({
 
   const flattened = (data || []).map(flattenEvent).filter((e) => {
     if (isAdminEntry(e.name)) return false;
-    if (futureOnly && isEventInPast(e.date, e.start_time)) return false;
+    if (futureOnly && isEventInPast(e.date, e.start_time, e.end_time)) return false;
     return true;
   });
 
@@ -584,12 +606,11 @@ function buildMatchMessage(profile, match, event) {
   const timeStr = formatTimeRange(event.start_time, event.end_time);
   if (timeStr) lines.push(rtlLine(`🕐 ${timeStr}`));
   if (event.location) lines.push(`📍 ${event.location}`);
-  // Skip the tickets line for free/unmetered city events
-  // (tickets_left = NULL via sql/039). Showing "🎫 null כרטיסים זמינים"
-  // is worse than no signal at all for free events.
-  if (event.tickets_left != null) {
-    lines.push(`🎫 ${event.tickets_left} כרטיסים זמינים`);
-  }
+  // Shared ticket-line helper — handles free events (null → skip)
+  // AND surfaces the low-stock urgency ("🎫 N כרטיסים אחרונים ❗️")
+  // inline per the May-2026 single-line revamp.
+  const matchTicketsLine = formatTicketsLine(event.tickets_left);
+  if (matchTicketsLine) lines.push(matchTicketsLine);
   lines.push(`💡 ${match.reason}`);
   lines.push(``, getBookingUrl(event));
 

@@ -1,0 +1,46 @@
+-- Capture each umbrella-child's own title separately from the chained
+-- `name` field, so the bot can render a clean two-tier title — umbrella
+-- (primary) on the first line, child (secondary) underneath — on event
+-- cards and the multi-occurrence umbrella view.
+--
+-- Background:
+--   Before this column, `buildCityChildEventRow` collapsed the parent
+--   and child titles into a single string ("שבועות 2026 - תיאטרון
+--   בובות") and stored it in `name`. The bot then had to parse the
+--   "<umbrella_title> - " prefix back out at render time to surface
+--   the child's distinguishing title alone. Parsing was fragile (any
+--   change to the separator broke it) and the bot's "כל אירועי
+--   <umbrella>" list ended up repeating the parent title in every row.
+--
+-- What this adds:
+--   - `child_title` — the raw per-child title (e.g. "תיאטרון בובות
+--                     'טיול בישראל'") with NO parent prefix. Stored
+--                     only for children whose own `child.title` was
+--                     non-empty AND different from the parent title;
+--                     left NULL for active-garden-style children that
+--                     inherit the parent name verbatim. The combined
+--                     `name` field continues to carry the chained form
+--                     for search / labels / backwards compatibility.
+--
+-- Population:
+--   `lib/cityApi.js#buildCityChildEventRow` sets this on every child
+--   it fans out. Existing rows fill in on the next re-scrape (upsert
+--   by (source, external_slug) → same row, new column populated).
+--   Singles, Smarticket rows, and same-name children leave it NULL.
+--
+-- Read side:
+--   - Card render: when both umbrella_title and child_title are non-
+--     NULL, the title block renders as
+--       <icon> <umbrella_title>
+--                  <child_title>
+--     When child_title is NULL we fall back to the single-line name
+--     (old behaviour).
+--   - `umb:<slug>` callback: header shows umbrella_title once at top;
+--     each row shows child_title instead of the chained name, so the
+--     same prefix doesn't repeat 20 times in a long list.
+--   No index — every read either projects this column out of a
+--   `WHERE umbrella_slug = $1` lookup (already indexed by sql/054) or
+--   joins it into a hot `SELECT *` for a single event row.
+
+ALTER TABLE public.events
+  ADD COLUMN IF NOT EXISTS child_title TEXT;

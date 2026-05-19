@@ -1,0 +1,45 @@
+-- Add 'community-miluim' to the events.access enum.
+--
+-- Context:
+--   sql/039 introduced `access_t` with three community scopes
+--   (disabilities / lgbtq / seniors). The 2026 reserve duty cycle
+--   surfaced a fourth: events explicitly run "למילואימניקים.ות"
+--   (Rooftop Pool Party, סדנת קוקטיילים, פק"ל קפה, …). These are
+--   not for the general public — they target people who served in
+--   miluim and surfacing them in default search creates the same
+--   "wrong audience" problem the original access column was built
+--   to solve.
+--
+-- Why a hard ENUM value (vs. a soft tag like "מילואימניקים"):
+--   Tags are open-set search terms — the matcher includes a tagged
+--   event whenever the user explicitly searches for it. Access is
+--   the inverse: we HIDE the event from default search unless the
+--   user has opted in via /interests (or said so to the agent).
+--   The same hard/soft split already lives between
+--   `tag_ids[]='קהילה גאה'` (soft) and `access='community-lgbtq'`
+--   (hard). Miluim deserves the same treatment.
+--
+-- Naming:
+--   `community-miluim` follows the existing `community-*` convention.
+--   Transliterated rather than translated because the upstream cue
+--   is the Hebrew word "מילואים" (used as-is on event titles), and
+--   "reserves" / "reservists" doesn't surface naturally anywhere
+--   else in the codebase or the city CMS.
+--
+-- Migration shape:
+--   `ALTER TYPE … ADD VALUE` is non-transactional in Postgres (the
+--   added value isn't visible to the same transaction that added
+--   it), so we don't wrap this in BEGIN/COMMIT. Idempotency is
+--   `IF NOT EXISTS` so re-running the script on an already-patched
+--   DB is a no-op.
+--
+-- Backfill:
+--   No data migration here. The cityApiScraper / Smarticket upsert
+--   classifies new rows on the next cycle via the regex in
+--   lib/access.js. A one-off UPDATE for the 4 known existing rows
+--   lives in jobs/backfillAccessMiluim.js — separate file because
+--   schema migrations should not also be data scripts.
+
+ALTER TYPE public.access_t ADD VALUE IF NOT EXISTS 'community-miluim';
+
+NOTIFY pgrst, 'reload schema';
