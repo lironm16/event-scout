@@ -113,14 +113,60 @@ async function refreshUmbrellaDefaults({ verbose = true } = {}) {
       );
     }
   }
-  return { umbrellasUpdated: updated, totalUmbrellas: buckets.size };
+
+  // Garbage-collect orphan umbrellas. The cross-umbrella dedup in
+  // `lib/cityApiScraper.js` can produce these: `upsertUmbrellaRow`
+  // runs eagerly for every parent that fans out, but the dedup
+  // step that follows can hand all of an umbrella's children to a
+  // sibling umbrella (slug X "loses" to slug Y on every collision).
+  // The losing umbrella's row remains with zero children attached,
+  // never appearing in `buckets` above. Without this sweep those
+  // rows accumulate forever, polluting `SELECT FROM umbrellas` and
+  // the eventual Phase 3 "umbrella feed" pages.
+  //
+  // Safe to delete: no events reference them (umbrella_id FK is
+  // ON DELETE SET NULL, and at this point there are none to nullify
+  // anyway). If the same parent slug appears in a future scrape and
+  // wins this time, `upsertUmbrellaRow` recreates the row fresh.
+  const { data: allUmbs, error: listErr } = await supabase
+    .from("umbrellas")
+    .select("id");
+  let orphansDeleted = 0;
+  if (!listErr && allUmbs) {
+    const childrenIds = new Set(buckets.keys());
+    const orphanIds = allUmbs
+      .filter((u) => !childrenIds.has(u.id))
+      .map((u) => u.id);
+    if (orphanIds.length) {
+      const { error: delErr } = await supabase
+        .from("umbrellas")
+        .delete()
+        .in("id", orphanIds);
+      if (delErr) {
+        console.warn(
+          `[RefreshUmbrellas] orphan cleanup failed: ${delErr.message}`,
+        );
+      } else {
+        orphansDeleted = orphanIds.length;
+        if (verbose && orphansDeleted) {
+          console.log(`  cleaned up ${orphansDeleted} orphan umbrella(s)`);
+        }
+      }
+    }
+  }
+
+  return {
+    umbrellasUpdated: updated,
+    totalUmbrellas: buckets.size,
+    orphansDeleted,
+  };
 }
 
 if (require.main === module) {
   refreshUmbrellaDefaults()
-    .then(({ umbrellasUpdated, totalUmbrellas }) => {
+    .then(({ umbrellasUpdated, totalUmbrellas, orphansDeleted }) => {
       console.log(
-        `\nDone. Updated ${umbrellasUpdated} / ${totalUmbrellas} umbrellas.`,
+        `\nDone. Updated ${umbrellasUpdated} / ${totalUmbrellas} umbrellas, deleted ${orphansDeleted} orphan(s).`,
       );
       process.exit(0);
     })
