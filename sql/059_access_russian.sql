@@ -1,0 +1,48 @@
+-- Add 'community-russian' to the events.access enum.
+--
+-- Context:
+--   sql/039 introduced `access_t` with three community scopes
+--   (disabilities / lgbtq / seniors). sql/057 added miluim. The
+--   2026-05 sweep through the live feed surfaced ten events whose
+--   titles are entirely in Cyrillic — Russian-language tours,
+--   lectures, and cooking classes targeted at the Russian-speaking
+--   immigrant community in Ramat Gan ("Экскурсия в Американскую
+--   колонию", "Кулинарный мастер-класс по выпечке мини-халы",
+--   "Русские евреи - потомки сефардов"). Without a dedicated
+--   access scope these surface to every user by default, which
+--   helps nobody — a Hebrew-only user can't read the title, and
+--   the Russian-speaking user has no way to filter IN.
+--
+-- Why a hard ENUM value (vs. a soft tag):
+--   Same logic as the other community-* scopes (see sql/039 and
+--   sql/057 comments). Tags are open-set search inclusions; access
+--   is the binary exclusion gate. Russian-language events fail the
+--   "default public" test for non-Russian-speakers, so they belong
+--   on the exclusion side.
+--
+-- Naming:
+--   `community-russian` follows the existing `community-*`
+--   convention. Transliterated rather than spelled with a Cyrillic
+--   slug because all the surrounding code (lib/access.js,
+--   lib/agent/tools/profile.js, lib/interestCategories.js) is
+--   ASCII identifiers — keeping the enum value ASCII matches.
+--
+-- Migration shape:
+--   `ALTER TYPE … ADD VALUE` is non-transactional in Postgres (the
+--   added value isn't visible to the same transaction that added
+--   it), so we don't wrap this in BEGIN/COMMIT. Idempotency is
+--   `IF NOT EXISTS` so re-running the script on an already-patched
+--   DB is a no-op.
+--
+-- Backfill:
+--   No data migration here. The Smarticket pipeline picks up new
+--   classifications on the next cycle via the regex in
+--   lib/access.js (which now detects Cyrillic-script titles via a
+--   3+ char Unicode range match). A one-off UPDATE for the 10
+--   known existing rows lives in jobs/backfillAccessRussian.js —
+--   separate file because schema migrations should not also be
+--   data scripts.
+
+ALTER TYPE public.access_t ADD VALUE IF NOT EXISTS 'community-russian';
+
+NOTIFY pgrst, 'reload schema';
