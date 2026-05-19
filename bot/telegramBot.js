@@ -6791,8 +6791,8 @@ bot.action(/^pgn:next$/, async (ctx) => {
         ? "👀 כן, להראות עוד 1"
         : `👀 כן, להראות עוד ${remainingSeriesCount}`;
       const text = remainingSeriesCount === 1
-        ? "יש עוד סדרת אירועים אחת — להראות?"
-        : `יש עוד ${remainingSeriesCount} סדרות — להראות?`;
+        ? "יש עוד אירוע אחד — להראות?"
+        : `יש עוד ${remainingSeriesCount} אירועים — להראות?`;
       await ctx.reply(text, Markup.inlineKeyboard([
         [Markup.button.callback(label, "pgn:next")],
       ]));
