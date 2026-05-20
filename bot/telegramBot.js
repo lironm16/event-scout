@@ -5094,6 +5094,16 @@ bot.on("text", async (ctx) => {
       }
     }
 
+    // Free-text feedback explanation — inject event context so the agent
+    // knows what event the user is reacting to and can update the profile
+    // (e.g. set community-lgbtq = not-member) based on the explanation.
+    const feedbackCtx = session?.pendingFeedbackExplain;
+    if (feedbackCtx) {
+      delete session.pendingFeedbackExplain;
+      message =
+        `[הקשר: המשתמש ציין שהאירוע "${feedbackCtx.eventName}" (מזהה ${feedbackCtx.eventId}) לא מתאים לו/ה. הסברו:]\n${message}`;
+    }
+
     // Append the new user input to history and run the agent.
     sessionStore.appendUserMessage(telegramId, message);
     agentInvoked = true;
@@ -7097,6 +7107,7 @@ bot.action(/^fb:reasons:(\d+)$/, async (ctx) => {
     const rows = REASON_KEYS.map((k) => [
       Markup.button.callback(REASON_LABELS[k], `fb:save:${eventId}:${k}`),
     ]);
+    rows.push([Markup.button.callback("✏️ הסבר לנו", `fb:explain:${eventId}`)]);
     rows.push([Markup.button.callback("↩️ חזרה", `fb:cancel:${eventId}`)]);
     await replyAsCallbackResult(
       ctx,
@@ -7117,6 +7128,31 @@ bot.action(/^fb:reasons:(\d+)$/, async (ctx) => {
 bot.action(/^fb:cancel:(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery("👍");
   await ctx.deleteMessage().catch(() => {});
+});
+
+// Free-text feedback path — user chose to explain in their own words
+// rather than pick one of the preset reasons. We store the event
+// context on the session so the next text message is automatically
+// forwarded to the agent with that context injected.
+bot.action(/^fb:explain:(\d+)$/, async (ctx) => {
+  const eventId = ctx.match[1];
+  await safeAck(ctx);
+  try {
+    const { data: ev } = await supabase
+      .from("events")
+      .select("name")
+      .eq("id", parseInt(eventId, 10))
+      .maybeSingle();
+    const session = sessionStore.ensureSession(ctx.from.id);
+    session.pendingFeedbackExplain = {
+      eventId,
+      eventName: ev?.name || `אירוע #${eventId}`,
+    };
+    await ctx.reply("מה לא מתאים לך? כתוב/י בחופשיות ואעדכן את ההעדפות שלך 👂");
+  } catch (err) {
+    console.error(`[Bot] fb:explain error (event=${eventId}):`, err.message);
+    await ctx.reply("⚠️ אופס — נסי שוב בעוד רגע").catch(() => {});
+  }
 });
 
 bot.action(/^fb:save:(\d+):([a-z_]+)$/, async (ctx) => {
