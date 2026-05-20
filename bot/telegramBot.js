@@ -7107,7 +7107,7 @@ bot.action(/^fb:reasons:(\d+)$/, async (ctx) => {
     const rows = REASON_KEYS.map((k) => [
       Markup.button.callback(REASON_LABELS[k], `fb:save:${eventId}:${k}`),
     ]);
-    rows.push([Markup.button.callback("✏️ הסבר לנו", `fb:explain:${eventId}`)]);
+    rows.push([Markup.button.callback("🎯 עזור לנו להתאים לך אירועים", `fb:explain:${eventId}`)]);
     rows.push([Markup.button.callback("↩️ חזרה", `fb:cancel:${eventId}`)]);
     await replyAsCallbackResult(
       ctx,
@@ -7148,7 +7148,7 @@ bot.action(/^fb:explain:(\d+)$/, async (ctx) => {
       eventId,
       eventName: ev?.name || `אירוע #${eventId}`,
     };
-    await ctx.reply("מה לא מתאים לך? כתוב/י בחופשיות ואעדכן את ההעדפות שלך 👂");
+    await ctx.reply("ספר/י לנו מה לא התאים — נשתמש בזה כדי להתאים לך אירועים טוב יותר 🎯");
   } catch (err) {
     console.error(`[Bot] fb:explain error (event=${eventId}):`, err.message);
     await ctx.reply("⚠️ אופס — נסי שוב בעוד רגע").catch(() => {});
