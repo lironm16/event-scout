@@ -7085,15 +7085,10 @@ bot.action(/^sa:(.+)$/, async (ctx) => {
 // impactful click (suppresses an entire recurring series) and the
 // most-frequent reason a user wants to silence the משחקיית רגעים-
 // style "I know about this, stop reminding me" pattern.
-const REASON_KEYS = [
-  "already_known",
-  "wrong_audience",
-  "too_far",
-  "wrong_time",
-  "not_interested",
-  "already_seen",
-  "other",
-];
+// Only already_known is surfaced as a direct button today.
+// The other reason codes are kept for the fb:save validation guard
+// and may be promoted to buttons again if usage patterns warrant it.
+const REASON_KEYS = ["already_known"];
 
 bot.action(/^fb:reasons:(\d+)$/, async (ctx) => {
   const eventId = ctx.match[1];
@@ -7104,11 +7099,11 @@ bot.action(/^fb:reasons:(\d+)$/, async (ctx) => {
   await safeAck(ctx);
   console.log(`[Bot] fb:reasons: user=${ctx.from?.id} event=${eventId}`);
   try {
-    const rows = REASON_KEYS.map((k) => [
-      Markup.button.callback(REASON_LABELS[k], `fb:save:${eventId}:${k}`),
-    ]);
-    rows.push([Markup.button.callback("🎯 עזור לנו להתאים לך אירועים", `fb:explain:${eventId}`)]);
-    rows.push([Markup.button.callback("↩️ חזרה", `fb:cancel:${eventId}`)]);
+    const rows = [
+      [Markup.button.callback("🔁 כבר מכיר — אל תציג שוב", `fb:save:${eventId}:already_known`)],
+      [Markup.button.callback("✏️ אחר...", `fb:explain:${eventId}`)],
+      [Markup.button.callback("↩️ חזרה", `fb:cancel:${eventId}`)],
+    ];
     await replyAsCallbackResult(
       ctx,
       "מה הסיבה? (זה עוזר לי ללמוד)",
