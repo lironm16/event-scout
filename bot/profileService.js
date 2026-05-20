@@ -205,6 +205,84 @@ function profileToBrainShape(profile) {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Preference weights
+//
+// `user_context.preferences` shape:
+//   {
+//     tag_weights:      { "<label_id>": number },  // >1 boost, <1 suppress
+//     category_weights: { "<category_str>": number },
+//     series_suppress:  ["<series_name>", ...]      // recurring series to sink
+//   }
+//
+// Numeric weight presets (chosen by the agent based on signal strength):
+//   strong_suppress → 0.05   suppress → 0.2   neutral → 1.0
+//   boost → 2.0              strong_boost → 4.0
+//
+// Weights are clamped to [0.05, 4.0] to avoid extreme compounding when the
+// same preference is reinforced repeatedly.
+// ─────────────────────────────────────────────────────────────────────────
+const WEIGHT_PRESETS = {
+  strong_suppress: 0.05,
+  suppress:        0.2,
+  neutral:         1.0,
+  boost:           2.0,
+  strong_boost:    4.0,
+};
+const WEIGHT_MIN = 0.05;
+const WEIGHT_MAX = 4.0;
+
+/**
+ * Merge a set of preference adjustments into the user's stored preferences.
+ * Each adjustment can target a tag (by label_id), a category string, or a
+ * series name.
+ *
+ * @param {string|number} telegramId
+ * @param {Array<{kind:"tag"|"category"|"series", key:string, preset:string}>} adjustments
+ */
+async function updatePreferences(telegramId, adjustments) {
+  if (!adjustments || !adjustments.length) return;
+
+  const profile = await getProfile(telegramId);
+  const ctx = profile?.user_context || {};
+  const prefs = ctx.preferences || {};
+  const tagWeights      = { ...(prefs.tag_weights      || {}) };
+  const categoryWeights = { ...(prefs.category_weights || {}) };
+  let seriesSuppress    = [...(prefs.series_suppress   || [])];
+
+  for (const { kind, key, preset, weight: rawWeight } of adjustments) {
+    const k = String(key || "").trim();
+    if (!k) continue;
+    // `weight` (numeric) takes precedence over `preset` (string alias)
+    const w = rawWeight != null ? rawWeight : (WEIGHT_PRESETS[preset] ?? 1.0);
+
+    if (kind === "tag") {
+      tagWeights[k] = Math.min(Math.max(w, WEIGHT_MIN), WEIGHT_MAX);
+    } else if (kind === "category") {
+      categoryWeights[k] = Math.min(Math.max(w, WEIGHT_MIN), WEIGHT_MAX);
+    } else if (kind === "series") {
+      if (w < 1.0) {
+        // Suppress: add to the list if not already there
+        if (!seriesSuppress.includes(k)) seriesSuppress.push(k);
+      } else {
+        // Un-suppress or boost: remove from list
+        seriesSuppress = seriesSuppress.filter((s) => s !== k);
+      }
+    }
+  }
+
+  const updatedCtx = {
+    ...ctx,
+    preferences: { tag_weights: tagWeights, category_weights: categoryWeights, series_suppress: seriesSuppress },
+  };
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ user_context: updatedCtx })
+    .eq("telegram_id", String(telegramId));
+  if (error) throw new Error(`updatePreferences failed: ${error.message}`);
+}
+
 /**
  * Compute the set of `events.access` ENUM values this profile is
  * allowed to see in a default search.
@@ -249,4 +327,6 @@ module.exports = {
   profileToBrainShape,
   accessScopesForProfile,
   getAccessScopesForUser,
+  updatePreferences,
+  WEIGHT_PRESETS,
 };

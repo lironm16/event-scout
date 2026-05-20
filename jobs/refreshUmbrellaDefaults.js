@@ -77,8 +77,13 @@ async function refreshUmbrellaDefaults({ verbose = true } = {}) {
     const b = buckets.get(e.umbrella_id);
     if (e.audience) b.aud.set(e.audience, (b.aud.get(e.audience) || 0) + 1);
     if (e.category) b.cat.set(e.category, (b.cat.get(e.category) || 0) + 1);
-    if (e.access && e.access !== "open") {
-      b.acc.set(e.access, (b.acc.get(e.access) || 0) + 1);
+    // events.access is now access_t[] — iterate each scope value,
+    // skip 'open' (the default), count only meaningful community-* scopes.
+    const accessValues = Array.isArray(e.access) ? e.access : (e.access ? [e.access] : []);
+    for (const v of accessValues) {
+      if (v && v !== "open") {
+        b.acc.set(v, (b.acc.get(v) || 0) + 1);
+      }
     }
   }
 

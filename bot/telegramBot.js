@@ -37,6 +37,8 @@ const {
   removeInterest,
   isInterested,
   recordInterestSignal,
+  recordNotInterestedSignal,
+  recordTooFarSignal,
 } = require("../lib/interestService");
 const {
   listSavedSearches,
@@ -55,6 +57,7 @@ const { flushDueNotifications } = require("../lib/scheduleService");
 const { formatHebrewDate, formatTimeRange, formatTagLine, formatAdultAgeGate, getEventIcon, rtlLine } = require("../lib/eventFormat");
 const { formatTicketsLine, formatLowStockBadge, buildNavButtons, buildNavPickerLinks } = require("../lib/eventCard");
 const { normalizeImageUrl } = require("../lib/imageUrl");
+const { isCityWideLocation } = require("../lib/locationStore");
 const { getBookingUrl } = require("../lib/sourceUrls");
 const { runCleanup } = require("../lib/archiveService");
 const { getStaticReply } = require("../lib/staticReplies");
@@ -144,10 +147,24 @@ const ALERT_DEDUPE_MAX = 500;
 const alertDedupe = new Map();
 
 function escapeMarkdown(s) {
-  // Telegram's "Markdown" (v1) treats _ * ` [ as control chars. We
-  // only emit user-controlled values inside backtick spans, but a
-  // value containing a backtick would still break the span. Strip them.
-  return String(s).replace(/`/g, "'");
+  // Telegram's "Markdown" (v1) treats * _ ` [ as control chars.
+  // Escape them so user-supplied text (event names, location strings)
+  // can never accidentally open a formatting span.
+  return String(s)
+    .replace(/\\/g, "\\\\") // backslash first
+    .replace(/\*/g, "\\*")
+    .replace(/_/g, "\\_")
+    .replace(/`/g, "\\`")
+    .replace(/\[/g, "\\[");
+}
+
+// Escape user-supplied strings for Telegram HTML parse mode.
+// Only & < > need escaping; all other characters pass through.
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 async function alertAdmin({
@@ -803,15 +820,28 @@ async function sendEventCard(ctx, event, opts = {}) {
     umbrellaTitleTrim && nameTrim && nameTrim !== umbrellaTitleTrim
       ? nameTrim
       : null;
-  const lines = [`${getEventIcon(event)} ${primaryTitle}`];
-  if (secondaryTitle) lines.push(secondaryTitle);
+  // When both titles exist: primary (series/umbrella name) is plain context,
+  // secondary (the specific event name) is bold since it's the actionable title.
+  // When only primary exists it's the sole title so we bold it.
+  // RLM (\u200F) after the emoji anchors the bidi paragraph to RTL so the
+  // entire caption is right-aligned in Telegram, even under wide photos.
+  const RLM = "\u200F";
+  const icon = getEventIcon(event);
+  const formattedPrimary = secondaryTitle
+    ? `${icon} ${RLM}${escapeHtml(primaryTitle)}`
+    : `${icon} ${RLM}<b>${escapeHtml(primaryTitle)}</b>`;
+  const lines = [formattedPrimary];
+  if (secondaryTitle) lines.push(`${RLM}<b>${escapeHtml(secondaryTitle)}</b>`);
   if (event.date) lines.push(`📅 ${formatHebrewDate(event.date)}`);
   const timeStr = formatTimeRange(event.start_time, event.end_time);
   if (timeStr) lines.push(rtlLine(`🕐 ${timeStr}`));
-  if (multiVenue) {
-    lines.push(`📍 מתקיים במספר מיקומים`);
+  if (multiVenue || isCityWideLocation(event.location_key)) {
+    const locLabel = isCityWideLocation(event.location_key)
+      ? "ברחבי העיר"
+      : "מתקיים במספר מיקומים";
+    lines.push(`🗺️ ${locLabel}`);
   } else if (event.location) {
-    lines.push(`📍 ${event.location}`);
+    lines.push(`📍 ${escapeHtml(event.location)}`);
   }
   // Tickets line — the helper handles all branches:
   //   sold out         → "🚫 אזלו הכרטיסים"
@@ -845,8 +875,8 @@ async function sendEventCard(ctx, event, opts = {}) {
   // don't qualify, which we then skip entirely (no empty line).
   const ageGate = formatAdultAgeGate(event);
   if (ageGate) lines.push(ageGate);
-  if (event._proximity?.label) lines.push(event._proximity.label);
-  if (event._reason) lines.push(`💡 ${event._reason}`);
+  if (event._proximity?.label) lines.push(escapeHtml(event._proximity.label));
+  if (event._reason) lines.push(`💡 ${escapeHtml(event._reason)}`);
 
   // Description (sql/053). Same shape and rules as
   // `buildConsolidatedEventBlock` for visual parity across surfaces:
@@ -861,7 +891,7 @@ async function sendEventCard(ctx, event, opts = {}) {
     const desc = event.description.replace(/\s+/g, " ").trim();
     const capped =
       desc.length > 280 ? desc.slice(0, 280).trimEnd() + "…" : desc;
-    lines.push(`📝 ${capped}`);
+    lines.push(`📝 ${escapeHtml(capped)}`);
   }
 
   // Tag line — surfaces the topic at-a-glance ("מוזיקה • התפתחות") so
@@ -994,21 +1024,41 @@ async function sendEventCard(ctx, event, opts = {}) {
   // Telegram caption max is 1024 chars. Most event cards sit ~300-500
   // so we rarely hit it, but if a card grows (lots of tags + reasons)
   // we fall back to text-only rather than truncating mid-line.
+  const msgOpts = { parse_mode: "HTML" };
   if (photoUrl && text.length <= 1024) {
     try {
       await ctx.replyWithPhoto(photoUrl, {
         caption: text,
+        ...msgOpts,
         ...keyboard,
       });
       return;
     } catch (err) {
-      // Telegram occasionally rejects photo URLs (404, host blocks
-      // its UA, image is a tiny placeholder GIF, etc.). Fall through
-      // to text — losing the image is better than losing the card.
+      // "wrong type of the web page content" means Telegram's servers
+      // couldn't download the image — common for geo-restricted CDNs
+      // (e.g. cms-media.ramat-gan.muni.il only serves images to IL IPs).
+      // Download the image on our server and re-upload as a Buffer so
+      // Telegram never needs to reach the CDN directly.
+      if (/wrong type|wrong_type/i.test(err.message)) {
+        try {
+          const imgRes = await fetch(photoUrl, { signal: AbortSignal.timeout(8000) });
+          if (imgRes.ok && (imgRes.headers.get("content-type") || "").startsWith("image/")) {
+            const buf = Buffer.from(await imgRes.arrayBuffer());
+            await ctx.replyWithPhoto(
+              { source: buf, filename: "event.jpg" },
+              { caption: text, ...msgOpts, ...keyboard },
+            );
+            return;
+          }
+        } catch (proxyErr) {
+          console.warn(`[Bot] sendEventCard proxy-upload failed for event ${event.id}: ${proxyErr.message}`);
+        }
+      }
+      // Any other rejection (404, GIF placeholder, etc.) — fall through to text.
       console.warn(`[Bot] sendEventCard photo fallback for event ${event.id}: ${err.message}`);
     }
   }
-  await ctx.reply(text, keyboard);
+  await ctx.reply(text, { ...msgOpts, ...keyboard });
 }
 
 async function sendTicketCard(ctx, ticket) {
@@ -1752,7 +1802,7 @@ bot.command("saved", async (ctx) => {
     if (!items.length) {
       await ctx.reply(
         "עדיין לא שמרת חיפושים.\n" +
-        "תכתבי לי 'תעקבי אחרי...' ואני אגדיר מעקב.",
+        "אפשר לכתוב לי 'עקבי אחרי...' ואני אגדיר מעקב.",
       );
       return;
     }
@@ -1809,7 +1859,7 @@ bot.command("profile", async (ctx) => {
   try {
     const profile = await getProfile(ctx.from.id);
     if (!profile) {
-      await ctx.reply("אין לי פרופיל שלך עדיין. שלחי הודעה ואלמד אותך!");
+      await ctx.reply("אין לי פרופיל שלך עדיין. שלחו הודעה ואלמד אתכם!");
       return;
     }
 
@@ -1849,6 +1899,29 @@ bot.command("profile", async (ctx) => {
       );
     }
 
+    // Learned preferences (from feedback buttons)
+    const prefs = c.preferences || {};
+    const suppressedCats = Object.entries(prefs.category_weights || {})
+      .filter(([, w]) => w < 0.8) // only show meaningfully suppressed
+      .sort(([, a], [, b]) => a - b) // most suppressed first
+      .map(([cat]) => cat);
+    const suppressedSeries = prefs.series_suppress || [];
+    const suppressedLocations = prefs.suppressed_locations || [];
+    if (suppressedCats.length || suppressedSeries.length || suppressedLocations.length) {
+      lines.push("");
+      lines.push("🎛️ *העדפות שנלמדו:*");
+      if (suppressedCats.length) {
+        lines.push(`📉 פחות מזה: ${suppressedCats.join(", ")}`);
+      }
+      if (suppressedSeries.length) {
+        lines.push(`🔇 סדרות מושתקות: ${suppressedSeries.join(", ")}`);
+      }
+      if (suppressedLocations.length) {
+        lines.push(`📍 מקומות שסומנו כרחוקים: ${suppressedLocations.join(", ")}`);
+      }
+      lines.push("_לאיפוס: כתבו לבוט \"אפס העדפות\"_");
+    }
+
     let watched = [];
     try { watched = await getWatchedEvents(ctx.from.id); } catch {}
     if (watched.length) lines.push(`\n🔔 אירועים במעקב (${watched.length}):`);
@@ -1859,6 +1932,7 @@ bot.command("profile", async (ctx) => {
     // shortcut beats forcing users to type /interests on the next
     // line.
     await ctx.reply(lines.join("\n"), {
+      parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
           [{ text: "⭐ ערכי תחומי עניין", callback_data: "ip:start_from_welcome" }],
@@ -2027,7 +2101,7 @@ bot.action(/^ip:tog:(.+)$/, async (ctx) => {
   const state = sessionStore.getInterestsPicker(telegramId);
   const chip = getInterestById(chipId);
   if (!state || !chip) {
-    await ctx.answerCbQuery("⏰ פג תוקף — שלחי /interests מחדש");
+    await ctx.answerCbQuery("⏰ פג תוקף — שלחו /interests מחדש");
     return;
   }
   const set = new Set(state.selected);
@@ -2056,14 +2130,14 @@ bot.action("ip:other", async (ctx) => {
   const telegramId = ctx.from.id;
   const state = sessionStore.getInterestsPicker(telegramId);
   if (!state) {
-    await ctx.answerCbQuery("⏰ פג תוקף — שלחי /interests מחדש");
+    await ctx.answerCbQuery("⏰ פג תוקף — שלחו /interests מחדש");
     return;
   }
   sessionStore.updateInterestsPicker(telegramId, { freeTextMode: true });
   await ctx.answerCbQuery("✏️");
   await replyAsCallbackResult(
     ctx,
-    "כתבי תחומי עניין נוספים, מופרדים בפסיק (לדוגמה: יין, ריצה, ג׳אז). אחרי שתשלחי — אוסיף אותם לרשימה.",
+    "כתבו תחומי עניין נוספים, מופרדים בפסיק (לדוגמה: יין, ריצה, ג׳אז). לאחר השליחה אוסיף אותם לרשימה.",
   );
 });
 
@@ -2156,7 +2230,7 @@ bot.action("ip:cancel", async (ctx) => {
   sessionStore.clearInterestsPicker(telegramId);
   await ctx.answerCbQuery("👍 ביטלתי");
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
-  await replyAsCallbackResult(ctx, "👍 לא שיניתי כלום. תוכלי לחזור מתי שתרצי עם /interests.");
+  await replyAsCallbackResult(ctx, "👍 לא שיניתי כלום. אפשר לחזור מתי שרוצים עם /interests.");
 });
 
 // Partner-pivot handlers — fired by the "כן, בואי נגדיר עבור <name>"
@@ -3136,7 +3210,7 @@ bot.action("onb:cancel", async (ctx) => {
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
   await replyAsCallbackResult(
     ctx,
-    "👍 לא שיניתי כלום. תוכלי לחזור מתי שתרצי עם /interests.",
+    "👍 לא שיניתי כלום. אפשר לחזור מתי שרוצים עם /interests.",
   );
 });
 
@@ -3607,7 +3681,7 @@ function buildSingleEventKeyboard(event) {
 // user to select at least one event.
 function buildNewsletterFooterText(selectedCount) {
   if (selectedCount === 0) {
-    return rtlLine("📋 בחרי אירועים בלחיצה על ☐ בחר, ואז בצעי פעולה:");
+    return rtlLine("📋 בחרו אירועים בלחיצה על ☐ בחר, ואז בצעו פעולה:");
   }
   return rtlLine(`📋 נבחרו ${selectedCount} אירועים — בצעי פעולה:`);
 }
@@ -3940,7 +4014,7 @@ bot.action("nl:share", async (ctx) => {
       return;
     }
     if (state.selectedEventIds.size === 0) {
-      await safeAck(ctx, "בחרי לפחות אירוע אחד עם ☐ בחר", { show_alert: true });
+      await safeAck(ctx, "יש לבחור לפחות אירוע אחד עם ☐ בחר", { show_alert: true });
       return;
     }
     const selected = [...state.selectedEventIds]
@@ -3979,7 +4053,7 @@ bot.action("nl:notrel", async (ctx) => {
       return;
     }
     if (state.selectedEventIds.size === 0) {
-      await safeAck(ctx, "בחרי לפחות אירוע אחד עם ☐ בחר", { show_alert: true });
+      await safeAck(ctx, "יש לבחור לפחות אירוע אחד עם ☐ בחר", { show_alert: true });
       return;
     }
     const selected = [...state.selectedEventIds]
@@ -4038,7 +4112,7 @@ bot.action("nl:cal", async (ctx) => {
       return;
     }
     if (state.selectedEventIds.size === 0) {
-      await safeAck(ctx, "בחרי לפחות אירוע אחד עם ☐ בחר", { show_alert: true });
+      await safeAck(ctx, "יש לבחור לפחות אירוע אחד עם ☐ בחר", { show_alert: true });
       return;
     }
     // Phase E replaces this branch with the real Calendar insert
@@ -4574,8 +4648,8 @@ bot.command("broadcast", async (ctx) => {
   if (!reply) {
     await ctx.reply(
       "📢 *broadcast* — שליחת הודעה לכל המשתמשים\n\n" +
-        "1. כתבי קודם את ההודעה (טקסט, תמונה, מה שתרצי).\n" +
-        "2. השיבי לאותה הודעה עם הפקודה /broadcast.\n" +
+        "1. כתבו קודם את ההודעה (טקסט, תמונה, כל מה שרוצים).\n" +
+        "2. הגיבו לאותה הודעה עם הפקודה /broadcast.\n" +
         "אאסוף את הקהל ואציג תצוגה מקדימה לאישור.",
       { parse_mode: "Markdown" },
     );
@@ -4936,7 +5010,7 @@ bot.on("text", async (ctx) => {
         // because anything larger probably means the user wanted to
         // type a category name, not a number.
         await ctx.reply(
-          "לא הצלחתי לפענח. כתבי מספר בלבד — לדוגמה 20 (= עד 20 דקות הליכה).",
+          "לא הצלחתי לפענח. יש לכתוב מספר בלבד — לדוגמה 20 (= עד 20 דקות הליכה).",
         );
         tracing.setOutput(traceId, "[onboarding_other_reject]");
         return;
@@ -5559,26 +5633,26 @@ async function renderSavePreviewView(ctx, view) {
   let reply_markup = null;
 
   if (view === PSE_VIEWS.AUDIENCE) {
-    header = "👥 *בחרי קהל יעד*\n";
+    header = "👥 *קהל יעד*\n";
     reply_markup = buildAudienceKeyboard(snapshot);
   } else if (view === PSE_VIEWS.AGES) {
-    header = "🧒 *בחרי גילאים* (סמני אחד או יותר)\n";
+    header = "🧒 *גילאים* (אפשר לבחור יותר מאחד)\n";
     reply_markup = buildAgesKeyboard(snapshot);
   } else if (view === PSE_VIEWS.PROXIMITY) {
-    header = "📍 *בחרי מקום או מרחק*\n";
+    header = "📍 *מקום או מרחק*\n";
     reply_markup = buildProximityKeyboard(snapshot);
   } else if (view === PSE_VIEWS.DATES) {
-    header = "📅 *בחרי טווח תאריכים*\n";
+    header = "📅 *טווח תאריכים*\n";
     reply_markup = buildDatesKeyboard(snapshot);
   } else if (view === PSE_VIEWS.TIMES) {
-    header = "🕐 *בחרי טווח שעות*\n";
+    header = "🕐 *טווח שעות*\n";
     reply_markup = buildTimesKeyboard(snapshot);
   } else if (view === PSE_VIEWS.TAGS) {
     snapshot._fieldEdit = { field: "tags" };
     header = buildFreeTextHeader({
       field: "תגיות לעקוב",
       current: (snapshot.filters?.watch_tag_names || []).join(", "),
-      hint: "כתבי תגיות מופרדות בפסיק (לדוגמה: מוזיקה, סדנאות יצירה).",
+      hint: "כתבו תגיות מופרדות בפסיק (לדוגמה: מוזיקה, סדנאות יצירה).",
     });
     reply_markup = buildFreeTextKeyboard("tags");
   } else if (view === PSE_VIEWS.VENUE) {
@@ -5586,7 +5660,7 @@ async function renderSavePreviewView(ctx, view) {
     header = buildFreeTextHeader({
       field: "מקום ספציפי",
       current: snapshot.filters?.location_label || snapshot.filters?.venue || "",
-      hint: "כתבי שם של מקום (לדוגמה: מרכז פיס גאולים). ננסה לזהות אותו אוטומטית.",
+      hint: "כתבו שם של מקום (לדוגמה: מרכז פיס גאולים). ננסה לזהות אותו אוטומטית.",
     });
     reply_markup = buildFreeTextKeyboard("venue");
   } else if (view === PSE_VIEWS.TITLE) {
@@ -5602,7 +5676,7 @@ async function renderSavePreviewView(ctx, view) {
     header = buildFreeTextHeader({
       field: "מילים חובה בשם האירוע",
       current: (snapshot.tokens || []).join(", "),
-      hint: "השאירי ריק במקרים רגילים. כתבי מילים רק אם חשוב שהמילה תופיע בשם האירוע (לדוגמה: יין).",
+      hint: "השאירו ריק במקרים רגילים. כתבו מילים רק אם חשוב שהמילה תופיע בשם האירוע (לדוגמה: יין).",
     });
     reply_markup = buildFreeTextKeyboard("tokens");
   }
@@ -5730,7 +5804,7 @@ bot.action("pse:cancel", async (ctx) => {
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
   sessionStore.clearPendingSave(telegramId);
   sessionStore.clearPendingClarification(telegramId);
-  await replyAsCallbackResult(ctx, "👍 לא שמרתי. תוכלי לבקש מעקב שוב מתי שתרצי.");
+  await replyAsCallbackResult(ctx, "👍 לא שמרתי. אפשר לבקש מעקב שוב מתי שרוצים.");
 });
 
 // Save — commit the snapshot.
@@ -5905,7 +5979,7 @@ bot.action("ss:cancel", async (ctx) => {
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
   sessionStore.clearPendingSave(telegramId);
   sessionStore.clearPendingClarification(telegramId);
-  await replyAsCallbackResult(ctx, "👍 לא שמרתי. תוכלי לבקש מעקב שוב מתי שתרצי.");
+  await replyAsCallbackResult(ctx, "👍 לא שמרתי. אפשר לבקש מעקב שוב מתי שרוצים.");
 });
 
 // Promote one_time → recurring (keeps id + dedup history; clears expiry).
@@ -6734,7 +6808,7 @@ bot.action(/^pgn:next$/, async (ctx) => {
   try {
     const hits = sessionStore.getLastSearchHits(telegramId);
     if (!hits.length) {
-      await safeAck(ctx, "החיפוש הזה כבר לא בתוקף — תגידי לי מה תרצי לחפש 🙏", { show_alert: true });
+      await safeAck(ctx, "החיפוש הזה כבר לא בתוקף — כתבו לי מה לחפש 🙏", { show_alert: true });
       return;
     }
     const { selectSeriesForRender, venueIdentity } = require("../lib/eventSeries");
@@ -7089,6 +7163,25 @@ bot.action(/^fb:save:(\d+):([a-z_]+)$/, async (ctx) => {
     }
   }
 
+  if (reason === "not_interested") {
+    // Fire-and-forget: compound-reduce the event's category weight in
+    // the user's preference profile. Each click applies a ×0.7 factor
+    // (clamped to 0.2 floor) so repeated "not interested" signals on
+    // the same category sink it progressively lower in search results.
+    recordNotInterestedSignal(ctx.from.id, eventId).catch((err) =>
+      console.warn(`[Bot] recordNotInterestedSignal failed: ${err.message}`),
+    );
+  }
+
+  if (reason === "too_far") {
+    // Permanently suppress the venue: add location_key to
+    // user_context.preferences.suppressed_locations. search_events
+    // will skip events at this location in all future queries.
+    recordTooFarSignal(ctx.from.id, eventId).catch((err) =>
+      console.warn(`[Bot] recordTooFarSignal failed: ${err.message}`),
+    );
+  }
+
   const ack = ACK_LABELS[reason] || "✅ תודה";
   await ctx.answerCbQuery(ack);
   // Best-effort UI cleanup. If the edit fails we already toasted the
@@ -7103,6 +7196,10 @@ bot.action(/^fb:save:(\d+):([a-z_]+)$/, async (ctx) => {
       console.warn("[Bot] fb:save edit-ui failed (data saved):", err.message);
     }
   }
+
+  // Follow-up chat message — lets the user know they can always reverse
+  // the feedback by writing to the bot.
+  await ctx.reply("💡 תמיד אפשר לשנות — פשוט כתבו לי!").catch(() => {});
 });
 
 async function notifySeller(ticket, buyerName) {
