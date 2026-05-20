@@ -94,7 +94,7 @@ async function main() {
   for (const event of targets) {
     processed++;
     try {
-      const html = await fetchDetailHtml(event.id, event.name, event.source);
+      const { html } = await fetchDetailHtml(event.id, event.name, event.source);
       await maybeFillLocationKey(event.id, html, event.source);
       const after = await readLocationKey(event.id);
       if (after) filled++;

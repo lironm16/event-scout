@@ -136,7 +136,7 @@ async function main() {
     const ev = targets[i];
     scanned++;
     try {
-      const html = await fetchDetailHtml(ev.id, ev.name, ev.source);
+      const { html } = await fetchDetailHtml(ev.id, ev.name, ev.source);
       const cluster = extractSmarticketCluster(html);
       if (!cluster) {
         skippedNoCluster++;

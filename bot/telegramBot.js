@@ -37,6 +37,7 @@ const {
   removeInterest,
   isInterested,
   recordInterestSignal,
+  recordPositiveSignal,
   recordNotInterestedSignal,
   recordTooFarSignal,
 } = require("../lib/interestService");
@@ -6622,9 +6623,18 @@ bot.action(/^umb:(.+)$/, async (ctx) => {
 
     const umbrellaTitleEsc = escHtml(umbrellaTitle);
     const lines = [];
-    if (sharedUrl) {
+    // Prefer the shared booking URL (all children point to the same page).
+    // Fallback for city events: always show a link to the umbrella's parent
+    // page on the municipality website even when children have different
+    // per-child booking URLs (e.g. paid Smarticket / external links).
+    const parentCityUrl =
+      !sharedUrl && rows[0]?.source === "rg-muni"
+        ? `https://www.ramat-gan.muni.il/events/${encodeURIComponent(slug)}/`
+        : null;
+    const headerUrl = sharedUrl || parentCityUrl;
+    if (headerUrl) {
       lines.push(
-        `📋 כל אירועי <a href="${sharedUrl}">${umbrellaTitleEsc}</a>`,
+        `📋 כל אירועי <a href="${headerUrl}">${umbrellaTitleEsc}</a>`,
       );
     } else {
       lines.push(`📋 כל אירועי ${umbrellaTitleEsc}`);
@@ -6935,9 +6945,10 @@ bot.action(/^int:add:(\d+)$/, async (ctx) => {
   const eventId = ctx.match[1];
   try {
     await addInterest(ctx.from.id, eventId);
-    // Fire-and-forget: record learning signal without blocking the response
+    // Fire-and-forget: store learning signal + boost category/tag weights
     recordInterestSignal(ctx.from.id, eventId).catch(() => {});
-    await ctx.answerCbQuery("⭐ שמרתי! אשלח תזכורת ערב לפני האירוע");
+    recordPositiveSignal(ctx.from.id, eventId).catch(() => {});
+    await ctx.answerCbQuery("⭐ שמרנו! נציג לך יותר אירועים כאלה");
     // Flip the button to the "cancel" state
     await ctx.editMessageReplyMarkup(
       replaceInlineButton(
@@ -6956,7 +6967,7 @@ bot.action(/^int:rem:(\d+)$/, async (ctx) => {
   const eventId = ctx.match[1];
   try {
     await removeInterest(ctx.from.id, eventId);
-    await ctx.answerCbQuery("הוסרה התזכורת");
+    await ctx.answerCbQuery("הוסר הסימון");
     await ctx.editMessageReplyMarkup(
       replaceInlineButton(
         ctx.callbackQuery.message.reply_markup,
