@@ -440,6 +440,11 @@ async function notifyWatchers(event) {
 // 45-day window. Any event that is in the DB but absent from the feed
 // has been deleted on Smarticket's side and should be archived.
 //
+// Also archives any Smarticket event with date IS NULL — these are
+// payment/placeholder rows that Smarticket exposes as events but have
+// no real date. isFutureOrToday() already filters them from new upserts;
+// this call cleans up any that slipped through in earlier scrape cycles.
+//
 // The window guard is essential: events beyond LOOKAHEAD_DAYS are simply
 // not yet returned by the calendar API — we must not archive them.
 //
@@ -449,24 +454,45 @@ async function archiveDroppedSmartTicketEvents(seenIds, range) {
   const smarticketSources = TENANTS.filter((t) => t.kind === "smarticket").map(
     (t) => t.source,
   );
-  if (!smarticketSources.length || !seenIds.size) return 0;
+  if (!smarticketSources.length) return 0;
 
-  const { data: candidates, error } = await supabase
+  const toArchive = new Set();
+
+  // ── 1. In-window events missing from this cycle's feed ───────────────
+  if (seenIds.size) {
+    const { data: dropped, error } = await supabase
+      .from("events")
+      .select("id")
+      .in("source", smarticketSources)
+      .eq("archived", false)
+      .gte("date", range.start)
+      .lte("date", range.end)
+      .not("id", "in", `(${[...seenIds].join(",")})`);
+
+    if (error) {
+      console.warn(`[Check] archiveDropped: candidate query failed — ${error.message}`);
+    } else {
+      (dropped || []).forEach((r) => toArchive.add(r.id));
+    }
+  }
+
+  // ── 2. Events with no date (payment/fake rows) ────────────────────────
+  const { data: dateless, error: datelessErr } = await supabase
     .from("events")
     .select("id")
     .in("source", smarticketSources)
     .eq("archived", false)
-    .gte("date", range.start)
-    .lte("date", range.end)
-    .not("id", "in", `(${[...seenIds].join(",")})`);
+    .is("date", null);
 
-  if (error) {
-    console.warn(`[Check] archiveDropped: candidate query failed — ${error.message}`);
-    return 0;
+  if (datelessErr) {
+    console.warn(`[Check] archiveDropped: dateless query failed — ${datelessErr.message}`);
+  } else {
+    (dateless || []).forEach((r) => toArchive.add(r.id));
   }
-  if (!candidates?.length) return 0;
 
-  const ids = candidates.map((r) => r.id);
+  if (!toArchive.size) return 0;
+
+  const ids = [...toArchive];
   const { error: archiveErr } = await supabase
     .from("events")
     .update({ archived: true })
@@ -478,7 +504,7 @@ async function archiveDroppedSmartTicketEvents(seenIds, range) {
   }
 
   console.log(
-    `[Check] Archived ${ids.length} dropped Smarticket event(s): ${ids.join(", ")}`,
+    `[Check] Archived ${ids.length} dropped/dateless Smarticket event(s): ${ids.join(", ")}`,
   );
   return ids.length;
 }
