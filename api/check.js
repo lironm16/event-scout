@@ -435,6 +435,54 @@ async function notifyWatchers(event) {
   }
 }
 
+// Compare the set of Smarticket IDs seen in this scrape cycle against
+// every non-archived Smarticket event whose date falls within the same
+// 45-day window. Any event that is in the DB but absent from the feed
+// has been deleted on Smarticket's side and should be archived.
+//
+// The window guard is essential: events beyond LOOKAHEAD_DAYS are simply
+// not yet returned by the calendar API — we must not archive them.
+//
+// Called at the end of upsertEvents so the seenIds set is already fully
+// populated (after all filter/skip decisions).
+async function archiveDroppedSmartTicketEvents(seenIds, range) {
+  const smarticketSources = TENANTS.filter((t) => t.kind === "smarticket").map(
+    (t) => t.source,
+  );
+  if (!smarticketSources.length || !seenIds.size) return 0;
+
+  const { data: candidates, error } = await supabase
+    .from("events")
+    .select("id")
+    .in("source", smarticketSources)
+    .eq("archived", false)
+    .gte("date", range.start)
+    .lte("date", range.end)
+    .not("id", "in", `(${[...seenIds].join(",")})`);
+
+  if (error) {
+    console.warn(`[Check] archiveDropped: candidate query failed — ${error.message}`);
+    return 0;
+  }
+  if (!candidates?.length) return 0;
+
+  const ids = candidates.map((r) => r.id);
+  const { error: archiveErr } = await supabase
+    .from("events")
+    .update({ archived: true })
+    .in("id", ids);
+
+  if (archiveErr) {
+    console.warn(`[Check] archiveDropped: update failed — ${archiveErr.message}`);
+    return 0;
+  }
+
+  console.log(
+    `[Check] Archived ${ids.length} dropped Smarticket event(s): ${ids.join(", ")}`,
+  );
+  return ids.length;
+}
+
 async function upsertEvents(events) {
   const now = new Date().toISOString();
   let skippedPast = 0;
@@ -632,6 +680,14 @@ async function upsertEvents(events) {
       console.log(`[Check] last_changed_at bumped on ${changedIds.length} rows`);
     }
   }
+
+  // Archive events that were in the DB but absent from the calendar
+  // response this cycle — they've been deleted on Smarticket's side.
+  // We pass the same date range used to fetch so we only touch events
+  // that should have appeared had they still existed.
+  const range = buildDateRange();
+  const seenIds = new Set(rows.map((r) => r.id));
+  await archiveDroppedSmartTicketEvents(seenIds, range);
 
   return rows.length;
 }
