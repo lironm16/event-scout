@@ -759,6 +759,17 @@ async function check() {
     }
   }
 
+  // Evening-before reminders for ⭐ event interests.
+  // Only fires during 18:00–22:00 Jerusalem time; no-ops outside the window.
+  if (bot) {
+    try {
+      const { sendPendingReminders } = require("../lib/reminderService");
+      await sendPendingReminders(bot.telegram);
+    } catch (err) {
+      console.error("[Reminders] error:", err.message);
+    }
+  }
+
   // Saved-search LIVE push was REMOVED in the May-2026 newsletter
   // redesign — saved-search topics now drive the buffered delivery
   // above. The `saved_searches` rows themselves are still used by:

@@ -33,6 +33,12 @@ const {
   getWatchedEvents,
 } = require("../lib/watchService");
 const {
+  addInterest,
+  removeInterest,
+  isInterested,
+  recordInterestSignal,
+} = require("../lib/interestService");
+const {
   listSavedSearches,
   archiveSavedSearch,
   promoteToRecurring: promoteSavedSearchToRecurring,
@@ -698,6 +704,20 @@ setInterval(async () => {
 // hyperlink too in the user's Telegram client, so the trade-off lost
 // its only benefit while costing us HTML-escape complexity. Reverted
 // May 2026.
+// Replace a single button inside a Telegram reply_markup by callback_data.
+// Returns a new reply_markup object. Used by interest toggle handlers to
+// flip the button text without re-rendering the whole card.
+function replaceInlineButton(replyMarkup, oldCallbackData, newButton) {
+  if (!replyMarkup?.inline_keyboard) return replyMarkup;
+  return {
+    inline_keyboard: replyMarkup.inline_keyboard.map((row) =>
+      row.map((btn) =>
+        btn.callback_data === oldCallbackData ? newButton : btn,
+      ),
+    ),
+  };
+}
+
 function buildDetailsButton(event) {
   const url = getBookingUrl(event);
   if (!url) return null;
@@ -945,6 +965,16 @@ async function sendEventCard(ctx, event, opts = {}) {
         : Markup.button.callback("🔔 עדכן אותי אם מתפנה", watchCb),
     ]);
   }
+
+  // "Interested" toggle — marks the event for a day-before reminder and
+  // records a learning signal. State is fetched lazily so we don't block
+  // card rendering on a DB round-trip; the button reflects current state.
+  const interested = await isInterested(ctx.from.id, event.id).catch(() => false);
+  rows.push([
+    interested
+      ? Markup.button.callback("⭐ מעניין אותי ✓", `int:rem:${event.id}`)
+      : Markup.button.callback("⭐ מעניין אותי", `int:add:${event.id}`),
+  ]);
 
   // Always offer the "not relevant" feedback path. Clicks open a reason
   // picker (`fb:reasons:<event_id>`); we use this both to suppress
@@ -6821,6 +6851,48 @@ bot.action(/^unw:(\d+)$/, async (ctx) => {
   } catch (err) {
     console.error("[Bot] unw error:", err.message);
     await ctx.answerCbQuery("⚠️ שגיאה");
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Event interest toggle (⭐ מעניין אותי)
+// ──────────────────────────────────────────────────────────────────────────
+bot.action(/^int:add:(\d+)$/, async (ctx) => {
+  const eventId = ctx.match[1];
+  try {
+    await addInterest(ctx.from.id, eventId);
+    // Fire-and-forget: record learning signal without blocking the response
+    recordInterestSignal(ctx.from.id, eventId).catch(() => {});
+    await ctx.answerCbQuery("⭐ שמרתי! אשלח תזכורת ערב לפני האירוע");
+    // Flip the button to the "cancel" state
+    await ctx.editMessageReplyMarkup(
+      replaceInlineButton(
+        ctx.callbackQuery.message.reply_markup,
+        `int:add:${eventId}`,
+        { text: "⭐ מעניין אותי ✓", callback_data: `int:rem:${eventId}` },
+      ),
+    );
+  } catch (err) {
+    console.error("[Bot] int:add error:", err.message);
+    await ctx.answerCbQuery("⚠️ שגיאה, נסי שוב");
+  }
+});
+
+bot.action(/^int:rem:(\d+)$/, async (ctx) => {
+  const eventId = ctx.match[1];
+  try {
+    await removeInterest(ctx.from.id, eventId);
+    await ctx.answerCbQuery("הוסרה התזכורת");
+    await ctx.editMessageReplyMarkup(
+      replaceInlineButton(
+        ctx.callbackQuery.message.reply_markup,
+        `int:rem:${eventId}`,
+        { text: "⭐ מעניין אותי", callback_data: `int:add:${eventId}` },
+      ),
+    );
+  } catch (err) {
+    console.error("[Bot] int:rem error:", err.message);
+    await ctx.answerCbQuery("⚠️ שגיאה, נסי שוב");
   }
 });
 
