@@ -56,7 +56,7 @@ const { _saveOffer: saveTicketOfferToDb } = require("../lib/agent/tools/ticketOf
 const referralService = require("../lib/referralService");
 const { flushDueNotifications } = require("../lib/scheduleService");
 const { formatHebrewDate, formatTimeRange, formatTagLine, formatAdultAgeGate, getEventIcon, rtlLine } = require("../lib/eventFormat");
-const { formatTicketsLine, formatLowStockBadge, buildNavButtons, buildNavPickerLinks } = require("../lib/eventCard");
+const { formatTicketsLine, formatLowStockBadge, buildNavButtons } = require("../lib/eventCard");
 const { normalizeImageUrl } = require("../lib/imageUrl");
 const { isCityWideLocation } = require("../lib/locationStore");
 const { getBookingUrl } = require("../lib/sourceUrls");
@@ -1457,10 +1457,20 @@ bot.start(async (ctx) => {
     // feature overview without typing it from memory. To re-open
     // the interests picker they can use /help or /interests; we
     // deliberately don't auto-open it here on every /start.
+    const catalogUrl = process.env.MINIAPP_URL;
     await ctx.reply(
       "שיחה חדשה התחילה 🔄\n" +
         "אפשר לכתוב לי על מה לחפש, או לבחור מהתפריט:\n\n" +
         "/profile · /saved · /watching · /interests · /invite · /help",
+      catalogUrl
+        ? {
+            reply_markup: {
+              inline_keyboard: [[
+                { text: "📅 לקטלוג האירועים", web_app: { url: catalogUrl } },
+              ]],
+            },
+          }
+        : {},
     );
     return;
   }
@@ -1490,6 +1500,24 @@ bot.start(async (ctx) => {
   // prompt and types free text, the agent handles it; the unanswered
   // gender keyboard sits harmlessly above and they can still tap it
   // later (it's just a regular inline keyboard).
+});
+
+// /catalog — opens the personalized Mini App event catalog.
+// Works as a fallback entry point for users who dismissed the menu button
+// or are browsing from desktop Telegram where the menu button isn't prominent.
+bot.command("catalog", async (ctx) => {
+  const catalogUrl = process.env.MINIAPP_URL;
+  if (!catalogUrl) {
+    await ctx.reply("הקטלוג עדיין לא מוגדר. פנה למפעיל הבוט.");
+    return;
+  }
+  await ctx.reply("פתח את קטלוג האירועים המותאם לך 👇", {
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "📅 לקטלוג האירועים", web_app: { url: catalogUrl } },
+      ]],
+    },
+  });
 });
 
 // /help — manual trigger for the welcome / feature overview. Useful
@@ -6096,47 +6124,8 @@ function buildNeededKeyboard(eventId) {
   };
 }
 
-// nav:<lat>,<lng>  — per-app navigation picker. The "🧭 ניווט"
-// button on every event card is a CALLBACK (not a URL) so we can
-// open a follow-up message with three deep-link buttons (Waze /
-// Google Maps / Apple Maps) and let the user pick the app they
-// actually use. Telegram URL buttons require http(s), so we can't
-// just emit a geo: intent — but offering all three deep links
-// effectively gives the user the same "open with" choice.
-//
-// Coords are encoded directly in callback_data (no server-side
-// cache) so the picker keeps working across bot restarts and for
-// arbitrarily old cards in chat history. The regex requires both
-// coords; the URL-button fallback path (events without coords)
-// never reaches this handler.
-bot.action(/^nav:(-?\d+\.\d+),(-?\d+\.\d+)$/, async (ctx) => {
-  try {
-    const lat = ctx.match[1];
-    const lng = ctx.match[2];
-    await safeAck(ctx);
-    const links = buildNavPickerLinks(lat, lng);
-    // We use ctx.reply (a new message) rather than editing the
-    // tapped card's reply_markup — editing would obliterate the
-    // other buttons on the card (פרטים / לא מתאים / שמרי על
-    // מעקב). Sending as a follow-up message keeps the original
-    // card intact, which matters because the user often wants
-    // to come back to it after navigating.
-    await ctx.reply("איך לפתוח את הניווט?", {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "🚗 Waze", url: links.waze },
-            { text: "🗺 Google Maps", url: links.gmaps },
-            { text: "🍎 Apple Maps", url: links.apple },
-          ],
-        ],
-      },
-    });
-  } catch (err) {
-    console.error("[Bot] nav action error:", err.stack || err.message);
-    try { await safeAck(ctx, "⚠️"); } catch {}
-  }
-});
+// nav: callback handler removed — nav buttons are now direct URL
+// buttons to Google Maps. The OS/browser handles app selection natively.
 
 bot.action(/^wt:(\d+)(?::(\d+))?$/, async (ctx) => {
   const eventId = ctx.match[1];
@@ -7548,22 +7537,45 @@ runCleanup()
         } catch (err) {
           console.error("[Bot] Newsletter scheduler failed to start:", err.message);
         }
-        // OAuth callback server — only starts when Google credentials
-        // are configured. On Railway the worker service type already
-        // exposes $PORT; locally we default to 3000 inside the server.
-        // The bot polls Telegram regardless; the server just adds the
-        // single `/oauth/google/callback` route for the Calendar flow.
-        if (process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_REDIRECT_URI) {
-          try {
-            const oauthServer = require("../lib/oauthServer");
-            oauthServer.start({ bot });
-          } catch (err) {
-            console.error("[Bot] OAuth server failed to start:", err.message);
-          }
-        } else {
+        // Express server — hosts the Mini App + Google OAuth callback.
+        // Always started so the Mini App catalog is available regardless
+        // of whether Google Calendar is configured.
+        try {
+          const oauthServer = require("../lib/oauthServer");
+          oauthServer.start({ bot });
+        } catch (err) {
+          console.error("[Bot] Express server failed to start:", err.message);
+        }
+        if (!process.env.GOOGLE_OAUTH_CLIENT_ID || !process.env.GOOGLE_OAUTH_REDIRECT_URI) {
           console.log(
             "[Bot] Google OAuth not configured — /connect_calendar disabled. " +
               "Set GOOGLE_OAUTH_CLIENT_ID + _REDIRECT_URI + _CLIENT_SECRET to enable.",
+          );
+        }
+
+        // Register the Mini App as the bot's Menu Button — appears as a
+        // persistent "📅 קטלוג אירועים" button at the bottom of every chat.
+        // Only registers when MINIAPP_URL is configured (set this to the
+        // public URL of the deployed service + /miniapp, e.g.
+        // https://your-service.up.railway.app/miniapp).
+        const miniAppUrl = process.env.MINIAPP_URL;
+        if (miniAppUrl) {
+          bot.telegram
+            .setChatMenuButton({
+              menu_button: {
+                type: "web_app",
+                text: "📅 קטלוג אירועים",
+                web_app: { url: miniAppUrl },
+              },
+            })
+            .then(() => console.log(`[Bot] Mini App menu button set → ${miniAppUrl}`))
+            .catch((err) =>
+              console.warn(`[Bot] setChatMenuButton failed: ${err.message}`),
+            );
+        } else {
+          console.log(
+            "[Bot] MINIAPP_URL not set — Mini App menu button skipped. " +
+              "Set MINIAPP_URL to enable the catalog button.",
           );
         }
       })

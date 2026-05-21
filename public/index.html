@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>אירועים ברמת גן</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-top">
+    <h1>📅 אירועים ברמת גן</h1>
+    <span class="greeting" id="greeting"></span>
+  </div>
+  <div class="filter-bar" id="filterBar">
+    <button class="chip active" data-audience="default">הכל</button>
+    <button class="chip" data-audience="family">משפחה</button>
+    <button class="chip" data-audience="kids">ילדים</button>
+    <button class="chip" data-audience="toddlers">תינוקות</button>
+    <button class="chip" data-audience="teens">נוער</button>
+    <button class="chip" data-audience="parents">הורים</button>
+    <button class="chip" data-audience="adults">מבוגרים</button>
+    <button class="chip" data-audience="all">כל הגילאים</button>
+  </div>
+</header>
+
+<div class="search-wrap">
+  <input
+    class="search-input"
+    type="search"
+    id="searchInput"
+    placeholder="חיפוש לפי שם..."
+    autocomplete="off"
+  />
+</div>
+
+<main class="content">
+  <div class="spinner-wrap" id="spinner">
+    <div class="spinner"></div>
+  </div>
+  <div id="error" style="display:none"></div>
+  <div id="catalog" style="display:none">
+    <div class="results-meta" id="resultsMeta"></div>
+    <div class="card-grid" id="cardGrid"></div>
+    <div id="noResults" style="display:none" class="empty-state">
+      <div style="font-size:2.5rem">🔍</div>
+      <p>לא נמצאו אירועים תואמים</p>
+    </div>
+  </div>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
