@@ -49,9 +49,61 @@ body {
   flex: 1;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .greeting {
   font-size: .82rem;
   color: var(--hint);
+}
+
+/* ── View toggle (list / map) ─────────────────────────────────────── */
+.view-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--bg2);
+  border-radius: 8px;
+  padding: 2px;
+}
+.view-btn {
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: .85rem;
+  cursor: pointer;
+  color: var(--hint);
+  transition: background .15s, color .15s;
+}
+.view-btn.active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* ── Map view ─────────────────────────────────────────────────────── */
+#mapContainer {
+  height: calc(100vh - 160px);
+  width: 100%;
+}
+/* Leaflet popup in RTL */
+.leaflet-popup-content {
+  direction: rtl;
+  text-align: right;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: .88rem;
+  line-height: 1.4;
+}
+.map-popup-title { font-weight: 700; margin-bottom: 4px; }
+.map-popup-meta  { color: #666; font-size: .8rem; }
+.map-popup-link  {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--link, #2481cc);
+  text-decoration: none;
+  font-size: .82rem;
 }
 
 /* ── Filter sections ──────────────────────────────────────────────── */
@@ -252,6 +304,36 @@ body {
 .btn-secondary {
   background: color-mix(in srgb, var(--hint) 15%, transparent);
   color: var(--text);
+}
+.btn-interest {
+  background: color-mix(in srgb, gold 18%, transparent);
+  color: var(--text);
+}
+.btn-interest.active {
+  background: color-mix(in srgb, gold 40%, transparent);
+  font-weight: 700;
+}
+.btn-muted {
+  background: transparent;
+  color: var(--hint);
+  border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent);
+}
+
+/* ── Feedback row ─────────────────────────────────────────────────── */
+.card-feedback {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--hint) 15%, transparent);
+}
+
+/* ── Map pin emoji ────────────────────────────────────────────────── */
+.map-pin {
+  font-size: 1.4rem;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.4));
+  cursor: pointer;
 }
 
 /* ── Audience line ────────────────────────────────────────────────── */

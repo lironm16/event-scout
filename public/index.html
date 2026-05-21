@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>אירועים ברמת גן</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Leaflet for map view -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -12,7 +15,13 @@
 <header class="app-header">
   <div class="header-top">
     <h1>📅 אירועים ברמת גן</h1>
-    <span class="greeting" id="greeting"></span>
+    <div class="header-actions">
+      <span class="greeting" id="greeting"></span>
+      <div class="view-toggle" id="viewToggle">
+        <button class="view-btn active" data-view="list" title="רשימה">☰</button>
+        <button class="view-btn" data-view="map" title="מפה">🗺️</button>
+      </div>
+    </div>
   </div>
 
   <!-- Date quick-filters -->
@@ -32,7 +41,7 @@
   </div>
 </header>
 
-<div class="search-wrap">
+<div class="search-wrap" id="searchWrap">
   <input
     class="search-input"
     type="search"
@@ -43,10 +52,10 @@
 </div>
 
 <main class="content">
-  <div class="spinner-wrap" id="spinner">
-    <div class="spinner"></div>
-  </div>
+  <div class="spinner-wrap" id="spinner"><div class="spinner"></div></div>
   <div id="error" style="display:none"></div>
+
+  <!-- List view -->
   <div id="catalog" style="display:none">
     <div class="results-meta" id="resultsMeta"></div>
     <div class="card-grid" id="cardGrid"></div>
@@ -54,6 +63,11 @@
       <div style="font-size:2.5rem">🔍</div>
       <p>לא נמצאו אירועים תואמים</p>
     </div>
+  </div>
+
+  <!-- Map view -->
+  <div id="mapView" style="display:none">
+    <div id="mapContainer"></div>
   </div>
 </main>
 
