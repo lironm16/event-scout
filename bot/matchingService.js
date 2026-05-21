@@ -217,7 +217,7 @@ async function getAvailableExtraCols() {
 // without it, getBookingUrl throws ("requires event.external_slug") and
 // every render of a city event card fails.
 const BASE_COLS =
-  "id, source, external_slug, external_url, umbrella_slug, umbrella_title, name, date, start_time, end_time, image, tickets_left, location_key";
+  "id, source, external_slug, external_url, online_url, umbrella_slug, umbrella_title, name, date, start_time, end_time, image, tickets_left, location_key";
 const LOCATION_JOIN =
   "locations:location_key(raw_address, lat, lng, found, kind)";
 

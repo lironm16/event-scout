@@ -940,6 +940,11 @@ async function sendEventCard(ctx, event, opts = {}) {
   const topRow = [...navBtns, detailsBtn].filter(Boolean);
   if (topRow.length) rows.push(topRow);
 
+  // Online meeting join button — shown only when event has a Zoom/Meet link.
+  if (event.online_url) {
+    rows.push([Markup.button.url("📹 הצטרף למפגש", event.online_url)]);
+  }
+
   // Series / umbrella button — TWO possible behaviours, mutually
   // exclusive (the user picked one button max for visual restraint):
   //
@@ -6221,7 +6226,7 @@ bot.action(/^bg:(\d+):(\d+)$/, async (ctx) => {
     const supabase = require("../lib/supabase");
     const { data: row } = await supabase
       .from("events")
-      .select("source, external_slug, external_url")
+      .select("source, external_slug, external_url, online_url")
       .eq("id", eventId)
       .maybeSingle();
     const linkEvent = {
@@ -6279,7 +6284,7 @@ async function rebuildSeriesPayloadFromDb(seriesId) {
   const { data: rep, error: repErr } = await supabase
     .from("events")
     .select(
-      "id, source, external_slug, external_url, name, location_key, min_months, max_months, " +
+      "id, source, external_slug, external_url, online_url, name, location_key, min_months, max_months, " +
         "locations:location_key(raw_address, lat, lng, found)"
     )
     .eq("id", seriesId)
@@ -6300,7 +6305,7 @@ async function rebuildSeriesPayloadFromDb(seriesId) {
   const { data: rows, error: occErr } = await supabase
     .from("events")
     .select(
-      "id, source, external_slug, external_url, name, date, start_time, end_time, " +
+      "id, source, external_slug, external_url, online_url, name, date, start_time, end_time, " +
         "tickets_left, description, location_key, min_months, max_months, " +
         // Per-occurrence venue join. lat/lng/found feed `venueIdentity`
         // so two rows that resolved the same physical place from
@@ -6571,7 +6576,7 @@ bot.action(/^umb:(.+)$/, async (ctx) => {
     const { data: rows, error } = await supabase
       .from("events")
       .select(
-        "id, source, external_slug, external_url, umbrella_title, name, date, start_time, end_time, tickets_left, description, tag_ids, location_key, locations:location_key(raw_address, lat, lng)",
+        "id, source, external_slug, external_url, online_url, umbrella_title, name, date, start_time, end_time, tickets_left, description, tag_ids, location_key, locations:location_key(raw_address, lat, lng)",
       )
       .eq("umbrella_slug", slug)
       .eq("archived", false)
