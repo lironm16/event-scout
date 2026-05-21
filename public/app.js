@@ -40,7 +40,8 @@
   function todayISO() { return new Date().toISOString().slice(0, 10); }
   function dateRange(key) {
     const today = todayISO();
-    if (key === "today") return [today, today];
+    if (key === "today")    return [today, today];
+    if (key === "tomorrow") { const t = offsetISO(1); return [t, t]; }
     if (key === "week") {
       const now = new Date(), day = now.getDay();
       const mon = new Date(now); mon.setDate(now.getDate() - ((day + 6) % 7));
