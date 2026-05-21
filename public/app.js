@@ -134,12 +134,36 @@
     else renderMap(visible);
   }
 
-  // ── Render list ───────────────────────────────────────────────────────
+  // ── Render list (grouped by date) ────────────────────────────────────
   function renderGrid(events) {
     cardGrid.innerHTML = "";
-    resultsMeta.textContent = events.length ? `${events.length} אירועים` : "";
     noResults.style.display = events.length ? "none" : "block";
-    for (const ev of events) cardGrid.appendChild(buildCard(ev));
+    if (!events.length) { resultsMeta.textContent = ""; return; }
+
+    // Group by date string (YYYY-MM-DD).
+    const groups = [];
+    let lastDate = null;
+    for (const ev of events) {
+      if (ev.date !== lastDate) {
+        groups.push({ date: ev.date, dateHe: ev.dateHe || ev.date, events: [] });
+        lastDate = ev.date;
+      }
+      groups[groups.length - 1].events.push(ev);
+    }
+
+    let total = 0;
+    for (const g of groups) {
+      // Date section header.
+      const header = document.createElement("div");
+      header.className = "date-header";
+      header.textContent = g.dateHe;
+      cardGrid.appendChild(header);
+      for (const ev of g.events) {
+        cardGrid.appendChild(buildCard(ev));
+        total++;
+      }
+    }
+    resultsMeta.textContent = `${total} אירועים`;
   }
 
   // ── Build card ────────────────────────────────────────────────────────
@@ -149,7 +173,7 @@
     card.dataset.id = ev.id;
 
     const metaParts = [];
-    if (ev.dateHe) metaParts.push(`📅 ${esc(ev.dateHe)}`);
+    // Date is shown as a section header above the group — not repeated in the card.
     if (ev.timeHe) metaParts.push(`🕐 ${esc(ev.timeHe)}`);
     if (ev.location && !isCityWide(ev.location)) metaParts.push(`📍 ${esc(ev.location)}`);
     else if (isCityWide(ev.location)) metaParts.push(`🗺️ ברחבי העיר`);
