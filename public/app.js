@@ -124,10 +124,15 @@
     const visible = allEvents.filter((e) => {
       if (df && e.date < df) return false;
       if (dt && e.date > dt) return false;
-      // Type filter.
-      if (activeType === "registration" && !e.bookingUrl && !e.onlineUrl) return false;
-      if (activeType === "free"         && (e.bookingUrl || e.onlineUrl))  return false;
-      if (activeType === "online"       && !e.onlineUrl)                   return false;
+      // "מחייב הרשמה" = has a dedicated registration page (external_url)
+      // OR is an online event (zoom/meet) OR is a paid Smarticket event.
+      // City page URLs (bookingUrl for rg-muni without external_url) are
+      // NOT registration — they're just info pages.
+      const requiresReg = !!(e.externalUrl || e.onlineUrl ||
+        (e.source !== "rg-muni" && e.ticketsLeft != null));
+      if (activeType === "registration" && !requiresReg) return false;
+      if (activeType === "free"         && requiresReg)  return false;
+      if (activeType === "online"       && !e.onlineUrl) return false;
       if (activeType === "low_stock") {
         const t = e.ticketsLeft;
         if (t == null || t <= 0 || t > 10) return false;
@@ -136,6 +141,8 @@
       if (activeTag && !(e.tags || []).includes(activeTag)) return false;
       // Tag drill-down.
       if (tagDrilldown && !(e.tags || []).includes(tagDrilldown)) return false;
+      // Umbrella drill-down.
+      if (umbrellaDrilldown && e.umbrella_slug !== umbrellaDrilldown.slug) return false;
       if (q) {
         const hay = [e.name, e.location, e.category, ...(e.tags || [])]
           .filter(Boolean).join(" ").toLowerCase();
@@ -148,20 +155,24 @@
     else renderMap(visible);
   }
 
-  // ── Tag drill-down bar ────────────────────────────────────────────────
+  // ── Drill-down bar (tag or umbrella) ─────────────────────────────────
   function updateDrillBar() {
     if (!drillBar) return;
-    if (tagDrilldown) {
+    const inDrill = tagDrilldown || umbrellaDrilldown;
+    if (inDrill) {
+      const label = tagDrilldown
+        ? `🏷️ ${esc(tagDrilldown)}`
+        : `📋 ${esc(umbrellaDrilldown.title)}`;
       drillBar.style.display = "flex";
       drillBar.innerHTML = `
         <button class="drill-back" id="drillBackBtn">← חזרה</button>
-        <span class="drill-label">🏷️ ${esc(tagDrilldown)}</span>
+        <span class="drill-label">${label}</span>
       `;
       document.getElementById("drillBackBtn").addEventListener("click", () => {
         tagDrilldown = null;
+        umbrellaDrilldown = null;
         applyFilters();
       });
-      // Hide other filters while drilling.
       searchWrap.style.display = "none";
     } else {
       drillBar.style.display = "none";
@@ -368,13 +379,14 @@
     }, 500);
   };
 
-  // Filter to umbrella siblings (client-side).
+  // umbrella drill-down state.
+  let umbrellaDrilldown = null; // { slug, title }
+
+  // Filter to umbrella siblings (client-side) with back button.
   window.filterUmbrella = function (slug, title) {
-    const matches = allEvents.filter((e) => e.umbrella_slug === slug);
-    if (!matches.length) return;
-    renderGrid(matches);
-    resultsMeta.textContent = `📋 ${esc(title)} — ${matches.length} אירועים`;
-    // Scroll to top.
+    umbrellaDrilldown = { slug, title };
+    document.querySelectorAll(".event-card.open").forEach((c) => c.classList.remove("open"));
+    applyFilters();
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
