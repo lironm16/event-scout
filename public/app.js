@@ -228,16 +228,17 @@
     card.dataset.id = ev.id;
 
     const metaParts = [];
-    // Date is shown as a section header above the group — not repeated in the card.
-    if (ev.timeHe) metaParts.push(`🕐 ${esc(ev.timeHe)}`);
+    // Time is shown as a badge on the image — not repeated in the meta line.
     if (ev.location && !isCityWide(ev.location)) metaParts.push(`📍 ${esc(ev.location)}`);
     else if (isCityWide(ev.location)) metaParts.push(`🗺️ ברחבי העיר`);
 
     const tagsHtml = (ev.tags || []).slice(0, 5)
       .map((t) => `<button class="tag-pill tag-pill-btn" onclick="window.drillTag('${esc(t)}')">${esc(t)}</button>`).join("");
 
-    const audienceHtml = ev.audienceLine
-      ? `<div class="audience-line">${esc(ev.audienceLine)}</div>` : "";
+    // Audience/age shown in meta line (not as a separate div).
+    if (ev.audienceLine) metaParts.push(esc(ev.audienceLine));
+
+    const audienceHtml = "";
 
     // Ticket / availability line — mirrors the bot's formatTicketsLine.
     let ticketHtml = "";

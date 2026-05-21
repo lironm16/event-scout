@@ -340,11 +340,6 @@ body {
   margin-bottom: 8px;
 }
 
-.audience-line {
-  font-size: .82rem;
-  color: var(--hint);
-  margin-bottom: 6px;
-}
 
 /* ── Ticket availability line ─────────────────────────────────────── */
 .ticket-line {
@@ -371,6 +366,12 @@ body {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+/* Show full description when card is expanded */
+.event-card.open .card-desc-preview {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
 }
 
 .card-umbrella {
