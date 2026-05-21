@@ -402,9 +402,9 @@
       const icon = L.divIcon({
         className: "",
         html: `<div class="map-pin">${esc(ev.icon || "📌")}</div>`,
-        iconSize: [32, 32],
-        iconAnchor: [16, 32],
-        popupAnchor: [0, -32],
+        iconSize: [40, 40],
+        iconAnchor: [20, 40],
+        popupAnchor: [0, -42],
       });
       const marker = L.marker([ev._lat, ev._lng], { icon }).addTo(leafletMap);
       marker.bindPopup(`
