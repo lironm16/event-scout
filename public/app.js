@@ -257,6 +257,10 @@
       ? `<div class="card-umbrella" onclick="event.stopPropagation();window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 ${esc(ev.umbrella_title)}</div>`
       : "";
 
+    const dateBadge = ev.timeHe
+      ? `<div class="card-date-badge">${esc(ev.timeHe)}</div>`
+      : (ev.dateHe ? `<div class="card-date-badge">${esc(ev.dateHe)}</div>` : "");
+
     const imgHtml = ev.image
       ? `<div class="card-img-wrap card-click">
            <img class="card-image"
@@ -265,8 +269,9 @@
              loading="lazy"
              onerror="this.closest('.card-img-wrap').style.display='none'"
            />
+           ${dateBadge}
          </div>`
-      : "";
+      : (dateBadge ? `<div class="card-img-wrap card-img-placeholder card-click">${dateBadge}</div>` : "");
 
     const isInterested = interestedIds.has(ev.id);
 
