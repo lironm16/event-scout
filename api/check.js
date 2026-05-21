@@ -490,6 +490,27 @@ async function archiveDroppedSmartTicketEvents(seenIds, range) {
     (dateless || []).forEach((r) => toArchive.add(r.id));
   }
 
+  // ── 3. Ghost events: enrichment ran but no time/slug/url ─────────────
+  // These are course-enrollment or payment placeholders that Smarticket
+  // exposes with a date in the API but shows as "ללא תאריך" on the
+  // website. After enrichment they still have no start_time, no
+  // external_slug, and no external_url — they are not actionable.
+  const { data: ghosts, error: ghostErr } = await supabase
+    .from("events")
+    .select("id")
+    .in("source", smarticketSources)
+    .eq("archived", false)
+    .is("start_time", null)
+    .is("external_slug", null)
+    .is("external_url", null)
+    .not("enrichment_last_attempt", "is", null);
+
+  if (ghostErr) {
+    console.warn(`[Check] archiveDropped: ghost query failed — ${ghostErr.message}`);
+  } else {
+    (ghosts || []).forEach((r) => toArchive.add(r.id));
+  }
+
   if (!toArchive.size) return 0;
 
   const ids = [...toArchive];
@@ -504,7 +525,7 @@ async function archiveDroppedSmartTicketEvents(seenIds, range) {
   }
 
   console.log(
-    `[Check] Archived ${ids.length} dropped/dateless Smarticket event(s): ${ids.join(", ")}`,
+    `[Check] Archived ${ids.length} dropped/dateless/ghost Smarticket event(s): ${ids.join(", ")}`,
   );
   return ids.length;
 }
