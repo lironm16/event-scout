@@ -249,10 +249,7 @@
       else              ticketHtml = `<div class="ticket-line">🎫 ${t} כרטיסים</div>`;
     }
 
-    // Description preview — first 120 chars, shown without expand.
-    const descPreview = ev.description
-      ? `<div class="card-desc-preview">📝 ${esc(ev.description.slice(0, 150).trim())}${ev.description.length > 150 ? "…" : ""}</div>`
-      : "";
+    // Description is shown only in the expanded detail section — not in the collapsed card.
 
     const umbrellaHtml = ev.umbrella_title
       ? `<div class="card-umbrella" onclick="event.stopPropagation();window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 ${esc(ev.umbrella_title)}</div>`
@@ -287,7 +284,6 @@
         ${umbrellaHtml}
         <div class="card-meta">${metaParts.map((p) => `<span>${p}</span>`).join("")}</div>
         ${ticketHtml}
-        ${descPreview}
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}
       </div>
       <div class="card-detail">
@@ -305,11 +301,9 @@
   function buildDetail(ev, isInterested) {
     const parts = [];
 
-    // Full description in expanded view (only if longer than preview threshold).
-    if (ev.description && ev.description.length > 150) {
+    // Full description shown in expanded view.
+    if (ev.description) {
       parts.push(`<div class="card-description">${esc(ev.description).replace(/\n/g, "<br>")}</div>`);
-    } else if (ev.description && ev.description.length <= 150) {
-      // Already shown in preview — don't repeat.
     }
 
     const actions = [];

@@ -358,23 +358,6 @@ body {
   font-weight: 700;
 }
 
-/* ── Description preview ──────────────────────────────────────────── */
-.card-desc-preview {
-  font-size: .82rem;
-  color: color-mix(in srgb, var(--text) 65%, transparent);
-  margin: 6px 0 4px;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-/* Show full description when card is expanded */
-.event-card.open .card-desc-preview {
-  display: block;
-  -webkit-line-clamp: unset;
-  overflow: visible;
-}
 
 .card-umbrella {
   display: inline-flex;
