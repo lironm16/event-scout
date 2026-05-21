@@ -14,15 +14,21 @@
     <h1>📅 אירועים ברמת גן</h1>
     <span class="greeting" id="greeting"></span>
   </div>
-  <div class="filter-bar" id="filterBar">
-    <button class="chip active" data-audience="default">הכל</button>
-    <button class="chip" data-audience="family">משפחה</button>
-    <button class="chip" data-audience="kids">ילדים</button>
-    <button class="chip" data-audience="toddlers">תינוקות</button>
-    <button class="chip" data-audience="teens">נוער</button>
-    <button class="chip" data-audience="parents">הורים</button>
-    <button class="chip" data-audience="adults">מבוגרים</button>
-    <button class="chip" data-audience="all">כל הגילאים</button>
+
+  <!-- Date quick-filters -->
+  <div class="filter-section">
+    <div class="filter-bar" id="dateFilterBar">
+      <button class="chip active" data-date="all">הכל</button>
+      <button class="chip" data-date="today">היום</button>
+      <button class="chip" data-date="weekend">סוף שבוע</button>
+      <button class="chip" data-date="week">השבוע</button>
+      <button class="chip" data-date="month">החודש</button>
+    </div>
+  </div>
+
+  <!-- Interest tag filters — populated after profile loads -->
+  <div class="filter-section" id="tagsSection" style="display:none">
+    <div class="filter-bar" id="tagFilterBar"></div>
   </div>
 </header>
 
@@ -31,7 +37,7 @@
     class="search-input"
     type="search"
     id="searchInput"
-    placeholder="חיפוש לפי שם..."
+    placeholder="חיפוש לפי שם, מיקום או תגית..."
     autocomplete="off"
   />
 </div>

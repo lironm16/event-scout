@@ -54,7 +54,13 @@ body {
   color: var(--hint);
 }
 
-/* ── Filter bar ───────────────────────────────────────────────────── */
+/* ── Filter sections ──────────────────────────────────────────────── */
+.filter-section {
+  border-top: 1px solid color-mix(in srgb, var(--hint) 12%, transparent);
+  padding-top: 8px;
+}
+.filter-section:first-of-type { border-top: none; padding-top: 0; }
+
 .filter-bar {
   display: flex;
   gap: 6px;
@@ -136,12 +142,19 @@ body {
 }
 .event-card:active { transform: scale(.985); }
 
-.card-image {
+.card-img-wrap {
   width: 100%;
   aspect-ratio: 16/7;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--hint) 12%, transparent);
+}
+.card-image {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   display: block;
-  background: color-mix(in srgb, var(--hint) 15%, transparent);
+  /* Prevent layout shift while loading */
+  min-height: 120px;
 }
 
 .card-body {

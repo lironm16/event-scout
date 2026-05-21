@@ -1,65 +1,88 @@
-/* Event catalog Mini App — app.js
- *
- * Flow:
- *   1. Init Telegram WebApp SDK (theme, expand to full screen)
- *   2. Fetch personalized events from /miniapp/events
- *   3. Render card grid with filters + search
- */
-
+/* Event catalog Mini App — app.js */
 (function () {
   "use strict";
 
-  // ── Telegram SDK setup ──────────────────────────────────────────────
+  // ── Telegram SDK ────────────────────────────────────────────────────
   const tg = window.Telegram?.WebApp;
-  if (tg) {
-    tg.ready();
-    tg.expand();
-    // Apply Telegram's color scheme so CSS vars are immediately set.
-    document.documentElement.style.setProperty(
-      "--tg-theme-bg-color",
-      tg.backgroundColor || "",
-    );
+  if (tg) { tg.ready(); tg.expand(); }
+
+  // ── State ────────────────────────────────────────────────────────────
+  let allEvents    = [];
+  let activeDate   = "all";   // all | today | weekend | week | month
+  let activeTag    = null;    // null = no tag filter
+  let searchQuery  = "";
+
+  // ── DOM ──────────────────────────────────────────────────────────────
+  const spinner      = document.getElementById("spinner");
+  const errorDiv     = document.getElementById("error");
+  const catalog      = document.getElementById("catalog");
+  const cardGrid     = document.getElementById("cardGrid");
+  const resultsMeta  = document.getElementById("resultsMeta");
+  const dateBar      = document.getElementById("dateFilterBar");
+  const tagBar       = document.getElementById("tagFilterBar");
+  const tagsSection  = document.getElementById("tagsSection");
+  const searchInput  = document.getElementById("searchInput");
+  const noResults    = document.getElementById("noResults");
+  const greetingEl   = document.getElementById("greeting");
+
+  // ── Date helpers ─────────────────────────────────────────────────────
+  function todayISO() {
+    return new Date().toISOString().slice(0, 10);
+  }
+  function offsetISO(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+  // Returns [from, to] YYYY-MM-DD inclusive for the given filter key.
+  function dateRange(key) {
+    const today = todayISO();
+    if (key === "today") return [today, today];
+    if (key === "week") {
+      // Monday–Sunday of current week (Sunday = 0 in JS).
+      const now = new Date();
+      const day = now.getDay(); // 0=Sun
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - ((day + 6) % 7));
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      return [monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10)];
+    }
+    if (key === "weekend") {
+      // Next or current Friday + Saturday (Israel weekend).
+      const now = new Date();
+      const day = now.getDay(); // 0=Sun … 5=Fri … 6=Sat
+      const daysToFri = (5 - day + 7) % 7;
+      const fri = new Date(now);
+      fri.setDate(now.getDate() + daysToFri);
+      const sat = new Date(fri);
+      sat.setDate(fri.getDate() + 1);
+      return [fri.toISOString().slice(0, 10), sat.toISOString().slice(0, 10)];
+    }
+    if (key === "month") {
+      const now = new Date();
+      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return [today, last.toISOString().slice(0, 10)];
+    }
+    return [null, null]; // "all"
   }
 
-  // ── State ───────────────────────────────────────────────────────────
-  let allEvents = [];      // full fetched list
-  let visibleEvents = [];  // after client-side filter/search
-  let activeAudience = "default";
-  let searchQuery = "";
-
-  // ── DOM refs ────────────────────────────────────────────────────────
-  const spinner    = document.getElementById("spinner");
-  const errorDiv   = document.getElementById("error");
-  const catalog    = document.getElementById("catalog");
-  const cardGrid   = document.getElementById("cardGrid");
-  const resultsMeta = document.getElementById("resultsMeta");
-  const filterBar  = document.getElementById("filterBar");
-  const searchInput = document.getElementById("searchInput");
-  const noResults  = document.getElementById("noResults");
-  const greeting   = document.getElementById("greeting");
-
-  // ── Fetch events ─────────────────────────────────────────────────────
+  // ── Fetch ─────────────────────────────────────────────────────────────
   async function loadEvents() {
     const initData = tg?.initData || "";
-    if (!initData) {
-      showError("פתח את הקטלוג דרך הבוט בטלגרם.");
-      return;
-    }
-
-    const params = new URLSearchParams({ initData });
-    const url = `/miniapp/events?${params}`;
+    if (!initData) { showError("פתח את הקטלוג דרך הבוט בטלגרם."); return; }
 
     try {
-      const res = await fetch(url);
+      const res  = await fetch(`/miniapp/events?${new URLSearchParams({ initData })}`);
       const body = await res.json();
-      if (!res.ok) {
-        showError(body.error || `שגיאה ${res.status}`);
-        return;
-      }
+      if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
 
       if (body.profile?.firstName) {
-        greeting.textContent = `שלום, ${body.profile.firstName}`;
+        greetingEl.textContent = `שלום, ${body.profile.firstName} 👋`;
       }
+
+      // Build interest-tag filter chips from profile.
+      buildTagChips(body.profile?.interests || []);
 
       allEvents = body.events || [];
       applyFilters();
@@ -71,152 +94,142 @@
     }
   }
 
-  // ── Filter + search (client-side) ───────────────────────────────────
-  function applyFilters() {
-    const q = searchQuery.trim().toLowerCase();
-    const AUDIENCE_HE = {
-      family:   "לכל המשפחה",
-      kids:     "ילדים",
-      toddlers: "תינוקות",
-      teens:    "נוער",
-      parents:  "הורים",
-      adults:   "מבוגרים",
-    };
+  // ── Build tag chips from user interests ────────────────────────────
+  function buildTagChips(interests) {
+    if (!interests.length) return;
+    tagBar.innerHTML = "";
+    // "הכל" chip resets tag filter.
+    tagBar.appendChild(makeChip("הכל", null, true, "tag"));
+    for (const tag of interests) {
+      tagBar.appendChild(makeChip(tag, tag, false, "tag"));
+    }
+    tagsSection.style.display = "block";
 
-    visibleEvents = allEvents.filter((e) => {
-      // Audience chip filter
-      if (activeAudience !== "default" && activeAudience !== "all") {
-        const targetHe = AUDIENCE_HE[activeAudience];
-        if (targetHe && e.audience && e.audience !== targetHe && e.audience !== "לכל המשפחה") {
-          return false;
-        }
+    tagBar.addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip");
+      if (!chip) return;
+      tagBar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+      chip.classList.add("active");
+      activeTag = chip.dataset.tagValue === "__all__" ? null : chip.dataset.tagValue;
+      applyFilters();
+    });
+  }
+
+  function makeChip(label, value, active, type) {
+    const btn = document.createElement("button");
+    btn.className = "chip" + (active ? " active" : "");
+    btn.textContent = label;
+    if (type === "tag") btn.dataset.tagValue = value ?? "__all__";
+    return btn;
+  }
+
+  // ── Filter ────────────────────────────────────────────────────────────
+  function applyFilters() {
+    const [dateFrom, dateTo] = dateRange(activeDate);
+    const q = searchQuery.trim().toLowerCase();
+
+    const visible = allEvents.filter((e) => {
+      // Date window.
+      if (dateFrom && e.date < dateFrom) return false;
+      if (dateTo   && e.date > dateTo)   return false;
+      // Interest tag filter.
+      if (activeTag) {
+        const tags = e.tags || [];
+        if (!tags.some((t) => t === activeTag)) return false;
       }
-      // Text search
+      // Text search.
       if (q) {
-        const haystack = [e.name, e.location, e.category, ...(e.tags || [])]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        if (!haystack.includes(q)) return false;
+        const hay = [e.name, e.location, e.category, ...(e.tags || [])]
+          .filter(Boolean).join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
       }
       return true;
     });
 
-    renderGrid();
+    renderGrid(visible);
   }
 
-  // ── Render card grid ─────────────────────────────────────────────────
-  function renderGrid() {
+  // ── Render grid ───────────────────────────────────────────────────────
+  function renderGrid(events) {
     cardGrid.innerHTML = "";
-    const count = visibleEvents.length;
-    resultsMeta.textContent = count
-      ? `${count} אירועים`
-      : "";
-    noResults.style.display = count ? "none" : "block";
-
-    for (const event of visibleEvents) {
-      cardGrid.appendChild(buildCard(event));
-    }
+    resultsMeta.textContent = events.length ? `${events.length} אירועים` : "";
+    noResults.style.display = events.length ? "none" : "block";
+    for (const ev of events) cardGrid.appendChild(buildCard(ev));
   }
 
-  // ── Build a single card element ──────────────────────────────────────
-  function buildCard(event) {
+  // ── Build card ────────────────────────────────────────────────────────
+  function buildCard(ev) {
     const card = document.createElement("div");
     card.className = "event-card";
-    card.dataset.id = event.id;
 
-    // Image
-    let imageHtml = "";
-    if (event.image) {
-      imageHtml = `<img class="card-image" src="${esc(event.image)}" alt="" loading="lazy" onerror="this.style.display='none'" />`;
-    }
-
-    // Meta line
     const metaParts = [];
-    if (event.dateHe) metaParts.push(`📅 ${esc(event.dateHe)}`);
-    if (event.timeHe) metaParts.push(`🕐 ${esc(event.timeHe)}`);
-    if (event.location) metaParts.push(`📍 ${esc(event.location)}`);
-    const metaHtml = metaParts.map((p) => `<span>${p}</span>`).join("");
+    if (ev.dateHe) metaParts.push(`📅 ${esc(ev.dateHe)}`);
+    if (ev.timeHe) metaParts.push(`🕐 ${esc(ev.timeHe)}`);
+    if (ev.location && !isCityWide(ev.location)) metaParts.push(`📍 ${esc(ev.location)}`);
+    else if (isCityWide(ev.location)) metaParts.push(`🗺️ ברחבי העיר`);
 
-    // Tags
-    const tagsHtml = (event.tags || []).slice(0, 4)
-      .map((t) => `<span class="tag-pill">${esc(t)}</span>`)
-      .join("");
+    const tagsHtml = (ev.tags || []).slice(0, 4)
+      .map((t) => `<span class="tag-pill">${esc(t)}</span>`).join("");
 
-    // Audience line
-    const audienceHtml = event.audienceLine
-      ? `<div class="audience-line">${esc(event.audienceLine)}</div>`
+    const audienceHtml = ev.audienceLine
+      ? `<div class="audience-line">${esc(ev.audienceLine)}</div>` : "";
+
+    // Image — use a proxy via our own server to avoid CORS issues with
+    // Smarticket/city CDN. Falls back to a placeholder on error.
+    const imgHtml = ev.image
+      ? `<div class="card-img-wrap">
+           <img class="card-image"
+             src="${esc(ev.image)}"
+             alt="${esc(ev.name)}"
+             loading="lazy"
+             onerror="this.closest('.card-img-wrap').style.display='none'"
+           />
+         </div>`
       : "";
 
     card.innerHTML = `
-      ${imageHtml}
+      ${imgHtml}
       <div class="card-body">
         <div class="card-title-row">
-          <span class="card-icon">${esc(event.icon || "📌")}</span>
-          <span class="card-title">${esc(event.name)}</span>
+          <span class="card-icon">${esc(ev.icon || "📌")}</span>
+          <span class="card-title">${esc(ev.name)}</span>
         </div>
         ${audienceHtml}
-        <div class="card-meta">${metaHtml}</div>
+        <div class="card-meta">${metaParts.map((p) => `<span>${p}</span>`).join("")}</div>
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}
       </div>
-      <div class="card-detail" id="detail-${event.id}">
-        ${buildDetail(event)}
+      <div class="card-detail">
+        ${buildDetail(ev)}
       </div>
     `;
 
-    // Toggle expand on tap
-    card.addEventListener("click", () => toggleCard(card, event));
-
+    card.querySelector(".card-body").addEventListener("click", () => toggleCard(card));
     return card;
   }
 
-  function buildDetail(event) {
+  function buildDetail(ev) {
     const parts = [];
-
-    if (event.description) {
-      parts.push(
-        `<div class="card-description">${esc(event.description).replace(/\n/g, "<br>")}</div>`,
-      );
+    if (ev.description) {
+      parts.push(`<div class="card-description">${esc(ev.description).replace(/\n/g, "<br>")}</div>`);
     }
-
     const actions = [];
-    if (event.bookingUrl) {
-      actions.push(
-        `<a class="btn btn-primary" href="${esc(event.bookingUrl)}" target="_blank" rel="noopener">🔗 פרטים והרשמה</a>`,
-      );
+    if (ev.bookingUrl) {
+      actions.push(`<a class="btn btn-primary" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🔗 פרטים והרשמה</a>`);
     }
-    if (event.onlineUrl) {
-      actions.push(
-        `<a class="btn btn-secondary" href="${esc(event.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרף למפגש</a>`,
-      );
+    if (ev.onlineUrl) {
+      actions.push(`<a class="btn btn-secondary" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרף למפגש</a>`);
     }
-    if (event._lat && event._lng) {
-      const mapsUrl = `https://maps.google.com/?q=${event._lat},${event._lng}`;
-      actions.push(
-        `<a class="btn btn-secondary" href="${esc(mapsUrl)}" target="_blank" rel="noopener">🧭 ניווט</a>`,
-      );
-    } else if (event.location && !isCityWide(event.location)) {
-      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}`;
-      actions.push(
-        `<a class="btn btn-secondary" href="${esc(mapsUrl)}" target="_blank" rel="noopener">🧭 ניווט</a>`,
-      );
+    if (ev._lat && ev._lng) {
+      actions.push(`<a class="btn btn-secondary" href="https://maps.google.com/?q=${ev._lat},${ev._lng}" target="_blank" rel="noopener">🧭 ניווט</a>`);
+    } else if (ev.location && !isCityWide(ev.location)) {
+      actions.push(`<a class="btn btn-secondary" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener">🧭 ניווט</a>`);
     }
-
-    if (actions.length) {
-      parts.push(`<div class="card-actions">${actions.join("")}</div>`);
-    }
-
+    if (actions.length) parts.push(`<div class="card-actions">${actions.join("")}</div>`);
     return parts.join("") || "<div class='card-description'>אין פרטים נוספים.</div>";
-  }
-
-  function isCityWide(locationText) {
-    const cityWide = ["ברחבי העיר", "רחבי העיר", "כלל העיר", "מספר מיקומים", "מיקומים שונים"];
-    return cityWide.some((k) => locationText?.includes(k));
   }
 
   function toggleCard(card) {
     const wasOpen = card.classList.contains("open");
-    // Close all open cards first.
     document.querySelectorAll(".event-card.open").forEach((c) => c.classList.remove("open"));
     if (!wasOpen) {
       card.classList.add("open");
@@ -224,33 +237,31 @@
     }
   }
 
-  // ── Filter chips ─────────────────────────────────────────────────────
-  filterBar.addEventListener("click", (e) => {
+  // ── Date filter chips ─────────────────────────────────────────────────
+  dateBar.addEventListener("click", (e) => {
     const chip = e.target.closest(".chip");
-    if (!chip) return;
-    filterBar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+    if (!chip || !chip.dataset.date) return;
+    dateBar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
-    activeAudience = chip.dataset.audience;
+    activeDate = chip.dataset.date;
     applyFilters();
   });
 
-  // ── Search input ──────────────────────────────────────────────────────
+  // ── Search ────────────────────────────────────────────────────────────
   let searchTimer = null;
   searchInput.addEventListener("input", () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-      searchQuery = searchInput.value;
-      applyFilters();
-    }, 250);
+    searchTimer = setTimeout(() => { searchQuery = searchInput.value; applyFilters(); }, 250);
   });
 
   // ── Utils ─────────────────────────────────────────────────────────────
-  function esc(str) {
-    return String(str ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+  const CITY_WIDE = ["ברחבי העיר", "רחבי העיר", "כלל העיר", "מספר מיקומים", "מיקומים שונים"];
+  function isCityWide(loc) { return CITY_WIDE.some((k) => (loc || "").includes(k)); }
+
+  function esc(s) {
+    return String(s ?? "")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
   function showError(msg) {
@@ -259,6 +270,5 @@
     errorDiv.innerHTML = `<div class="error-banner">${esc(msg)}</div>`;
   }
 
-  // ── Bootstrap ─────────────────────────────────────────────────────────
   loadEvents();
 })();
