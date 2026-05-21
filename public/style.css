@@ -96,23 +96,25 @@ body {
 .filter-toggle-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 5px 12px;
-  border-radius: 10px;
-  border: 1.5px solid color-mix(in srgb, var(--hint) 28%, transparent);
-  background: var(--bg2);
-  color: var(--hint);
-  font-size: .78rem;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 22px;
+  border: 1.5px solid color-mix(in srgb, var(--hint) 25%, transparent);
+  background: color-mix(in srgb, var(--hint) 8%, transparent);
+  color: var(--text);
+  font-size: .84rem;
   font-weight: 600;
   cursor: pointer;
   transition: all .15s;
   white-space: nowrap;
 }
+.filter-toggle-btn svg { opacity: .75; flex-shrink: 0; }
 .filter-toggle-btn.active {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-color: var(--accent);
   color: var(--accent);
 }
+.filter-toggle-btn.active svg { opacity: 1; stroke: var(--accent); }
 
 /* ── Collapsible filter panel ─────────────────────────────────────── */
 .filter-panel {
