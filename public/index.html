@@ -17,6 +17,7 @@
     <h1>📅 אירועים ברמת גן</h1>
     <div class="header-actions">
       <span class="greeting" id="greeting"></span>
+      <button class="filter-toggle-btn" id="filterToggleBtn" title="סינון">⚙️ סינון</button>
       <div class="view-toggle" id="viewToggle">
         <button class="view-btn active" data-view="list" title="רשימה">☰</button>
         <button class="view-btn" data-view="map" title="מפה">🗺️</button>
@@ -24,30 +25,37 @@
     </div>
   </div>
 
-  <!-- Date quick-filters -->
-  <div class="filter-section">
-    <div class="filter-bar" id="dateFilterBar">
-      <button class="chip active" data-date="all">הכל</button>
-      <button class="chip" data-date="today">היום</button>
-      <button class="chip" data-date="weekend">סוף שבוע</button>
-      <button class="chip" data-date="week">השבוע</button>
-      <button class="chip" data-date="month">החודש</button>
+  <!-- Collapsible filter panel -->
+  <div class="filter-panel" id="filterPanel">
+    <!-- Date quick-filters -->
+    <div class="filter-section">
+      <div class="filter-label">תאריך</div>
+      <div class="filter-bar" id="dateFilterBar">
+        <button class="chip active" data-date="all">הכל</button>
+        <button class="chip" data-date="today">היום</button>
+        <button class="chip" data-date="weekend">סוף שבוע</button>
+        <button class="chip" data-date="week">השבוע</button>
+        <button class="chip" data-date="month">החודש</button>
+      </div>
     </div>
-  </div>
 
-  <!-- Type filter -->
-  <div class="filter-section">
-    <div class="filter-bar" id="typeFilterBar">
-      <button class="chip active" data-type="all">כל הסוגים</button>
-      <button class="chip" data-type="registration">📋 מחייב הרשמה</button>
-      <button class="chip" data-type="free">🎁 כניסה חופשית</button>
-      <button class="chip" data-type="online">💻 אונליין</button>
+    <!-- Type filter -->
+    <div class="filter-section">
+      <div class="filter-label">סוג</div>
+      <div class="filter-bar" id="typeFilterBar">
+        <button class="chip active" data-type="all">הכל</button>
+        <button class="chip" data-type="registration">📋 מחייב הרשמה</button>
+        <button class="chip" data-type="free">🎁 כניסה חופשית</button>
+        <button class="chip" data-type="online">💻 אונליין</button>
+        <button class="chip" data-type="low_stock">🎫 נשארו מעט כרטיסים</button>
+      </div>
     </div>
-  </div>
 
-  <!-- Interest tag filters — populated after profile loads -->
-  <div class="filter-section" id="tagsSection" style="display:none">
-    <div class="filter-bar" id="tagFilterBar"></div>
+    <!-- Interest tag filters — populated after profile loads -->
+    <div class="filter-section" id="tagsSection" style="display:none">
+      <div class="filter-label">תחומי עניין שלי</div>
+      <div class="filter-bar" id="tagFilterBar"></div>
+    </div>
   </div>
 </header>
 

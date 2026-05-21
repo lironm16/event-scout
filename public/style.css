@@ -92,14 +92,56 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
+/* ── Filter toggle button ─────────────────────────────────────────── */
+.filter-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: 10px;
+  border: 1.5px solid color-mix(in srgb, var(--hint) 28%, transparent);
+  background: var(--bg2);
+  color: var(--hint);
+  font-size: .78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.filter-toggle-btn.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Collapsible filter panel ─────────────────────────────────────── */
+.filter-panel {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height .28s cubic-bezier(.4,0,.2,1);
+  border-top: 1px solid color-mix(in srgb, var(--hint) 10%, transparent);
+}
+.filter-panel.open {
+  max-height: 400px;
+}
+
 /* ── Filter sections ──────────────────────────────────────────────── */
 .filter-section { padding: 0 0 2px; }
+
+.filter-label {
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--hint);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  padding: 8px 16px 2px;
+}
 
 .filter-bar {
   display: flex;
   gap: 6px;
   overflow-x: auto;
-  padding: 8px 16px;
+  padding: 4px 16px 10px;
   scrollbar-width: none;
 }
 .filter-bar::-webkit-scrollbar { display: none; }

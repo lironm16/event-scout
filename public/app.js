@@ -127,6 +127,10 @@
       if (activeType === "registration" && !e.bookingUrl && !e.onlineUrl) return false;
       if (activeType === "free"         && (e.bookingUrl || e.onlineUrl))  return false;
       if (activeType === "online"       && !e.onlineUrl)                   return false;
+      if (activeType === "low_stock") {
+        const t = e.ticketsLeft;
+        if (t == null || t <= 0 || t > 10) return false;
+      }
       // Profile tag chip filter.
       if (activeTag && !(e.tags || []).includes(activeTag)) return false;
       // Tag drill-down.
@@ -435,6 +439,17 @@
     chip.classList.add("active");
     activeType = chip.dataset.type;
     applyFilters();
+  });
+
+  // ── Filter panel toggle ───────────────────────────────────────────────
+  const filterPanel = document.getElementById("filterPanel");
+  const filterToggleBtn = document.getElementById("filterToggleBtn");
+  let filtersOpen = false;
+
+  filterToggleBtn?.addEventListener("click", () => {
+    filtersOpen = !filtersOpen;
+    filterPanel.classList.toggle("open", filtersOpen);
+    filterToggleBtn.classList.toggle("active", filtersOpen);
   });
 
   // ── Search ────────────────────────────────────────────────────────────
