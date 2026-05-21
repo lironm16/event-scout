@@ -10,12 +10,11 @@
   // ── State ────────────────────────────────────────────────────────────
   let allEvents    = [];
   let activeDate   = "all";
+  let activeType   = "all";   // all | registration | free | online
   let activeTag    = null;
   let searchQuery  = "";
   let currentView  = "list";  // "list" | "map"
   let leafletMap   = null;
-  // Tag drill-down: when user taps a tag pill on a card we enter "tag view".
-  // tagDrilldown stores the active tag label or null.
   let tagDrilldown = null;
   const interestedIds = new Set();
 
@@ -26,6 +25,7 @@
   const cardGrid    = document.getElementById("cardGrid");
   const resultsMeta = document.getElementById("resultsMeta");
   const dateBar     = document.getElementById("dateFilterBar");
+  const typeBar     = document.getElementById("typeFilterBar");
   const tagBar      = document.getElementById("tagFilterBar");
   const tagsSection = document.getElementById("tagsSection");
   const searchWrap  = document.getElementById("searchWrap");
@@ -123,14 +123,14 @@
     const visible = allEvents.filter((e) => {
       if (df && e.date < df) return false;
       if (dt && e.date > dt) return false;
+      // Type filter.
+      if (activeType === "registration" && !e.bookingUrl && !e.onlineUrl) return false;
+      if (activeType === "free"         && (e.bookingUrl || e.onlineUrl))  return false;
+      if (activeType === "online"       && !e.onlineUrl)                   return false;
       // Profile tag chip filter.
-      if (activeTag) {
-        if (!(e.tags || []).includes(activeTag)) return false;
-      }
-      // Tag drill-down (card tag tap) — applied on top of everything.
-      if (tagDrilldown) {
-        if (!(e.tags || []).includes(tagDrilldown)) return false;
-      }
+      if (activeTag && !(e.tags || []).includes(activeTag)) return false;
+      // Tag drill-down.
+      if (tagDrilldown && !(e.tags || []).includes(tagDrilldown)) return false;
       if (q) {
         const hay = [e.name, e.location, e.category, ...(e.tags || [])]
           .filter(Boolean).join(" ").toLowerCase();
@@ -419,6 +419,16 @@
     dateBar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
     activeDate = chip.dataset.date;
+    applyFilters();
+  });
+
+  // ── Type filter chips ─────────────────────────────────────────────────
+  typeBar?.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip[data-type]");
+    if (!chip) return;
+    typeBar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+    chip.classList.add("active");
+    activeType = chip.dataset.type;
     applyFilters();
   });
 
