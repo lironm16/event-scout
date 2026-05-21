@@ -41,56 +41,48 @@ body {
 .header-top {
   display: flex;
   align-items: center;
-  padding: 12px 16px 8px;
-  gap: 10px;
-}
-
-.header-top h1 {
-  font-size: 1.15rem;
-  font-weight: 800;
-  letter-spacing: -.3px;
-  flex: 1;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
+  padding: 10px 12px;
   gap: 8px;
 }
 
-.greeting {
-  font-size: .78rem;
-  color: var(--hint);
-  white-space: nowrap;
+/* Search lives inside the header — takes all remaining space */
+.header-top .search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 14px;
+  border-radius: 12px;
+  font-size: 1rem;
+  border: 1.5px solid color-mix(in srgb, var(--hint) 20%, transparent);
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  transition: border-color .15s;
+}
+.header-top .search-input:focus {
+  border-color: var(--accent);
 }
 
-/* ── View toggle ──────────────────────────────────────────────────── */
-.view-toggle {
-  display: flex;
-  gap: 2px;
-  background: color-mix(in srgb, var(--hint) 12%, transparent);
-  border-radius: 10px;
-  padding: 3px;
-}
-.view-btn {
+/* ── Floating view-toggle FAB ─────────────────────────────────────── */
+.view-fab {
+  position: fixed;
+  bottom: 20px;
+  left: 16px;
+  z-index: 200;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
   border: none;
-  background: transparent;
-  border-radius: 7px;
-  width: 32px;
-  height: 28px;
-  font-size: .9rem;
-  cursor: pointer;
-  color: var(--hint);
+  background: var(--accent);
+  color: var(--accent-t);
+  font-size: 1.3rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background .15s, color .15s;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  transition: transform .15s, background .15s;
 }
-.view-btn.active {
-  background: var(--bg2);
-  color: var(--accent);
-  box-shadow: var(--shadow-sm);
-}
+.view-fab:active { transform: scale(.93); }
 
 /* ── Filter toggle button (icon-only) ────────────────────────────── */
 .filter-toggle-btn {
@@ -195,7 +187,6 @@ body {
 }
 
 /* ── Search ───────────────────────────────────────────────────────── */
-.search-wrap { padding: 10px 16px 6px; }
 .search-input {
   width: 100%;
   padding: 10px 16px;
@@ -226,15 +217,17 @@ body {
   letter-spacing: .2px;
 }
 
-/* ── Date section header ──────────────────────────────────────────── */
+/* ── Date section header (sticky below the app header) ───────────── */
 .date-header {
   font-size: .95rem;
   font-weight: 800;
   color: var(--accent);
-  padding: 16px 6px 8px;
+  padding: 14px 6px 6px;
   letter-spacing: -.2px;
   position: sticky;
-  top: 0;
+  /* --header-h is set dynamically by JS (ResizeObserver on .app-header).
+     The drill-bar height (--drill-h) is added when it's visible. */
+  top: calc(var(--header-h, 56px) + var(--drill-h, 0px));
   background: var(--bg);
   z-index: 10;
 }

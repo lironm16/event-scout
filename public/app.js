@@ -28,13 +28,27 @@
   const typeBar     = document.getElementById("typeFilterBar");
   const tagBar      = document.getElementById("tagFilterBar");
   const tagsSection = document.getElementById("tagsSection");
-  const searchWrap  = document.getElementById("searchWrap");
   const searchInput = document.getElementById("searchInput");
   const noResults   = document.getElementById("noResults");
-  const greetingEl  = document.getElementById("greeting");
-  const viewToggle  = document.getElementById("viewToggle");
+  const viewFab     = document.getElementById("viewFab");
   const mapView     = document.getElementById("mapView");
   const drillBar    = document.getElementById("drillBar");
+  const appHeader   = document.querySelector(".app-header");
+
+  // Keep --header-h CSS variable in sync so sticky date-headers offset correctly.
+  if (appHeader) {
+    const hObs = new ResizeObserver(() => {
+      document.documentElement.style.setProperty("--header-h", appHeader.offsetHeight + "px");
+    });
+    hObs.observe(appHeader);
+  }
+  if (drillBar) {
+    const dObs = new ResizeObserver(() => {
+      const h = drillBar.style.display === "none" ? 0 : drillBar.offsetHeight;
+      document.documentElement.style.setProperty("--drill-h", h + "px");
+    });
+    dObs.observe(drillBar);
+  }
 
   // ── Date helpers ─────────────────────────────────────────────────────
   function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -69,9 +83,6 @@
       const res  = await fetch(`/miniapp/events?${new URLSearchParams({ initData: INIT_DATA })}`);
       const body = await res.json();
       if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
-      if (body.profile?.firstName) {
-        greetingEl.textContent = `שלום, ${body.profile.firstName} 👋`;
-      }
       buildTagChips(body.profile?.interests || []);
       allEvents = body.events || [];
       applyFilters();
@@ -179,10 +190,8 @@
           requestAnimationFrame(() => window.scrollTo({ top: returnScroll, behavior: "instant" }));
         }
       });
-      searchWrap.style.display = "none";
     } else {
       drillBar.style.display = "none";
-      if (currentView === "list") searchWrap.style.display = "block";
     }
   }
 
@@ -441,24 +450,26 @@
     setTimeout(() => leafletMap.invalidateSize(), 100);
   }
 
-  // ── View toggle ───────────────────────────────────────────────────────
-  viewToggle.addEventListener("click", (e) => {
-    const btn = e.target.closest(".view-btn");
-    if (!btn || btn.dataset.view === currentView) return;
-    viewToggle.querySelectorAll(".view-btn").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    currentView = btn.dataset.view;
-
-    if (currentView === "map") {
-      catalog.style.display   = "none";
-      mapView.style.display   = "block";
-      searchWrap.style.display = "none";
+  // ── View toggle FAB ───────────────────────────────────────────────────
+  function setView(view) {
+    currentView = view;
+    if (view === "map") {
+      catalog.style.display = "none";
+      mapView.style.display = "block";
+      viewFab.textContent   = "☰";
+      viewFab.title         = "תצוגת רשימה";
     } else {
-      catalog.style.display   = "block";
-      mapView.style.display   = "none";
-      searchWrap.style.display = "block";
+      catalog.style.display = "block";
+      mapView.style.display = "none";
+      viewFab.textContent   = "🗺️";
+      viewFab.title         = "תצוגת מפה";
     }
     applyFilters();
+  }
+
+  viewFab?.addEventListener("click", () => {
+    setView(currentView === "list" ? "map" : "list");
+    tg?.HapticFeedback?.impactOccurred("light");
   });
 
   // ── Date filter chips ─────────────────────────────────────────────────
