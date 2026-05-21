@@ -268,6 +268,38 @@ body {
   font-size: .78rem;
   font-weight: 500;
 }
+.tag-pill-btn {
+  border: none;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+}
+.tag-pill-btn:active { transform: scale(.95); background: color-mix(in srgb, var(--accent) 28%, transparent); }
+
+/* ── Tag drill-down bar ───────────────────────────────────────────── */
+.drill-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.drill-back {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.drill-label {
+  font-size: .9rem;
+  font-weight: 600;
+  color: var(--accent);
+}
 
 /* ── Expanded card detail ─────────────────────────────────────────── */
 .card-detail {

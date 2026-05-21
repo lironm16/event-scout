@@ -8,13 +8,15 @@
   const INIT_DATA = tg?.initData || "";
 
   // ── State ────────────────────────────────────────────────────────────
-  let allEvents   = [];
-  let activeDate  = "all";
-  let activeTag   = null;
-  let searchQuery = "";
-  let currentView = "list";  // "list" | "map"
-  let leafletMap  = null;
-  // Set of event IDs the user has marked as interested (persists in session).
+  let allEvents    = [];
+  let activeDate   = "all";
+  let activeTag    = null;
+  let searchQuery  = "";
+  let currentView  = "list";  // "list" | "map"
+  let leafletMap   = null;
+  // Tag drill-down: when user taps a tag pill on a card we enter "tag view".
+  // tagDrilldown stores the active tag label or null.
+  let tagDrilldown = null;
   const interestedIds = new Set();
 
   // ── DOM ──────────────────────────────────────────────────────────────
@@ -32,6 +34,7 @@
   const greetingEl  = document.getElementById("greeting");
   const viewToggle  = document.getElementById("viewToggle");
   const mapView     = document.getElementById("mapView");
+  const drillBar    = document.getElementById("drillBar");
 
   // ── Date helpers ─────────────────────────────────────────────────────
   function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -120,8 +123,13 @@
     const visible = allEvents.filter((e) => {
       if (df && e.date < df) return false;
       if (dt && e.date > dt) return false;
+      // Profile tag chip filter.
       if (activeTag) {
         if (!(e.tags || []).includes(activeTag)) return false;
+      }
+      // Tag drill-down (card tag tap) — applied on top of everything.
+      if (tagDrilldown) {
+        if (!(e.tags || []).includes(tagDrilldown)) return false;
       }
       if (q) {
         const hay = [e.name, e.location, e.category, ...(e.tags || [])]
@@ -130,9 +138,40 @@
       }
       return true;
     });
+    updateDrillBar();
     if (currentView === "list") renderGrid(visible);
     else renderMap(visible);
   }
+
+  // ── Tag drill-down bar ────────────────────────────────────────────────
+  function updateDrillBar() {
+    if (!drillBar) return;
+    if (tagDrilldown) {
+      drillBar.style.display = "flex";
+      drillBar.innerHTML = `
+        <button class="drill-back" id="drillBackBtn">← חזרה</button>
+        <span class="drill-label">🏷️ ${esc(tagDrilldown)}</span>
+      `;
+      document.getElementById("drillBackBtn").addEventListener("click", () => {
+        tagDrilldown = null;
+        applyFilters();
+      });
+      // Hide other filters while drilling.
+      searchWrap.style.display = "none";
+    } else {
+      drillBar.style.display = "none";
+      if (currentView === "list") searchWrap.style.display = "block";
+    }
+  }
+
+  // Enter tag drill-down — called from card tag pills.
+  window.drillTag = function (tag) {
+    tagDrilldown = tag;
+    // Close any open card.
+    document.querySelectorAll(".event-card.open").forEach((c) => c.classList.remove("open"));
+    applyFilters();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   // ── Render list (grouped by date) ────────────────────────────────────
   function renderGrid(events) {
@@ -178,8 +217,8 @@
     if (ev.location && !isCityWide(ev.location)) metaParts.push(`📍 ${esc(ev.location)}`);
     else if (isCityWide(ev.location)) metaParts.push(`🗺️ ברחבי העיר`);
 
-    const tagsHtml = (ev.tags || []).slice(0, 4)
-      .map((t) => `<span class="tag-pill">${esc(t)}</span>`).join("");
+    const tagsHtml = (ev.tags || []).slice(0, 5)
+      .map((t) => `<button class="tag-pill tag-pill-btn" onclick="window.drillTag('${esc(t)}')">${esc(t)}</button>`).join("");
 
     const audienceHtml = ev.audienceLine
       ? `<div class="audience-line">${esc(ev.audienceLine)}</div>` : "";
