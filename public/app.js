@@ -223,6 +223,10 @@
     const audienceHtml = ev.audienceLine
       ? `<div class="audience-line">${esc(ev.audienceLine)}</div>` : "";
 
+    const umbrellaHtml = ev.umbrella_title
+      ? `<div class="card-umbrella" onclick="event.stopPropagation();window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 ${esc(ev.umbrella_title)}</div>`
+      : "";
+
     const imgHtml = ev.image
       ? `<div class="card-img-wrap card-click">
            <img class="card-image"
@@ -244,6 +248,7 @@
           <span class="card-title">${esc(ev.name)}</span>
         </div>
         ${audienceHtml}
+        ${umbrellaHtml}
         <div class="card-meta">${metaParts.map((p) => `<span>${p}</span>`).join("")}</div>
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}
       </div>

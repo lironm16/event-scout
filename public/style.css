@@ -280,6 +280,20 @@ body {
   margin-bottom: 6px;
 }
 
+.card-umbrella {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 6px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  text-underline-offset: 2px;
+}
+
 /* ── Tag pills ────────────────────────────────────────────────────── */
 .card-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
 
