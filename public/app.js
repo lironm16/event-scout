@@ -169,9 +169,15 @@
         <span class="drill-label">${label}</span>
       `;
       document.getElementById("drillBackBtn").addEventListener("click", () => {
+        const wasUmbrella = !!umbrellaDrilldown;
+        const returnScroll = umbrellaReturnScroll;
         tagDrilldown = null;
         umbrellaDrilldown = null;
         applyFilters();
+        if (wasUmbrella) {
+          // Restore position after the DOM re-renders (rAF gives layout a tick).
+          requestAnimationFrame(() => window.scrollTo({ top: returnScroll, behavior: "instant" }));
+        }
       });
       searchWrap.style.display = "none";
     } else {
@@ -381,9 +387,11 @@
 
   // umbrella drill-down state.
   let umbrellaDrilldown = null; // { slug, title }
+  let umbrellaReturnScroll = 0; // scrollY position to restore on back
 
   // Filter to umbrella siblings (client-side) with back button.
   window.filterUmbrella = function (slug, title) {
+    umbrellaReturnScroll = window.scrollY;
     umbrellaDrilldown = { slug, title };
     document.querySelectorAll(".event-card.open").forEach((c) => c.classList.remove("open"));
     applyFilters();
