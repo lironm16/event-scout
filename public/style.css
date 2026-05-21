@@ -322,6 +322,33 @@ body {
   margin-bottom: 6px;
 }
 
+/* ── Ticket availability line ─────────────────────────────────────── */
+.ticket-line {
+  font-size: .82rem;
+  color: var(--hint);
+  margin: 4px 0;
+}
+.ticket-line.low-stock {
+  color: #e67e00;
+  font-weight: 700;
+}
+.ticket-line.sold-out {
+  color: #c62828;
+  font-weight: 700;
+}
+
+/* ── Description preview ──────────────────────────────────────────── */
+.card-desc-preview {
+  font-size: .82rem;
+  color: color-mix(in srgb, var(--text) 65%, transparent);
+  margin: 6px 0 4px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .card-umbrella {
   display: inline-flex;
   align-items: center;
