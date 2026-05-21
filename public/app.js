@@ -316,11 +316,11 @@
     if (ev.onlineUrl) {
       actions.push(`<a class="btn btn-secondary" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרף למפגש</a>`);
     }
-    // Navigation
-    if (ev._lat && ev._lng) {
-      actions.push(`<a class="btn btn-secondary" href="https://maps.google.com/?q=${ev._lat},${ev._lng}" target="_blank" rel="noopener">🧭 ניווט</a>`);
-    } else if (ev.location && !isCityWide(ev.location)) {
+    // Navigation — prefer text address (shows venue name) over raw coords.
+    if (ev.location && !isCityWide(ev.location)) {
       actions.push(`<a class="btn btn-secondary" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener">🧭 ניווט</a>`);
+    } else if (ev._lat && ev._lng) {
+      actions.push(`<a class="btn btn-secondary" href="https://maps.google.com/?q=${ev._lat},${ev._lng}" target="_blank" rel="noopener">🧭 ניווט</a>`);
     }
     // Umbrella: all events in series
     if (ev.umbrella_slug && ev.umbrella_title) {
