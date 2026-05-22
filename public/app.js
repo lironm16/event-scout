@@ -463,7 +463,8 @@
 
     // Full description shown in expanded view.
     if (ev.description) {
-      parts.push(`<div class="card-description">${esc(ev.description).replace(/\n/g, "<br>")}</div>`);
+      const descHtml = linkifyPhones(esc(ev.description).replace(/\n/g, "<br>"));
+      parts.push(`<div class="card-description">${descHtml}</div>`);
     }
 
     const actions = [];
@@ -672,6 +673,19 @@
   // ── Utils ─────────────────────────────────────────────────────────────
   const CITY_WIDE = ["ברחבי העיר", "רחבי העיר", "כלל העיר", "מספר מיקומים", "מיקומים שונים"];
   function isCityWide(loc) { return CITY_WIDE.some((k) => (loc || "").includes(k)); }
+
+  // Wrap Israeli phone numbers in a tel: link so mobile users can tap to call.
+  // Runs on already-escaped HTML; dashes/spaces aren't affected by esc().
+  function linkifyPhones(html) {
+    return html.replace(
+      /\b(0\d[\s\u00a0-]?\d{2,3}[\s\u00a0-]?\d{4})\b/g,
+      (match) => {
+        const digits = match.replace(/[\s\u00a0-]/g, "");
+        return `<a href="tel:${digits}" class="phone-link">${match}</a>`;
+      },
+    );
+  }
+
   function esc(s) {
     return String(s ?? "")
       .replace(/&/g,"&amp;").replace(/</g,"&lt;")

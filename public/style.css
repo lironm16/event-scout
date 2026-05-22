@@ -575,6 +575,13 @@ body {
   line-height: 1.65;
   white-space: pre-line;
 }
+.phone-link {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--link) 40%, transparent);
+  text-underline-offset: 2px;
+  font-weight: 600;
+}
 
 /* ── Action buttons ───────────────────────────────────────────────── */
 .card-actions {
