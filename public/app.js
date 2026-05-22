@@ -246,15 +246,12 @@
         <span class="drill-label">${label}</span>
       `;
       document.getElementById("drillBackBtn").addEventListener("click", () => {
-        const wasUmbrella = !!umbrellaDrilldown;
-        const returnScroll = umbrellaReturnScroll;
+        const returnScroll = umbrellaDrilldown ? umbrellaReturnScroll : tagReturnScroll;
         tagDrilldown = null;
         umbrellaDrilldown = null;
         applyFilters();
-        if (wasUmbrella) {
-          // Restore position after the DOM re-renders (rAF gives layout a tick).
-          requestAnimationFrame(() => window.scrollTo({ top: returnScroll, behavior: "instant" }));
-        }
+        // Restore scroll position after DOM re-renders.
+        requestAnimationFrame(() => window.scrollTo({ top: returnScroll, behavior: "instant" }));
       });
     } else {
       drillBar.style.display = "none";
@@ -336,11 +333,11 @@
 
   // Enter tag drill-down — called from card tag pills.
   window.drillTag = function (tag) {
+    tagReturnScroll = window.scrollY;
     tagDrilldown = tag;
-    // Close any open card.
     document.querySelectorAll(".event-card.open").forEach((c) => c.classList.remove("open"));
     applyFilters();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Don't scroll to top — user stays where they were.
   };
 
   // ── Render list (grouped by date) ────────────────────────────────────
@@ -540,9 +537,10 @@
     }, 500);
   };
 
-  // umbrella drill-down state.
+  // umbrella / tag drill-down state.
   let umbrellaDrilldown = null; // { slug, title }
   let umbrellaReturnScroll = 0; // scrollY position to restore on back
+  let tagReturnScroll = 0;
 
   // Filter to umbrella siblings (client-side) with back button.
   window.filterUmbrella = function (slug, title) {
@@ -550,7 +548,7 @@
     umbrellaDrilldown = { slug, title };
     document.querySelectorAll(".event-card.open").forEach((c) => c.classList.remove("open"));
     applyFilters();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Don't scroll to top — user stays where they were.
   };
 
   // ── Map view ──────────────────────────────────────────────────────────
