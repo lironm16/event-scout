@@ -146,6 +146,51 @@
     return b;
   }
 
+  // ── Sort ──────────────────────────────────────────────────────────────
+  let activeSort = "date-asc"; // date-asc | date-desc | name-asc
+
+  const sortToggleBtn = document.getElementById("sortToggleBtn");
+  const sortPanel     = document.getElementById("sortPanel");
+  const sortBackdrop  = document.getElementById("sortBackdrop");
+  const sortSheetClose = document.getElementById("sortSheetClose");
+
+  function openSortSheet() {
+    sortPanel.classList.add("open");
+    sortBackdrop.classList.add("open");
+    sortToggleBtn.classList.add("active");
+    document.body.style.overflow = "hidden";
+  }
+  function closeSortSheet() {
+    sortPanel.classList.remove("open");
+    sortBackdrop.classList.remove("open");
+    sortToggleBtn.classList.toggle("active", activeSort !== "date-asc");
+    document.body.style.overflow = "";
+  }
+
+  sortToggleBtn?.addEventListener("click", openSortSheet);
+  sortSheetClose?.addEventListener("click", closeSortSheet);
+  sortBackdrop?.addEventListener("click", closeSortSheet);
+
+  // Listen to radio changes inside the sort sheet.
+  sortPanel?.querySelectorAll("input[name='sort']").forEach((radio) => {
+    radio.addEventListener("change", () => {
+      activeSort = radio.value;
+      closeSortSheet();
+      applyFilters();
+    });
+  });
+
+  function sortEvents(events) {
+    const arr = [...events];
+    if (activeSort === "date-desc") {
+      arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.timeHe || "").localeCompare(a.timeHe || ""));
+    } else if (activeSort === "name-asc") {
+      arr.sort((a, b) => (a.name || "").localeCompare(b.name || "", "he"));
+    }
+    // date-asc: already server-sorted, no-op.
+    return arr;
+  }
+
   // ── Filter ────────────────────────────────────────────────────────────
   function applyFilters() {
     const [df, dt] = dateRange(activeDate);
@@ -180,8 +225,9 @@
       return true;
     });
     updateDrillBar();
-    if (currentView === "list") renderGrid(visible);
-    else renderMap(visible);
+    const sorted = sortEvents(visible);
+    if (currentView === "list") renderGrid(sorted);
+    else renderMap(sorted);
   }
 
   // ── Drill-down bar (tag or umbrella) ─────────────────────────────────
