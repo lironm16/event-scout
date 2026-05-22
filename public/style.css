@@ -106,19 +106,104 @@ body {
   color: var(--accent);
 }
 
-/* ── Collapsible filter panel ─────────────────────────────────────── */
-.filter-panel {
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height .28s cubic-bezier(.4,0,.2,1);
-  border-top: 1px solid color-mix(in srgb, var(--hint) 10%, transparent);
+/* ── Filter backdrop ──────────────────────────────────────────────── */
+.filter-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0,0,0,.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .28s ease;
 }
-.filter-panel.open {
-  max-height: 400px;
+.filter-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
 }
 
+/* ── Filter bottom sheet ──────────────────────────────────────────── */
+.filter-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 310;
+  background: var(--bg2);
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -4px 32px rgba(0,0,0,.18);
+  max-height: 90dvh;
+  display: flex;
+  flex-direction: column;
+  transform: translateY(100%);
+  transition: transform .32s cubic-bezier(.32,1,.65,1);
+}
+.filter-sheet.open {
+  transform: translateY(0);
+}
+
+.filter-sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--hint) 35%, transparent);
+  margin: 10px auto 0;
+  flex-shrink: 0;
+}
+
+.filter-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px 10px;
+  flex-shrink: 0;
+}
+.filter-sheet-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text);
+}
+.filter-sheet-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: color-mix(in srgb, var(--hint) 14%, transparent);
+  color: var(--hint);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.filter-sheet-body {
+  overflow-y: auto;
+  flex: 1;
+  padding-bottom: 8px;
+}
+
+.filter-sheet-footer {
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
+  flex-shrink: 0;
+  border-top: 1px solid color-mix(in srgb, var(--hint) 10%, transparent);
+}
+.filter-sheet-apply {
+  width: 100%;
+  padding: 14px;
+  border-radius: 14px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-t);
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.filter-sheet-apply:active { opacity: .85; }
+
 /* ── Filter sections ──────────────────────────────────────────────── */
-.filter-section { padding: 0 0 2px; }
+.filter-section { padding: 4px 0 8px; }
 
 .filter-label {
   font-size: .72rem;
@@ -126,29 +211,34 @@ body {
   color: var(--hint);
   text-transform: uppercase;
   letter-spacing: .6px;
-  padding: 8px 16px 2px;
+  padding: 10px 20px 6px;
 }
 
 .filter-bar {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   overflow-x: auto;
-  padding: 4px 16px 10px;
+  padding: 4px 20px 4px;
   scrollbar-width: none;
 }
 .filter-bar::-webkit-scrollbar { display: none; }
+/* Inside the sheet chips wrap instead of scrolling */
+.filter-bar.wrap {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
 
 /* ── Chips ────────────────────────────────────────────────────────── */
 .chip {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  padding: 6px 14px;
+  padding: 8px 16px;
   border-radius: 20px;
   border: 1.5px solid color-mix(in srgb, var(--hint) 28%, transparent);
   background: var(--bg2);
-  color: var(--hint);
-  font-size: .82rem;
+  color: var(--text);
+  font-size: .88rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;

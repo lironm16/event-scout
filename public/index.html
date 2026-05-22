@@ -30,26 +30,36 @@
       </svg>
     </button>
   </div>
+</header>
 
-  <!-- Collapsible filter panel -->
-  <div class="filter-panel" id="filterPanel">
+<!-- Filter backdrop -->
+<div class="filter-backdrop" id="filterBackdrop"></div>
+
+<!-- Filter bottom sheet -->
+<div class="filter-sheet" id="filterPanel">
+  <div class="filter-sheet-handle"></div>
+  <div class="filter-sheet-header">
+    <span class="filter-sheet-title">סינון</span>
+    <button class="filter-sheet-close" id="filterSheetClose" aria-label="סגור">✕</button>
+  </div>
+  <div class="filter-sheet-body">
     <!-- Date quick-filters -->
     <div class="filter-section">
       <div class="filter-label">תאריך</div>
-      <div class="filter-bar" id="dateFilterBar">
-      <button class="chip active" data-date="all">הכל</button>
-      <button class="chip" data-date="today">היום</button>
-      <button class="chip" data-date="tomorrow">מחר</button>
-      <button class="chip" data-date="weekend">סוף שבוע</button>
-      <button class="chip" data-date="week">השבוע</button>
-      <button class="chip" data-date="month">החודש</button>
+      <div class="filter-bar wrap" id="dateFilterBar">
+        <button class="chip active" data-date="all">הכל</button>
+        <button class="chip" data-date="today">היום</button>
+        <button class="chip" data-date="tomorrow">מחר</button>
+        <button class="chip" data-date="weekend">סוף שבוע</button>
+        <button class="chip" data-date="week">השבוע</button>
+        <button class="chip" data-date="month">החודש</button>
       </div>
     </div>
 
     <!-- Type filter -->
     <div class="filter-section">
       <div class="filter-label">סוג</div>
-      <div class="filter-bar" id="typeFilterBar">
+      <div class="filter-bar wrap" id="typeFilterBar">
         <button class="chip active" data-type="all">הכל</button>
         <button class="chip" data-type="registration">📋 מחייב הרשמה</button>
         <button class="chip" data-type="free">🎁 כניסה חופשית</button>
@@ -61,10 +71,13 @@
     <!-- Interest tag filters — populated after profile loads -->
     <div class="filter-section" id="tagsSection" style="display:none">
       <div class="filter-label">תחומי עניין שלי</div>
-      <div class="filter-bar" id="tagFilterBar"></div>
+      <div class="filter-bar wrap" id="tagFilterBar"></div>
     </div>
   </div>
-</header>
+  <div class="filter-sheet-footer">
+    <button class="filter-sheet-apply" id="filterSheetApply">הצג תוצאות</button>
+  </div>
+</div>
 
 <!-- Tag drill-down bar (shown when a tag pill is tapped) -->
 <div class="drill-bar" id="drillBar" style="display:none"></div>

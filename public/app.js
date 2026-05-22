@@ -492,16 +492,30 @@
     applyFilters();
   });
 
-  // ── Filter panel toggle ───────────────────────────────────────────────
-  const filterPanel = document.getElementById("filterPanel");
+  // ── Filter sheet (bottom sheet overlay) ──────────────────────────────
+  const filterPanel     = document.getElementById("filterPanel");
+  const filterBackdrop  = document.getElementById("filterBackdrop");
   const filterToggleBtn = document.getElementById("filterToggleBtn");
-  let filtersOpen = false;
+  const filterSheetClose  = document.getElementById("filterSheetClose");
+  const filterSheetApply  = document.getElementById("filterSheetApply");
 
-  filterToggleBtn?.addEventListener("click", () => {
-    filtersOpen = !filtersOpen;
-    filterPanel.classList.toggle("open", filtersOpen);
-    filterToggleBtn.classList.toggle("active", filtersOpen);
-  });
+  function openFilterSheet() {
+    filterPanel.classList.add("open");
+    filterBackdrop.classList.add("open");
+    filterToggleBtn.classList.add("active");
+    document.body.style.overflow = "hidden";
+  }
+  function closeFilterSheet() {
+    filterPanel.classList.remove("open");
+    filterBackdrop.classList.remove("open");
+    filterToggleBtn.classList.remove("active");
+    document.body.style.overflow = "";
+  }
+
+  filterToggleBtn?.addEventListener("click", openFilterSheet);
+  filterSheetClose?.addEventListener("click", closeFilterSheet);
+  filterSheetApply?.addEventListener("click", closeFilterSheet);
+  filterBackdrop?.addEventListener("click", closeFilterSheet);
 
   // ── Search ────────────────────────────────────────────────────────────
   let st = null;
