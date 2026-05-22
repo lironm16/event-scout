@@ -67,7 +67,7 @@ body {
   position: fixed;
   bottom: 20px;
   left: 16px;
-  z-index: 200;
+  z-index: 900; /* above map layers, below filter/sort sheets (1000) */
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -650,8 +650,13 @@ body {
 }
 
 /* ── Map ──────────────────────────────────────────────────────────── */
+#mapView {
+  position: fixed;
+  inset: 0;
+  z-index: 50; /* above normal content, below header/FAB */
+}
 #mapContainer {
-  height: calc(100vh - 160px);
+  height: 100%;
   width: 100%;
   border-radius: 0;
 }

@@ -622,6 +622,8 @@
       mapView.style.display = "block";
       viewFab.textContent   = "☰";
       viewFab.title         = "תצוגת רשימה";
+      // Leaflet needs a size-recalc after the container becomes visible.
+      if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 50);
     } else {
       catalog.style.display = "block";
       mapView.style.display = "none";
