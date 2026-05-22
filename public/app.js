@@ -30,10 +30,28 @@
   const tagsSection = document.getElementById("tagsSection");
   const searchInput = document.getElementById("searchInput");
   const noResults   = document.getElementById("noResults");
-  const viewFab     = document.getElementById("viewFab");
-  const mapView     = document.getElementById("mapView");
-  const drillBar    = document.getElementById("drillBar");
-  const appHeader   = document.querySelector(".app-header");
+  const viewFab      = document.getElementById("viewFab");
+  const mapView      = document.getElementById("mapView");
+  const drillBar     = document.getElementById("drillBar");
+  const appHeader    = document.querySelector(".app-header");
+  const imgLightbox  = document.getElementById("imgLightbox");
+  const lightboxImg  = document.getElementById("lightboxImg");
+  const lightboxClose = document.getElementById("lightboxClose");
+
+  function openLightbox(src, alt) {
+    lightboxImg.src = src;
+    lightboxImg.alt = alt || "";
+    imgLightbox.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+  function closeLightbox() {
+    imgLightbox.classList.remove("open");
+    document.body.style.overflow = "";
+  }
+  imgLightbox?.addEventListener("click", (e) => {
+    if (e.target === imgLightbox || e.target === lightboxImg) closeLightbox();
+  });
+  lightboxClose?.addEventListener("click", closeLightbox);
 
   // Keep --header-h CSS variable in sync so sticky date-headers offset correctly.
   if (appHeader) {
@@ -274,8 +292,9 @@
       ? `<div class="card-date-badge">${esc(ev.timeHe)}</div>`
       : (ev.dateHe ? `<div class="card-date-badge">${esc(ev.dateHe)}</div>` : "");
 
+    // Images open the lightbox; placeholder (no image) still expands the card.
     const imgHtml = ev.image
-      ? `<div class="card-img-wrap card-click">
+      ? `<div class="card-img-wrap card-img-clickable">
            <img class="card-image"
              src="${esc(ev.image)}"
              alt="${esc(ev.name)}"
@@ -306,10 +325,15 @@
       </div>
     `;
 
-    // Both image and text body toggle the card open.
+    // Card body (and image-less placeholder) expands the card.
     card.querySelectorAll(".card-click").forEach((el) =>
       el.addEventListener("click", () => toggleCard(card, ev)),
     );
+    // Image opens the lightbox instead.
+    const imgWrap = card.querySelector(".card-img-clickable");
+    if (imgWrap) {
+      imgWrap.addEventListener("click", () => openLightbox(ev.image, ev.name));
+    }
     return card;
   }
 

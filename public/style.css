@@ -385,7 +385,7 @@ body {
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   color: #fff;
-  font-size: .75rem;
+  font-size: .82rem;
   font-weight: 600;
   padding: 4px 10px;
   border-radius: 20px;
@@ -406,9 +406,9 @@ body {
   gap: 8px;
   margin-bottom: 8px;
 }
-.card-icon { font-size: 1.15rem; flex-shrink: 0; margin-top: 2px; opacity: .85; }
+.card-icon { font-size: 1.2rem; flex-shrink: 0; margin-top: 2px; opacity: .85; }
 .card-title {
-  font-size: 1.15rem;
+  font-size: 1.2rem;
   font-weight: 800;
   line-height: 1.35;
   letter-spacing: -.3px;
@@ -419,7 +419,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 14px;
-  font-size: .82rem;
+  font-size: .95rem;
   color: var(--hint);
   margin-bottom: 8px;
 }
@@ -427,7 +427,7 @@ body {
 
 /* ── Ticket availability line ─────────────────────────────────────── */
 .ticket-line {
-  font-size: .82rem;
+  font-size: .93rem;
   color: var(--hint);
   margin: 4px 0;
 }
@@ -445,7 +445,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: .78rem;
+  font-size: .9rem;
   font-weight: 600;
   color: var(--accent);
   margin-bottom: 6px;
@@ -461,11 +461,11 @@ body {
 .tag-pill {
   display: inline-flex;
   align-items: center;
-  padding: 3px 10px;
+  padding: 4px 11px;
   border-radius: 20px;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--accent);
-  font-size: .75rem;
+  font-size: .83rem;
   font-weight: 600;
   letter-spacing: .1px;
 }
@@ -494,10 +494,10 @@ body {
 }
 
 .card-description {
-  font-size: .87rem;
-  color: color-mix(in srgb, var(--text) 75%, transparent);
+  font-size: .97rem;
+  color: color-mix(in srgb, var(--text) 80%, transparent);
   margin: 12px 0 4px;
-  line-height: 1.6;
+  line-height: 1.65;
   white-space: pre-line;
 }
 
@@ -635,4 +635,51 @@ body {
   font-weight: 600;
   text-align: center;
   border: 1.5px solid color-mix(in srgb, #e53935 25%, transparent);
+}
+
+/* ── Image lightbox ───────────────────────────────────────────────── */
+.img-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(0,0,0,.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .22s ease;
+}
+.img-lightbox.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.lightbox-img {
+  width: 100%;
+  max-height: 100dvh;
+  object-fit: contain;
+  display: block;
+  transition: transform .25s cubic-bezier(.34,1.56,.64,1);
+  transform: scale(.92);
+}
+.img-lightbox.open .lightbox-img {
+  transform: scale(1);
+}
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,.18);
+  color: #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
