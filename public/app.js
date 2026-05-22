@@ -30,10 +30,11 @@
   const tagsSection = document.getElementById("tagsSection");
   const searchInput = document.getElementById("searchInput");
   const noResults   = document.getElementById("noResults");
-  const viewFab      = document.getElementById("viewFab");
-  const mapView      = document.getElementById("mapView");
-  const drillBar     = document.getElementById("drillBar");
-  const appHeader    = document.querySelector(".app-header");
+  const viewFab          = document.getElementById("viewFab");
+  const mapView          = document.getElementById("mapView");
+  const drillBar         = document.getElementById("drillBar");
+  const activeFiltersBar = document.getElementById("activeFiltersBar");
+  const appHeader        = document.querySelector(".app-header");
   const imgLightbox  = document.getElementById("imgLightbox");
   const lightboxImg  = document.getElementById("lightboxImg");
   const lightboxClose = document.getElementById("lightboxClose");
@@ -225,6 +226,7 @@
       return true;
     });
     updateDrillBar();
+    updateActiveFiltersBar();
     const sorted = sortEvents(visible);
     if (currentView === "list") renderGrid(sorted);
     else renderMap(sorted);
@@ -256,6 +258,79 @@
       });
     } else {
       drillBar.style.display = "none";
+    }
+  }
+
+  // ── Active-filters strip ──────────────────────────────────────────────
+  const DATE_LABELS = { today: "היום", tomorrow: "מחר", weekend: "סוף שבוע", week: "השבוע", month: "החודש" };
+  const TYPE_LABELS = { registration: "📋 מחייב הרשמה", free: "🎁 כניסה חופשית", online: "💻 אונליין", low_stock: "🎫 נשארו מעט כרטיסים" };
+
+  function clearFilters() {
+    activeDate = "all";
+    activeType = "all";
+    activeTag  = null;
+    // Sync chip UI inside the filter sheet.
+    dateBar.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.date === "all"));
+    typeBar?.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.type === "all"));
+    tagBar?.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+    applyFilters();
+  }
+
+  function updateActiveFiltersBar() {
+    if (!activeFiltersBar) return;
+    const pills = [];
+
+    if (activeDate !== "all") {
+      pills.push({ label: DATE_LABELS[activeDate] || activeDate, clear: () => {
+        activeDate = "all";
+        dateBar.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.date === "all"));
+        applyFilters();
+      }});
+    }
+    if (activeType !== "all") {
+      pills.push({ label: TYPE_LABELS[activeType] || activeType, clear: () => {
+        activeType = "all";
+        typeBar?.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.type === "all"));
+        applyFilters();
+      }});
+    }
+    if (activeTag) {
+      pills.push({ label: `🏷️ ${activeTag}`, clear: () => {
+        activeTag = null;
+        tagBar?.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+        applyFilters();
+      }});
+    }
+
+    // Update badge on filter button.
+    const filterToggleBtn = document.getElementById("filterToggleBtn");
+    filterToggleBtn?.classList.toggle("has-badge", pills.length > 0);
+
+    if (!pills.length) {
+      activeFiltersBar.style.display = "none";
+      return;
+    }
+
+    activeFiltersBar.style.display = "flex";
+    activeFiltersBar.innerHTML = "";
+
+    for (const p of pills) {
+      const pill = document.createElement("span");
+      pill.className = "active-filter-pill";
+      const x = document.createElement("button");
+      x.className = "active-filter-pill-x";
+      x.textContent = "×";
+      x.addEventListener("click", p.clear);
+      pill.append(x, document.createTextNode(p.label));
+      activeFiltersBar.appendChild(pill);
+    }
+
+    if (pills.length > 1) {
+      const clearBtn = document.createElement("button");
+      clearBtn.className = "clear-filters-btn";
+      clearBtn.textContent = "נקה הכל";
+      clearBtn.addEventListener("click", clearFilters);
+      activeFiltersBar.appendChild(clearBtn);
     }
   }
 
