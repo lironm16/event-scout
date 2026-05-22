@@ -183,9 +183,10 @@ body {
 
 /* ── Filter backdrop ──────────────────────────────────────────────── */
 .filter-backdrop {
+  /* Must exceed Leaflet's highest layer (.leaflet-popup-pane z-index 700) */
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: 1000;
   background: rgba(0,0,0,.5);
   opacity: 0;
   pointer-events: none;
@@ -202,7 +203,7 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  z-index: 310;
+  z-index: 1010;
   background: var(--bg2);
   border-radius: 20px 20px 0 0;
   box-shadow: 0 -4px 32px rgba(0,0,0,.18);
