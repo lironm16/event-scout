@@ -83,6 +83,7 @@ body {
   transition: transform .15s, background .15s;
 }
 .view-fab:active { transform: scale(.93); }
+.view-fab svg { width: 22px; height: 22px; display: block; }
 
 /* ── Filter / sort toggle buttons (icon-only) ────────────────────── */
 .filter-toggle-btn {

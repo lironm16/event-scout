@@ -615,19 +615,23 @@
   }
 
   // ── View toggle FAB ───────────────────────────────────────────────────
+  // Flat SVG icons for the FAB — emoji are hard to read on the accent-coloured button.
+  const FAB_ICON_MAP  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5" fill="currentColor" stroke="none"/></svg>`;
+  const FAB_ICON_LIST = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>`;
+
   function setView(view) {
     currentView = view;
     if (view === "map") {
       catalog.style.display = "none";
       mapView.style.display = "block";
-      viewFab.textContent   = "☰";
+      viewFab.innerHTML     = FAB_ICON_LIST;
       viewFab.title         = "תצוגת רשימה";
       // Leaflet needs a size-recalc after the container becomes visible.
       if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 50);
     } else {
       catalog.style.display = "block";
       mapView.style.display = "none";
-      viewFab.textContent   = "🗺️";
+      viewFab.innerHTML     = FAB_ICON_MAP;
       viewFab.title         = "תצוגת מפה";
     }
     applyFilters();
