@@ -3437,17 +3437,17 @@ function buildConsolidatedEventBlock(event) {
   const timeStr = formatTimeRange(event.start_time, event.end_time);
   if (timeStr) lines.push(`🕐 ${escHtml(timeStr)}`);
 
-  // Location → maps deep-link. Mirrors the "🧭 ניווט" button on
-  // the full event card: tapping the hyperlink opens the OS maps
-  // picker (Google → Waze / Apple Maps), pinned to coords when
-  // we have them, falling back to a maps text search by address.
+  // Location → maps deep-link. Use 📷 instead of 📍 for online events.
+  const locIcon = event.online_url ? "📷" : "📍";
   if (event.location) {
-    const navUrl = buildLocationNavUrl(event);
+    const navUrl = event.online_url ? null : buildLocationNavUrl(event);
     lines.push(
       navUrl
-        ? `📍 <a href="${escHtml(navUrl)}">${escHtml(event.location)}</a>`
-        : `📍 ${escHtml(event.location)}`,
+        ? `${locIcon} <a href="${escHtml(navUrl)}">${escHtml(event.location)}</a>`
+        : `${locIcon} ${escHtml(event.location)}`,
     );
+  } else if (event.online_url) {
+    lines.push("📷 אונליין");
   }
 
   // Tickets — show the FULL line whenever count is known (not just

@@ -99,14 +99,12 @@
   async function loadEvents() {
     if (!INIT_DATA) { showError("פתח את הקטלוג דרך הבוט בטלגרם."); return; }
     try {
-      // audience=all: the Mini App is a full catalog browser — server-side
-      // audience pre-filtering would hide events from client-side filters
-      // like "💻 אונליין" whose events span multiple audience types.
-      const res  = await fetch(`/miniapp/events?${new URLSearchParams({ initData: INIT_DATA, audience: "all" })}`);
+      const res  = await fetch(`/miniapp/events?${new URLSearchParams({ initData: INIT_DATA })}`);
       const body = await res.json();
       if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
       buildTagChips(body.profile?.interests || []);
       allEvents = body.events || [];
+      updateTypeChipAvailability();
       applyFilters();
       spinner.style.display = "none";
       catalog.style.display = "block";
@@ -123,6 +121,21 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ initData: INIT_DATA, eventId, signal }),
+    });
+  }
+
+  // ── Disable type chips that have zero matching events ────────────────
+  function updateTypeChipAvailability() {
+    if (!typeBar) return;
+    const hasOnline   = allEvents.some(e => e.onlineUrl);
+    const hasLowStock = allEvents.some(e => e.ticketsLeft != null && e.ticketsLeft > 0 && e.ticketsLeft <= 10);
+    typeBar.querySelectorAll(".chip[data-type]").forEach(chip => {
+      const type = chip.dataset.type;
+      let available = true;
+      if (type === "online")    available = hasOnline;
+      if (type === "low_stock") available = hasLowStock;
+      chip.classList.toggle("chip-disabled", !available);
+      chip.disabled = !available;
     });
   }
 

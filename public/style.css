@@ -325,6 +325,11 @@ body {
   color: var(--accent-t);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
 }
+.chip.chip-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 
 /* ── Tag drill-down bar ───────────────────────────────────────────── */
 .drill-bar {
