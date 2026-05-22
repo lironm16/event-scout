@@ -403,7 +403,7 @@
     // Description is shown only in the expanded detail section — not in the collapsed card.
 
     const umbrellaHtml = ev.umbrella_title
-      ? `<div class="card-umbrella" onclick="event.stopPropagation();window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 ${esc(ev.umbrella_title)}</div>`
+      ? `<div class="card-umbrella" onclick="event.stopPropagation();window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 ${esc(ev.umbrella_title)} ←</div>`
       : "";
 
     const dateBadge = ev.timeHe
@@ -480,10 +480,8 @@
     } else if (ev._lat && ev._lng) {
       actions.push(`<a class="btn btn-secondary" href="https://maps.google.com/?q=${ev._lat},${ev._lng}" target="_blank" rel="noopener">🧭 ניווט</a>`);
     }
-    // Umbrella: all events in series
-    if (ev.umbrella_slug && ev.umbrella_title) {
-      actions.push(`<button class="btn btn-secondary" onclick="window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 כל אירועי ${esc(ev.umbrella_title)}</button>`);
-    }
+    // Umbrella button removed — the card-umbrella chip in the collapsed card
+    // already serves this purpose (with the ← arrow to signal navigation).
 
     if (actions.length) parts.push(`<div class="card-actions">${actions.join("")}</div>`);
 
