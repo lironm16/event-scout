@@ -99,7 +99,10 @@
   async function loadEvents() {
     if (!INIT_DATA) { showError("פתח את הקטלוג דרך הבוט בטלגרם."); return; }
     try {
-      const res  = await fetch(`/miniapp/events?${new URLSearchParams({ initData: INIT_DATA })}`);
+      // audience=all: the Mini App is a full catalog browser — server-side
+      // audience pre-filtering would hide events from client-side filters
+      // like "💻 אונליין" whose events span multiple audience types.
+      const res  = await fetch(`/miniapp/events?${new URLSearchParams({ initData: INIT_DATA, audience: "all" })}`);
       const body = await res.json();
       if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
       buildTagChips(body.profile?.interests || []);
@@ -379,9 +382,15 @@
     card.dataset.id = ev.id;
 
     const metaParts = [];
-    // Time is shown as a badge on the image — not repeated in the meta line.
-    if (ev.location && !isCityWide(ev.location)) metaParts.push(`📍 ${esc(ev.location)}`);
-    else if (isCityWide(ev.location)) metaParts.push(`🗺️ ברחבי העיר`);
+    // Location line: use 📷 for online events, 📍 for physical, 🗺️ city-wide.
+    if (ev.onlineUrl && !ev.location) {
+      metaParts.push("📷 אונליין");
+    } else if (ev.location && !isCityWide(ev.location)) {
+      const locPrefix = ev.onlineUrl ? "📷" : "📍";
+      metaParts.push(`${locPrefix} ${esc(ev.location)}`);
+    } else if (isCityWide(ev.location)) {
+      metaParts.push(`🗺️ ברחבי העיר`);
+    }
 
     const tagsHtml = (ev.tags || []).slice(0, 5)
       .map((t) => `<button class="tag-pill tag-pill-btn" onclick="window.drillTag('${esc(t)}')">${esc(t)}</button>`).join("");
