@@ -670,9 +670,17 @@
   const CITY_WIDE = ["ברחבי העיר", "רחבי העיר", "כלל העיר", "מספר מיקומים", "מיקומים שונים"];
   function isCityWide(loc) { return CITY_WIDE.some((k) => (loc || "").includes(k)); }
 
-  // Wrap Israeli phone numbers in a tel: link so mobile users can tap to call.
-  // Runs on already-escaped HTML; dashes/spaces aren't affected by esc().
+  // Wrap Israeli phone numbers in a tel: link — only on mobile/touch devices
+  // where tapping to call is meaningful. On desktop web the link adds no value.
+  const _isMobile = (() => {
+    const platform = window.Telegram?.WebApp?.platform;
+    if (platform) return platform === "android" || platform === "ios";
+    return /Mobi|Android/i.test(navigator.userAgent) ||
+      window.matchMedia("(pointer: coarse)").matches;
+  })();
+
   function linkifyPhones(html) {
+    if (!_isMobile) return html;
     return html.replace(
       /\b(0\d[\s\u00a0-]?\d{2,3}[\s\u00a0-]?\d{4})\b/g,
       (match) => {
