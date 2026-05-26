@@ -200,11 +200,13 @@
   function sortEvents(events) {
     const arr = [...events];
     if (activeSort === "date-desc") {
-      arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.timeHe || "").localeCompare(a.timeHe || ""));
+      arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.startTime || "").localeCompare(a.startTime || ""));
     } else if (activeSort === "name-asc") {
       arr.sort((a, b) => (a.name || "").localeCompare(b.name || "", "he"));
+    } else {
+      // date-asc: sort by date then by start time within the same day
+      arr.sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.startTime || "").localeCompare(b.startTime || ""));
     }
-    // date-asc: already server-sorted, no-op.
     return arr;
   }
 
