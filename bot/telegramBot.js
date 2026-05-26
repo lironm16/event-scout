@@ -7104,11 +7104,6 @@ bot.action(/^fb:reasons:(\d+)$/, async (ctx) => {
       Markup.inlineKeyboard(rows),
     );
   } catch (err) {
-    // Without this catch the error bubbles to bot.catch and the
-    // user sees… nothing. We'd rather log the cause AND fall back
-    // to a plain reply (no keyboard) so the click registers
-    // visibly even when something exotic breaks the keyboard
-    // render path.
     console.error(`[Bot] fb:reasons error (event=${eventId}):`, err.stack || err.message);
     await ctx.reply("⚠️ אופס — נסי שוב בעוד רגע").catch(() => {});
   }
@@ -7139,7 +7134,7 @@ bot.action(/^fb:explain:(\d+)$/, async (ctx) => {
     };
     await ctx.reply("ספר/י לנו מה לא התאים — נשתמש בזה כדי להתאים לך אירועים טוב יותר 🎯");
   } catch (err) {
-    console.error(`[Bot] fb:explain error (event=${eventId}):`, err.message);
+    console.error(`[Bot] fb:explain error (event=${eventId}):`, err.stack || err.message);
     await ctx.reply("⚠️ אופס — נסי שוב בעוד רגע").catch(() => {});
   }
 });
