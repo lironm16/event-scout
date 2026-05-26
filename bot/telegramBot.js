@@ -637,7 +637,17 @@ async function runScrape() {
       );
     }
   } catch (err) {
-    console.error("[Enricher] enrichPendingEvents failed:", err.message);
+    if (err.message.includes("Daily Gemini limit reached")) {
+      const today = new Date().toLocaleDateString("en-CA");
+      alertAdmin({
+        severity: "warning",
+        code: "enricher_daily_limit",
+        message: err.message,
+        dedupe_key: `enricher_daily_limit:${today}`,
+      }).catch(() => {});
+    } else {
+      console.error("[Enricher] enrichPendingEvents failed:", err.message);
+    }
   }
 }
 
