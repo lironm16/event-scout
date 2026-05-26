@@ -636,6 +636,18 @@ async function runScrape() {
         `cache_hits=${stats.cacheHits || 0} errors=${stats.errors}`,
       );
     }
+    // Alert about events that timed out and were left with audience=null.
+    // Deduped by event ID so the same event doesn't spam on every scrape cycle.
+    if (stats?.fallbackEvents?.length) {
+      for (const ev of stats.fallbackEvents) {
+        alertAdmin({
+          severity: "warning",
+          code: "enricher_timeout_fallback",
+          message: `אירוע #${ev.id} "${(ev.name || "").slice(0, 60)}" — Gemini timed out פעמיים. קהל יעד נותר ריק (audience=null). בדקי ידנית.`,
+          dedupe_key: `enricher_timeout:${ev.id}`,
+        }).catch(() => {});
+      }
+    }
   } catch (err) {
     if (err.message.includes("Daily Gemini limit reached")) {
       const today = new Date().toLocaleDateString("en-CA");
