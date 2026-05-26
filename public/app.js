@@ -517,6 +517,9 @@
         <button class="${intClass}" data-event="${ev.id}" onclick="window.toggleInterest(this,${ev.id})">${intLabel}</button>
         <button class="btn btn-muted" data-event="${ev.id}" onclick="window.markNotInterested(this,${ev.id})">✕ לא מתאים</button>
       </div>
+      <div class="card-report-row">
+        <button class="btn-report" onclick="window.openReportSheet(${ev.id})">🚩 דווח על בעיה</button>
+      </div>
     `);
 
     return parts.join("") || "<div class='card-description'>אין פרטים נוספים.</div>";
@@ -730,6 +733,67 @@
     errorDiv.style.display = "block";
     errorDiv.innerHTML = `<div class="error-banner">${esc(msg)}</div>`;
   }
+
+  // ── Report-a-problem sheet ────────────────────────────────────────────
+  const reportBackdrop  = document.getElementById("reportBackdrop");
+  const reportPanel     = document.getElementById("reportPanel");
+  const reportSheetClose = document.getElementById("reportSheetClose");
+  const reportChips     = document.getElementById("reportChips");
+  const reportNote      = document.getElementById("reportNote");
+  const reportSubmit    = document.getElementById("reportSubmit");
+
+  let _reportEventId    = null;
+  let _reportIssueType  = null;
+
+  window.openReportSheet = function(eventId) {
+    _reportEventId  = eventId;
+    _reportIssueType = null;
+    reportNote.value = "";
+    reportSubmit.disabled = true;
+    reportChips.querySelectorAll(".report-chip").forEach(c => c.classList.remove("selected"));
+    reportBackdrop.classList.add("open");
+    reportPanel.classList.add("open");
+  };
+
+  function closeReportSheet() {
+    reportBackdrop.classList.remove("open");
+    reportPanel.classList.remove("open");
+  }
+
+  reportSheetClose.addEventListener("click", closeReportSheet);
+  reportBackdrop.addEventListener("click", closeReportSheet);
+
+  reportChips.addEventListener("click", (e) => {
+    const chip = e.target.closest(".report-chip");
+    if (!chip) return;
+    reportChips.querySelectorAll(".report-chip").forEach(c => c.classList.remove("selected"));
+    chip.classList.add("selected");
+    _reportIssueType = chip.dataset.type;
+    reportSubmit.disabled = false;
+  });
+
+  reportSubmit.addEventListener("click", async () => {
+    if (!_reportEventId || !_reportIssueType) return;
+    reportSubmit.disabled = true;
+    reportSubmit.textContent = "שולח...";
+    try {
+      const body = { eventId: _reportEventId, issueType: _reportIssueType, note: reportNote.value.trim() || undefined };
+      const initData = window.Telegram?.WebApp?.initData;
+      if (initData) body.initData = initData;
+      const res = await fetch("/miniapp/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("server error");
+      reportSubmit.textContent = "✓ תודה על הדיווח!";
+      setTimeout(closeReportSheet, 1200);
+    } catch {
+      reportSubmit.textContent = "שלח דיווח";
+      reportSubmit.disabled = false;
+      alert("שגיאה בשליחה, נסה שוב.");
+    }
+  });
 
   loadEvents();
 })();

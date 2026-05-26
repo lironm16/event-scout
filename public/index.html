@@ -163,6 +163,29 @@
   <img class="lightbox-img" id="lightboxImg" src="" alt="" />
 </div>
 
+<!-- Report-a-problem sheet -->
+<div class="filter-backdrop" id="reportBackdrop"></div>
+<div class="filter-sheet report-sheet" id="reportPanel" role="dialog" aria-modal="true" aria-label="דיווח על בעיה">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <span class="sheet-title">🚩 דיווח על בעיה</span>
+    <button class="sheet-close" id="reportSheetClose" aria-label="סגור">✕</button>
+  </div>
+  <div class="sheet-body">
+    <p class="report-subtitle">מה הבעיה באירוע?</p>
+    <div class="report-chips" id="reportChips">
+      <button class="chip report-chip" data-type="wrong_audience">קהל יעד שגוי</button>
+      <button class="chip report-chip" data-type="wrong_category">סיווג / תגיות שגויים</button>
+      <button class="chip report-chip" data-type="bad_description">תיאור חסר או שגוי</button>
+      <button class="chip report-chip" data-type="wrong_time">שעה / תאריך שגויים</button>
+      <button class="chip report-chip" data-type="duplicate">אירוע כפול</button>
+      <button class="chip report-chip" data-type="other">אחר</button>
+    </div>
+    <textarea class="report-note" id="reportNote" placeholder="פרטים נוספים (רשותי)..." rows="3" maxlength="500"></textarea>
+    <button class="btn btn-primary report-submit" id="reportSubmit" disabled>שלח דיווח</button>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>
