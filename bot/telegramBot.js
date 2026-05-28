@@ -2954,10 +2954,12 @@ function buildOnboardingSummaryText(state) {
     lines.push("👥 *קהלים:* _ללא סינון_");
   }
   if (Array.isArray(state.kids) && state.kids.length) {
+    const { formatKidProfileSuffix } = require("../lib/kidAge");
     const kidStr = state.kids
       .map((k) => {
         const st = k.stages?.length ? ` (${k.stages.join("/")})` : "";
-        return `${k.name} — גיל ${k.age}${st}`;
+        const meta = formatKidProfileSuffix(k) || "";
+        return `${k.name}${meta ? ` — ${meta}` : ""}${st}`;
       })
       .join(" • ");
     lines.push(`👧 *ילדים:* ${kidStr}`);
