@@ -6,6 +6,7 @@
   const tg = window.Telegram?.WebApp;
   if (tg) { tg.ready(); tg.expand(); }
   const INIT_DATA = tg?.initData || "";
+  const API_PREFIX = "/miniapp";
 
   // ── State ────────────────────────────────────────────────────────────
   let allEvents    = [];
@@ -99,7 +100,7 @@
   async function loadEvents() {
     if (!INIT_DATA) { showError("פתח את הקטלוג דרך הבוט בטלגרם."); return; }
     try {
-      const res  = await fetch(`/miniapp/events?${new URLSearchParams({ initData: INIT_DATA })}`);
+      const res  = await fetch(`${API_PREFIX}/events?${new URLSearchParams({ initData: INIT_DATA })}`);
       const body = await res.json();
       if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
       buildTagChips(body.profile?.interests || []);
@@ -117,7 +118,7 @@
   // ── Signal to server (מעניין אותי / לא מתאים) ──────────────────────
   async function sendSignal(eventId, signal) {
     if (!INIT_DATA) return;
-    await fetch("/miniapp/signal", {
+    await fetch(`${API_PREFIX}/signal`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ initData: INIT_DATA, eventId, signal }),
@@ -780,7 +781,7 @@
       const body = { eventId: _reportEventId, issueType: _reportIssueType, note: reportNote.value.trim() || undefined };
       const initData = window.Telegram?.WebApp?.initData;
       if (initData) body.initData = initData;
-      const res = await fetch("/miniapp/report", {
+      const res = await fetch(`${API_PREFIX}/report`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

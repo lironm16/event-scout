@@ -628,11 +628,15 @@ async function upsertEvents(events) {
     // (`lib/imageUrl.js#normalizeImageUrl`) joins the tenant base at
     // read time — see callers in `lib/savedSearchNotifier.js` and the
     // bot's photo dispatcher.
-    if (e._image) {
+    const calendarImage = pickImagePath(e);
+    if (e._image && calendarImage && e._image !== calendarImage) {
+      // Prefer live calendar path when Smarticket rotated the upload
+      // file — keeps stale DB paths from sticking (404 on sendPhoto).
+      row.image = calendarImage;
+    } else if (e._image) {
       row.image = e._image;
-    } else {
-      const seedImage = pickImagePath(e);
-      if (seedImage) row.image = seedImage;
+    } else if (calendarImage) {
+      row.image = calendarImage;
     }
     rows.push(row);
   }

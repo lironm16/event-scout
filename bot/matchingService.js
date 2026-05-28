@@ -1,7 +1,13 @@
 const { GoogleGenerativeAI, SchemaType } = require("@google/generative-ai");
 const { createClient } = require("@supabase/supabase-js");
 const { todayISO, todayHumanEN, isAdminEntry, isEventInPast, currentTimeHHMM } = require("../lib/timeContext");
-const { formatHebrewDate, formatTimeRange, getEventIcon, rtlLine } = require("../lib/eventFormat");
+const {
+  formatHebrewDate,
+  formatTimeRange,
+  formatAudienceLine,
+  getEventIcon,
+  rtlLine,
+} = require("../lib/eventFormat");
 const { formatTicketsLine } = require("../lib/eventCard");
 const labelStore = require("../lib/labelStore");
 const { normalizeImageUrl } = require("../lib/imageUrl");
@@ -273,6 +279,7 @@ function flattenEvent(row) {
     audience: row.audience || null,
     category: row.category || null,
     tag_ids: row.tag_ids || [],
+    access: row.access ?? null,
     _coords: coords,
     _locationFound: loc?.found ?? null,
     _locationKind: loc?.kind || (row.location_key ? "unknown" : null),
@@ -343,6 +350,45 @@ function withAccessFilter(query, extraCols, scopes) {
   return query.overlaps("access", list);
 }
 
+// ENUM values the app may reference before a migration lands (e.g.
+// community-olim in sql/069). Probed once per process; dropped from
+// accessScopes so `.overlaps('access', …)` never kills the whole query.
+const ACCESS_SCOPES_TO_PROBE = ["community-olim"];
+let _unsupportedAccessScopes = null;
+
+async function getUnsupportedAccessScopes() {
+  if (_unsupportedAccessScopes) return _unsupportedAccessScopes;
+  const extras = await getAvailableExtraCols();
+  if (!extras.includes("access")) {
+    _unsupportedAccessScopes = new Set();
+    return _unsupportedAccessScopes;
+  }
+  const unsupported = new Set();
+  for (const scope of ACCESS_SCOPES_TO_PROBE) {
+    const { error } = await supabase
+      .from("events")
+      .select("id")
+      .overlaps("access", [scope])
+      .limit(1);
+    if (error && /invalid input value for enum/i.test(error.message || "")) {
+      unsupported.add(scope);
+      console.warn(
+        `[Matching] access scope "${scope}" missing from DB enum — ` +
+          "apply sql/069_access_olim.sql via Supabase SQL Editor and restart the bot.",
+      );
+    }
+  }
+  _unsupportedAccessScopes = unsupported;
+  return _unsupportedAccessScopes;
+}
+
+async function sanitizeAccessScopes(scopes) {
+  const list = Array.isArray(scopes) && scopes.length ? [...scopes] : ["open"];
+  const drop = await getUnsupportedAccessScopes();
+  if (!drop.size) return list;
+  return list.filter((s) => !drop.has(s));
+}
+
 async function getAvailableEvents({ accessScopes = ["open"] } = {}) {
   const today = todayISO();
   const select = await buildSelect();
@@ -354,7 +400,8 @@ async function getAvailableEvents({ accessScopes = ["open"] } = {}) {
     .eq("archived", false)
     .gte("date", today)
     .order("date", { ascending: true });
-  query = withAccessFilter(query, extras, accessScopes);
+  const safeScopes = await sanitizeAccessScopes(accessScopes);
+  query = withAccessFilter(query, extras, safeScopes);
   const { data, error } = await query;
 
   if (error) throw new Error(`Events fetch failed: ${error.message}`);
@@ -400,7 +447,8 @@ async function getAllEvents({
   const lowerBound = dateFrom || (futureOnly ? todayISO() : null);
   if (lowerBound) query = query.gte("date", lowerBound);
   if (dateTo) query = query.lte("date", dateTo);
-  query = withAccessFilter(query, extras, accessScopes);
+  const safeScopes = await sanitizeAccessScopes(accessScopes);
+  query = withAccessFilter(query, extras, safeScopes);
 
   const { data, error } = await query;
   if (error) throw new Error(`Events fetch failed: ${error.message}`);
@@ -415,8 +463,17 @@ async function getAllEvents({
   return applyFormatFilter(expanded, format);
 }
 
+const { isGeminiAllowed } = require("../lib/geminiPolicy");
+
 async function findMatchesForUser(profile, events, options = {}) {
   if (!events.length) return [];
+
+  if (!isGeminiAllowed("matching")) {
+    console.log(`[Matching] Gemini disabled — skipping AI match for user ${profile.telegram_id}`);
+    const out = [];
+    out._failureReason = "gemini_disabled";
+    return out;
+  }
 
   const watchedIds = Array.isArray(options.watchedEventIds)
     ? options.watchedEventIds.map((id) => parseInt(id, 10)).filter(Number.isFinite)
@@ -607,6 +664,8 @@ function buildMatchMessage(profile, match, event) {
   if (event.date) lines.push(`📅 ${formatHebrewDate(event.date)}`);
   const timeStr = formatTimeRange(event.start_time, event.end_time);
   if (timeStr) lines.push(rtlLine(`🕐 ${timeStr}`));
+  const audienceLine = formatAudienceLine(event);
+  if (audienceLine) lines.push(audienceLine);
   if (event.location) lines.push(`📍 ${event.location}`);
   // Shared ticket-line helper — handles free events (null → skip)
   // AND surfaces the low-stock urgency ("🎫 N כרטיסים אחרונים ❗️")
@@ -691,12 +750,30 @@ async function runMatchingForAllUsers(telegram) {
   return { processed: profiles.length, matched: totalMatched, notified: totalNotified };
 }
 
+/** Load one event row with the same shape as search/matching cards. */
+async function getEventById(id) {
+  const eventId = parseInt(id, 10);
+  if (!Number.isFinite(eventId)) return null;
+  const select = await buildSelect();
+  const { data, error } = await supabase
+    .from("events")
+    .select(select)
+    .eq("id", eventId)
+    .eq("archived", false)
+    .maybeSingle();
+  if (error || !data) return null;
+  const flat = flattenEvent(data);
+  await expandLabels([flat]);
+  return flat;
+}
+
 module.exports = {
   findMatchesForUser,
   runMatchingForAllUsers,
   getActiveProfiles,
   getAvailableEvents,
   getAllEvents,
+  getEventById,
   buildMatchMessage,
   flattenEvent,
   expandLabels,

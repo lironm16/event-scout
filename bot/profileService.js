@@ -16,33 +16,51 @@ const VALID_GENDERS = new Set(["female", "male"]);
 // kids-only logic for backward compatibility.
 const VALID_AGE_RANGES = new Set(["young_adult", "mid_adult", "senior"]);
 
-// `communities` is a sub-object of user_context that records the
-// user's community membership / non-membership, keyed by the same
-// `access_t` ENUM values that appear on `events.access` (sql/039).
-// Values are tri-state:
-//   present + "member"      → include events restricted to this community
-//   present + "not-member"  → never offer events restricted to this community
-//   absent                  → unknown; bot may ask once before offering
-//
-// The closed set of community keys lives in the ENUM. We don't
-// mirror it here as a constant — the bot's matcher just uses
-// `Object.entries(profile.communities || {}).filter(([_, v]) => v === 'member')`
-// which is forward-compatible with any new ENUM value added later.
+// `communities`: positive `member` flags after the user configures via picker.
+// Empty `{}` before first edit = default member of all communities.
+// Agent may still set `not-member` one-off via mergeCommunities.
 const VALID_COMMUNITY_STATUSES = new Set(["member", "not-member"]);
+
+const {
+  accessScopesForCommunities,
+} = require("../lib/communityAccess");
+const { normalizeKids } = require("../lib/profileDisplay");
 
 // Normalise an incoming `communities` payload. Drops unknown
 // statuses (so a Gemini hallucination of "maybe" doesn't end up
 // stored), and SHALLOW-MERGES with any existing entries so the
 // agent can update one community at a time without having to
 // resend the full object.
+// Community picker snapshot: ✅ = `member` only; all checked → `{}` (default all).
+function communitiesFromPickerSelection(selectedKeys) {
+  const selected = new Set(selectedKeys || []);
+  const { COMMUNITY_CHIPS } = require("../lib/kidsWizardUi");
+  if (COMMUNITY_CHIPS.every((c) => selected.has(c.key))) {
+    return {};
+  }
+  const out = {};
+  for (const c of COMMUNITY_CHIPS) {
+    if (selected.has(c.key)) out[c.key] = "member";
+  }
+  return out;
+}
+
+function isPickerCommunitiesSnapshot(incoming) {
+  if (!incoming || typeof incoming !== "object") return false;
+  const keys = Object.keys(incoming).filter((k) => k.startsWith("community-"));
+  if (keys.length === 0) return true;
+  return keys.every((k) => incoming[k] === "member");
+}
+
 function mergeCommunities(incoming, existing) {
+  if (isPickerCommunitiesSnapshot(incoming)) {
+    return { ...incoming };
+  }
   const merged = { ...(existing && typeof existing === "object" ? existing : {}) };
   if (incoming && typeof incoming === "object") {
     for (const [key, value] of Object.entries(incoming)) {
       if (typeof key !== "string" || !key) continue;
       if (value === null) {
-        // Explicit null → forget what we knew. Lets the agent reset
-        // a status if the user changes their mind.
         delete merged[key];
         continue;
       }
@@ -134,7 +152,11 @@ async function saveProfile(telegramId, updatedProfile, existing = null) {
     // parent gets both signals set, which is the whole point of the
     // independent dimension. See `deriveDefaultAudienceSet`.
     age_range: normalizeAgeRange(updatedProfile.age_range, existing?.user_context?.age_range),
-    kids: updatedProfile.kids || [],
+    kids: normalizeKids(
+      updatedProfile.kids !== undefined
+        ? updatedProfile.kids
+        : existing?.user_context?.kids || [],
+    ),
     // `partner` is a single OBJECT (not an array) — most households
     // have at most one. Preserve existing when the caller doesn't pass
     // one; allow explicit `null` to clear (e.g. "אני לבד עכשיו").
@@ -210,9 +232,11 @@ function profileToBrainShape(profile) {
 //
 // `user_context.preferences` shape:
 //   {
-//     tag_weights:      { "<label_id>": number },  // >1 boost, <1 suppress
-//     category_weights: { "<category_str>": number },
-//     series_suppress:  ["<series_name>", ...]      // recurring series to sink
+//     tag_weights:          { "<label_id>": number },  // >1 boost, <1 suppress
+//     category_weights:     { "<category_str>": number },
+//     series_suppress:      ["<series_name>", ...]   // recurring series to sink
+//     target_audience_chip_ids: ["kids", "young", ...] // positive audiences (לא מתאים picker)
+//     suppressed_locations: ["<location_key>", ...]  // "רחוק מדי"
 //   }
 //
 // Numeric weight presets (chosen by the agent based on signal strength):
@@ -287,25 +311,17 @@ async function updatePreferences(telegramId, adjustments) {
  * Compute the set of `events.access` ENUM values this profile is
  * allowed to see in a default search.
  *
- * Always includes 'open' (= everyone). Adds each community where
- * the profile says "member". "not-member" and "unknown" are both
- * excluded — but the system prompt knows to ask once before showing
- * an unknown-community event (vs never asking again for not-member).
+ * Always includes 'open'. All known communities are included unless
+ * the profile explicitly says "not-member".
  *
  * Pure function — safe to call on every search.
  */
 function accessScopesForProfile(profile) {
-  const scopes = ["open"];
   const communities =
     profile?.user_context?.communities ||
     profile?.communities ||
     {};
-  if (communities && typeof communities === "object") {
-    for (const [key, status] of Object.entries(communities)) {
-      if (status === "member" && !scopes.includes(key)) scopes.push(key);
-    }
-  }
-  return scopes;
+  return accessScopesForCommunities(communities);
 }
 
 /**
@@ -313,12 +329,34 @@ function accessScopesForProfile(profile) {
  * profile and computes scopes in one call so tool entry points
  * don't have to spell out the join.
  *
- * Returns just ['open'] when no profile exists (new user, pre-onboarding).
+ * With no profile, returns open + all communities (same default).
  */
 async function getAccessScopesForUser(telegramId) {
   if (telegramId == null) return ["open"];
   const profile = await getProfile(telegramId);
   return accessScopesForProfile(profile);
+}
+
+/** Positive venue allow-list — when non-empty, only these location_keys pass filters. */
+async function saveFavoriteLocationKeys(telegramId, keys) {
+  const profile = await getProfile(telegramId);
+  const ctx = profile?.user_context && typeof profile.user_context === "object"
+    ? { ...profile.user_context }
+    : {};
+  const normalized = Array.isArray(keys)
+    ? [...new Set(keys.map((k) => String(k).trim()).filter(Boolean))]
+    : [];
+  ctx.favorite_location_keys = normalized;
+  const { error } = await supabase
+    .from("profiles")
+    .update({ user_context: ctx })
+    .eq("telegram_id", String(telegramId));
+  if (error) throw new Error(`saveFavoriteLocationKeys failed: ${error.message}`);
+}
+
+function getFavoriteLocationKeys(profile) {
+  const keys = profile?.user_context?.favorite_location_keys;
+  return Array.isArray(keys) ? keys.filter(Boolean) : [];
 }
 
 module.exports = {
@@ -328,5 +366,8 @@ module.exports = {
   accessScopesForProfile,
   getAccessScopesForUser,
   updatePreferences,
+  saveFavoriteLocationKeys,
+  getFavoriteLocationKeys,
+  communitiesFromPickerSelection,
   WEIGHT_PRESETS,
 };

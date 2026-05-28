@@ -142,6 +142,7 @@ async function main() {
   console.log(`[Backfill] ${events.length} candidate row(s) with image populated`);
 
   let upgradedHiRes = 0; // upgraded thumb → upld
+  let refreshedCalendar = 0; // stale upld path → current calendar image
   let normalisedHost = 0; // stripped host, same identity
   let unchanged = 0;
   let touched = 0;
@@ -150,16 +151,19 @@ async function main() {
     const before = row.image;
     let after = stripHost(before);
 
-    const isThumbPath = /\/uploads\/thumbs\/thmb/i.test(after || "");
-    if (isThumbPath) {
-      const cal = calendarBySource.get(row.source)?.get(Number(row.id));
-      const upgraded = cal ? pickImagePathFromCalendar(cal) : null;
-      if (
-        upgraded &&
-        upgraded !== after &&
-        /\/uploads\/upld/i.test(upgraded)
-      ) {
-        after = upgraded;
+    const cal = calendarBySource.get(row.source)?.get(Number(row.id));
+    const calendarPath = cal ? pickImagePathFromCalendar(cal) : null;
+    if (calendarPath && calendarPath !== after) {
+      after = calendarPath;
+      if (/\/uploads\/thumbs\/thmb/i.test(stripHost(before))) {
+        upgradedHiRes++;
+      } else {
+        refreshedCalendar++;
+      }
+    } else {
+      const isThumbPath = /\/uploads\/thumbs\/thmb/i.test(after || "");
+      if (isThumbPath && calendarPath) {
+        after = calendarPath;
         upgradedHiRes++;
       }
     }
@@ -200,6 +204,7 @@ async function main() {
   console.log(``);
   console.log(`[Backfill] Summary:`);
   console.log(`  upgraded to hi-res /uploads/upld: ${upgradedHiRes}`);
+  console.log(`  refreshed from calendar API:    ${refreshedCalendar}`);
   console.log(`  host-only normalisation:         ${normalisedHost}`);
   console.log(`  unchanged:                       ${unchanged}`);
   console.log(`  total touched:                   ${touched}`);

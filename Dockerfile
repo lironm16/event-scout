@@ -13,9 +13,8 @@
 #     whatsapp-web.js → puppeteer dependency from pulling Chromium
 #     (~200MB) into the image. The bot doesn't load that scraper, so
 #     we save space and install time without losing anything.
-#   - Telegraf uses long-polling (`bot.launch()`), so the container
-#     doesn't bind to a port. Railway "worker" or "web" service types
-#     both work; no HTTP healthcheck is needed.
+#   - Telegraf long-polls Telegram; Express listens on $PORT for
+#     /health, /miniapp, and OAuth. HTTP starts at boot (before launch).
 #   - bot/telegramBot.js installs SIGTERM / SIGINT handlers that flush
 #     in-flight updates before exit. We invoke node via exec-form CMD
 #     so the signals Railway sends reach node directly (no shell

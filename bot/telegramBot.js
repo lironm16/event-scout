@@ -42,12 +42,44 @@ const {
   recordTooFarSignal,
 } = require("../lib/interestService");
 const {
+  registerFeedbackHandlers,
+  handlePendingFeedbackText,
+  handlePendingFeedbackKidWizardText,
+} = require("../lib/feedbackFlow");
+const {
+  startKidsCapture,
+  handlePendingKidsCaptureText,
+  PROMPT: KIDS_AGE_PROMPT,
+} = require("../lib/kidsProfileCapture");
+const { formatProfileLines, formatFavoriteLocationsLines } = require("../lib/profileDisplay");
+const {
+  openFavoriteLocationsPicker,
+  editFavoriteLocationsPicker,
+  saveFavoriteLocationsPicker,
+} = require("../lib/favoriteLocationsPicker");
+const {
+  buildMainMenuKeyboard,
+  buildProfileViewKeyboard,
+  buildProfileEditKeyboard,
+  buildGenderEditKeyboard,
+  buildAgeEditKeyboard,
+  resolveReplyAction,
+  shouldShowTypingMenu,
+  MENU,
+} = require("../lib/typingActionsMenu");
+const {
+  showMainMenu,
+  showSearchHub,
+  buildProfileViewKeyboardExtra,
+} = require("../lib/botNavigation");
+const {
   listSavedSearches,
   archiveSavedSearch,
   promoteToRecurring: promoteSavedSearchToRecurring,
   decrementTicketsRemaining: decrementSavedSearchRemaining,
   getSavedSearch,
   updateSavedSearch,
+  createSavedSearch,
 } = require("../lib/savedSearchService");
 const {
   getTicket, logClick, isStillActive, updateQuantity, markSoldById,
@@ -55,24 +87,49 @@ const {
 const { _saveOffer: saveTicketOfferToDb } = require("../lib/agent/tools/ticketOffer");
 const referralService = require("../lib/referralService");
 const { flushDueNotifications } = require("../lib/scheduleService");
-const { formatHebrewDate, formatTimeRange, formatTagLine, formatAdultAgeGate, getEventIcon, rtlLine } = require("../lib/eventFormat");
-const { formatTicketsLine, formatLowStockBadge, buildNavButtons } = require("../lib/eventCard");
+const {
+  formatHebrewDate,
+  formatTimeRange,
+  formatTagLine,
+  formatAdultAgeGate,
+  getEventIcon,
+  formatEventCardTitleLines,
+  resolveEventTitleParts,
+  rtlLine,
+} = require("../lib/eventFormat");
+const {
+  formatTicketsLine,
+  formatLowStockBadge,
+  buildNavButtons,
+  formatDescriptionSnippet,
+  descriptionNeedsReadMore,
+  buildReadMoreButton,
+} = require("../lib/eventCard");
+const { getEventById, flattenEvent, expandLabels } = require("./matchingService");
+const { filterAndRankForProfile } = require("../lib/profileEventFilter");
 const { normalizeImageUrl } = require("../lib/imageUrl");
 const { isCityWideLocation } = require("../lib/locationStore");
 const { getBookingUrl } = require("../lib/sourceUrls");
 const { runCleanup } = require("../lib/archiveService");
 const { getStaticReply } = require("../lib/staticReplies");
 const { runAgent } = require("../lib/agent/orchestrator");
+const { isAgentEnabled } = require("../lib/agentConfig");
+const {
+  runRouterTextTurn,
+  runRouterPreset,
+  runSearchWithFilters,
+  startSaveFromLastSearch,
+  searchMenuKeyboard,
+} = require("../lib/searchRouterRunner");
 const sessionStore = require("../lib/agent/sessionStore");
+const supabase = require("../lib/supabase");
 const { audienceLabel, AUDIENCE_LABELS } = require("../lib/categories");
 const {
-  INTEREST_CATEGORIES,
   TOPIC_CATEGORIES,
   AUDIENCE_CATEGORIES,
   LOCATION_OPTIONS,
-  getInterestById,
-  getInterestByLabel,
   getTopicById,
+  getTopicByLabel,
   getAudienceById,
   getLocationById,
   getChipByLabel,
@@ -107,11 +164,7 @@ const MAX_LOADED_TOP_LABELS = 60;
 // hit. Hebrew compound names read fine from their prefix, e.g.
 // "ר"געים משחקייה התפ…" still parses as the playgroup chip.
 const { enrichPendingEvents } = require("../lib/eventEnricher");
-const {
-  recordFeedback,
-  REASON_LABELS,
-  ACK_LABELS,
-} = require("../lib/feedbackService");
+const { recordFeedback } = require("../lib/feedbackService");
 const venueMemory = require("../lib/venueMemory");
 const tracing = require("../lib/tracing");
 
@@ -643,7 +696,7 @@ async function runScrape() {
         alertAdmin({
           severity: "warning",
           code: "enricher_timeout_fallback",
-          message: `אירוע #${ev.id} "${(ev.name || "").slice(0, 60)}" — Gemini timed out פעמיים. קהל יעד נותר ריק (audience=null). בדקי ידנית.`,
+          message: `אירוע #${ev.id} "${(ev.name || "").slice(0, 60)}" — Gemini timed out. audience ו-category נשארו null. בדקי ידנית.`,
           dedupe_key: `enricher_timeout:${ev.id}`,
         }).catch(() => {});
       }
@@ -761,7 +814,7 @@ function replaceInlineButton(replyMarkup, oldCallbackData, newButton) {
 function buildDetailsButton(event) {
   const url = getBookingUrl(event);
   if (!url) return null;
-  return Markup.button.url("🔗 פרטים", url);
+  return Markup.button.url("🔗 לאתר", url);
 }
 
 function buildNavigateButton(item) {
@@ -830,34 +883,14 @@ async function sendEventCard(ctx, event, opts = {}) {
   //               umbrella) and active-garden-style children (name
   //               echoes the umbrella) the secondary line is
   //               omitted and we render a single title line.
-  // We keep `event.name` flowing into `getEventIcon` so the icon
-  // picker has the most specific topic signal available.
-  const umbrellaTitleTrim =
-    (typeof event.umbrella_title === "string" && event.umbrella_title.trim())
-      ? event.umbrella_title.trim()
-      : null;
-  const nameTrim =
-    typeof event.name === "string" ? event.name.trim() : "";
-  const primaryTitle = umbrellaTitleTrim || nameTrim;
-  const secondaryTitle =
-    umbrellaTitleTrim && nameTrim && nameTrim !== umbrellaTitleTrim
-      ? nameTrim
-      : null;
-  // When both titles exist: primary (series/umbrella name) is plain context,
-  // secondary (the specific event name) is bold since it's the actionable title.
-  // When only primary exists it's the sole title so we bold it.
-  // RLM (\u200F) after the emoji anchors the bidi paragraph to RTL so the
-  // entire caption is right-aligned in Telegram, even under wide photos.
-  const RLM = "\u200F";
-  const icon = getEventIcon(event);
-  const formattedPrimary = secondaryTitle
-    ? `${icon} ${RLM}${escapeHtml(primaryTitle)}`
-    : `${icon} ${RLM}<b>${escapeHtml(primaryTitle)}</b>`;
-  const lines = [formattedPrimary];
-  if (secondaryTitle) lines.push(`${RLM}<b>${escapeHtml(secondaryTitle)}</b>`);
+  // Parent events under an umbrella: emoji on the secondary (session)
+  // title, not the umbrella branding line — see formatEventCardTitleLines.
+  const lines = formatEventCardTitleLines(event, escapeHtml);
   if (event.date) lines.push(`📅 ${formatHebrewDate(event.date)}`);
   const timeStr = formatTimeRange(event.start_time, event.end_time);
   if (timeStr) lines.push(rtlLine(`🕐 ${timeStr}`));
+  const audienceLine = formatAdultAgeGate(event);
+  if (audienceLine) lines.push(escapeHtml(audienceLine));
   if (multiVenue || isCityWideLocation(event.location_key)) {
     const locLabel = isCityWideLocation(event.location_key)
       ? "ברחבי העיר"
@@ -890,31 +923,17 @@ async function sendEventCard(ctx, event, opts = {}) {
     const moadStr = additionalOccurrences === 1 ? "מופע נוסף" : `${additionalOccurrences} מופעים נוספים`;
     lines.push(`🔁 ${moadStr} בטווח`);
   }
-  // Adult-tier age gate (May-2026 user request). For parties / adult
-  // events with a min_months>=216 (18+) we surface the bouncer-policy
-  // line on the card itself — previously this restriction lived only
-  // in the audience-tier filter, invisible to the user. See
-  // `formatAdultAgeGate` for the scope rules; null for events that
-  // don't qualify, which we then skip entirely (no empty line).
-  const ageGate = formatAdultAgeGate(event);
-  if (ageGate) lines.push(ageGate);
   if (event._proximity?.label) lines.push(escapeHtml(event._proximity.label));
   if (event._reason) lines.push(`💡 ${escapeHtml(event._reason)}`);
 
-  // Description (sql/053). Same shape and rules as
-  // `buildConsolidatedEventBlock` for visual parity across surfaces:
-  // dedicated 📝 prefix, normalised whitespace, soft cap at 280 chars.
-  // Surfaced for events with NO external-details URL — children of
-  // umbrellas like shavuot-2026 inherit the parent's marketing page
-  // through `umbrella_slug` but have no per-child detail URL of
-  // their own, so this card is the only place a user can read the
-  // event's blurb. We position it BELOW location/tickets/proximity
-  // and ABOVE the tag line so 🏷️ stays the final "footer" line.
-  if (typeof event.description === "string" && event.description.trim()) {
-    const desc = event.description.replace(/\s+/g, " ").trim();
-    const capped =
-      desc.length > 280 ? desc.slice(0, 280).trimEnd() + "…" : desc;
-    lines.push(`📝 ${escapeHtml(capped)}`);
+  // Description (sql/053) — always surfaced when present. Short excerpt
+  // on the card; "קרא עוד" opens the full card (see `ev:more:` handler).
+  const descSnippet = formatDescriptionSnippet(event.description);
+  if (descSnippet) {
+    const descText = opts.fullDescription
+      ? event.description.replace(/\s+/g, " ").trim()
+      : descSnippet;
+    lines.push(`📝 ${escapeHtml(descText)}`);
   }
 
   // Tag line — surfaces the topic at-a-glance ("מוזיקה • התפתחות") so
@@ -962,6 +981,11 @@ async function sendEventCard(ctx, event, opts = {}) {
   const topRow = [...navBtns, detailsBtn].filter(Boolean);
   if (topRow.length) rows.push(topRow);
 
+  if (!opts.fullDescription && descriptionNeedsReadMore(event.description)) {
+    const readMore = buildReadMoreButton(event.id);
+    if (readMore) rows.push([Markup.button.callback(readMore.text, readMore.callback_data)]);
+  }
+
   // Online meeting join button — shown only when event has a Zoom/Meet link.
   if (event.online_url) {
     rows.push([Markup.button.url("📹 הצטרף למפגש", event.online_url)]);
@@ -1000,15 +1024,22 @@ async function sendEventCard(ctx, event, opts = {}) {
     // "📋 כל אירועי " prefix = 32, within budget for typical screens.
     const truncated =
       rawTitle.length > 22 ? rawTitle.slice(0, 21) + "…" : rawTitle;
+    const umbSuffix = seriesCount > 1 ? ` (${seriesCount})` : "";
     rows.push([
       Markup.button.callback(
-        `📋 כל אירועי ${truncated}`,
+        `📋 כל אירועי ${truncated}${umbSuffix}`,
         `umb:${event.umbrella_slug}`,
       ),
+    ]);
+    rows.push([
+      Markup.button.callback("✨ בשבילי מהסדרה", `umb:me:${event.umbrella_slug}`),
     ]);
   } else if (additionalOccurrences > 0) {
     rows.push([
       Markup.button.callback(`📋 כל המופעים (${seriesCount})`, `seq:${event.id}`),
+    ]);
+    rows.push([
+      Markup.button.callback("✨ מופעים בשבילי", `seq:me:${event.id}`),
     ]);
   }
 
@@ -1052,14 +1083,12 @@ async function sendEventCard(ctx, event, opts = {}) {
   // Telegram caption max is 1024 chars. Most event cards sit ~300-500
   // so we rarely hit it, but if a card grows (lots of tags + reasons)
   // we fall back to text-only rather than truncating mid-line.
-  const msgOpts = { parse_mode: "HTML" };
+  const replyToId = opts.replyToMessageId || null;
+  const msgOpts = withReplyToMessageId({ parse_mode: "HTML" }, replyToId);
+  const photoOpts = { caption: text, ...msgOpts, ...keyboard };
   if (photoUrl && text.length <= 1024) {
     try {
-      await ctx.replyWithPhoto(photoUrl, {
-        caption: text,
-        ...msgOpts,
-        ...keyboard,
-      });
+      await ctx.replyWithPhoto(photoUrl, photoOpts);
       return;
     } catch (err) {
       // "wrong type of the web page content" means Telegram's servers
@@ -1072,10 +1101,7 @@ async function sendEventCard(ctx, event, opts = {}) {
           const imgRes = await fetch(photoUrl, { signal: AbortSignal.timeout(8000) });
           if (imgRes.ok && (imgRes.headers.get("content-type") || "").startsWith("image/")) {
             const buf = Buffer.from(await imgRes.arrayBuffer());
-            await ctx.replyWithPhoto(
-              { source: buf, filename: "event.jpg" },
-              { caption: text, ...msgOpts, ...keyboard },
-            );
+            await ctx.replyWithPhoto({ source: buf, filename: "event.jpg" }, photoOpts);
             return;
           }
         } catch (proxyErr) {
@@ -1116,6 +1142,8 @@ async function sendWatchListCards(ctx, watched) {
     if (event.date) lines.push(`📅 ${formatHebrewDate(event.date)}`);
     const timeStr = formatTimeRange(event.start_time, event.end_time);
     if (timeStr) lines.push(`🕐 ${timeStr}`);
+    const audienceLine = formatAdultAgeGate(event);
+    if (audienceLine) lines.push(audienceLine);
     if (event.location) lines.push(`📍 ${event.location}`);
     // Same NULL-aware rule as the search card above: free/unmetered
     // events (city source, sql/039 → tickets_left = NULL) omit the
@@ -1359,15 +1387,13 @@ function buildAgentCtx(ctx, { traceId, markResponded } = {}) {
         mark();
         return renderSavePreviewCard(ctx, { editInPlace: false });
       },
-      // Used by `present_interest_picker`. For SELF, opens the new
-      // multi-step onboarding (topics → audiences → location); for
-      // PARTNER, falls back to the legacy single-list picker — that
-      // sub-flow is intentionally simpler since partner-interests is
-      // a one-question interaction.
+      // Used by `present_interest_picker`. Topics-only chip picker for
+      // self; partner uses the same picker with a different header.
+      // Communities / location are separate profile flows.
       renderInterestPicker: async ({ target = "self" } = {}) => {
         mark();
         if (target === "self") {
-          return openOnboarding(ctx, { triggeredBy: "manual" });
+          return openInterestsPicker(ctx, { target: "self" });
         }
         let partnerName = null;
         try {
@@ -1479,21 +1505,8 @@ bot.start(async (ctx) => {
     // feature overview without typing it from memory. To re-open
     // the interests picker they can use /help or /interests; we
     // deliberately don't auto-open it here on every /start.
-    const catalogUrl = process.env.MINIAPP_URL;
-    await ctx.reply(
-      "שיחה חדשה התחילה 🔄\n" +
-        "אפשר לכתוב לי על מה לחפש, או לבחור מהתפריט:\n\n" +
-        "/profile · /saved · /watching · /interests · /invite · /help",
-      catalogUrl
-        ? {
-            reply_markup: {
-              inline_keyboard: [[
-                { text: "📅 לקטלוג האירועים", web_app: { url: catalogUrl } },
-              ]],
-            },
-          }
-        : {},
-    );
+    await ctx.reply("שיחה חדשה התחילה 🔄", catalogReplyKeyboardMarkup());
+    await showMainMenu(ctx);
     return;
   }
 
@@ -1524,22 +1537,42 @@ bot.start(async (ctx) => {
   // later (it's just a regular inline keyboard).
 });
 
+function getMiniAppCatalogUrl() {
+  return process.env.MINIAPP_URL?.trim() || null;
+}
+
+/** Persistent reply keyboard — quick actions + optional Mini App catalog. */
+function catalogReplyKeyboardMarkup() {
+  const url = getMiniAppCatalogUrl();
+  const rows = [
+    [{ text: "🔍 חיפוש אירוע" }, { text: "📋 פרופיל" }],
+    [{ text: "🔔 שמורים" }, { text: "👀 במעקב" }],
+    [{ text: "⭐ תחומי עניין" }, { text: "❓ עזרה" }],
+  ];
+  if (url) {
+    rows.push([{ text: "📅 קטלוג אירועים", web_app: { url } }]);
+  }
+  return {
+    reply_markup: {
+      keyboard: rows,
+      resize_keyboard: true,
+      is_persistent: true,
+    },
+  };
+}
+
 // /catalog — opens the personalized Mini App event catalog.
 // Works as a fallback entry point for users who dismissed the menu button
 // or are browsing from desktop Telegram where the menu button isn't prominent.
 bot.command("catalog", async (ctx) => {
-  const catalogUrl = process.env.MINIAPP_URL;
-  if (!catalogUrl) {
+  if (!getMiniAppCatalogUrl()) {
     await ctx.reply("הקטלוג עדיין לא מוגדר. פנה למפעיל הבוט.");
     return;
   }
-  await ctx.reply("פתח את קטלוג האירועים המותאם לך 👇", {
-    reply_markup: {
-      inline_keyboard: [[
-        { text: "📅 לקטלוג האירועים", web_app: { url: catalogUrl } },
-      ]],
-    },
-  });
+  await ctx.reply(
+    "פתח את קטלוג האירועים המותאם לך 👇",
+    catalogReplyKeyboardMarkup(),
+  );
 });
 
 // /help — manual trigger for the welcome / feature overview. Useful
@@ -1556,17 +1589,7 @@ bot.command("catalog", async (ctx) => {
 // the two stay byte-identical.
 bot.command(["help", "start_help"], async (ctx) => {
   await sendWelcome(ctx);
-  // Mirror the first-touch /start behavior: after the welcome card,
-  // give the user a single-tap path into the picker by auto-opening
-  // it. Picker is "reserved" for /start and /help — no other command
-  // (and no nudge) volunteers it. The 1.2s delay lets Telegram render
-  // the welcome before the picker so they don't stack into a single
-  // visual block.
-  setTimeout(() => {
-    openOnboarding(ctx, { triggeredBy: "manual" }).catch((err) =>
-      console.error("[Bot] /help auto-onboarding failed:", err.message),
-    );
-  }, 1200);
+  await showMainMenu(ctx);
 });
 
 // Centralized welcome renderer. Both bot.start (first-timer branch)
@@ -1611,17 +1634,17 @@ async function sendWelcome(ctx) {
     "🧭 *כל האירועים במקום אחד* — אני מאחדת מקורות שונים, כדי לא לפספס כלום",
     "🎫 *זמינות כרטיסים מראש* — מראה כאן אם נשארו כרטיסים, בלי לגלות באמצע הדרך שהכל אזל",
     "",
-    "*✨ מה אפשר לבקש ממני:*",
-    "🔍 *לחפש אירועים* — לדוגמה: \"מה יש בשבת בסביבה?\", \"סדנאות לילד בן 4\", \"מוזיקה השבוע\"",
-    "🔔 *לעקוב אחרי נושא* — \"תתריעי לי על כל אירוע מוזיקה\", \"תעקבי אחרי סדנאות יצירה\"",
-    "🎟️ *להציע התראות לכרטיסים יד-2* — אני מנטרת קבוצות וואטסאפ ומציעה כרטיסים שמתאימים לך",
-    "💬 *להציע כרטיס למכירה* — \"יש לי כרטיס נוסף ל…\" ואני אצמיד אותו לאירוע אצלי ואיידע מי שמחכה",
+    "*✨ מה אפשר לעשות בכפתורים:*",
+    "🔍 *חיפוש* — כפתור «חיפוש אירוע» או /search (סמני מסננים, ואז «חפשי»)",
+    "📋 *פרופיל* — ילדים, קהילות, כתובת, תחומי עניין",
+    "🔔 *מעקבים שמורים* · 👀 *אירועים במעקב*",
+    "⭐ *תחומי עניין* — /interests",
     "",
-    "*📋 פקודות זמינות:*",
+    "*📋 פקודות:*",
+    "/menu — תפריט ראשי",
     "/profile — הפרופיל שלך",
-    "/interests — לבחור תחומי עניין מהרשימה",
-    "/saved — המעקבים השמורים שלך",
-    "/watching — האירועים במעקב שלך",
+    "/search — חיפוש בכפתורים",
+    "/saved · /watching",
     // Underscores in command names must be escaped in Markdown v1, or
     // Telegram parses "_off — להשבית..." as the start of an italic
     // span that never closes → "can't parse entities: ... byte 1437".
@@ -1629,16 +1652,19 @@ async function sendWelcome(ctx) {
     "/newsletter\\_off — להשבית את הניוזלטר השבועי (/newsletter\\_on להפעיל בחזרה)",
     "/connect\\_calendar — חיבור Google Calendar (להוספת אירועים מהניוזלטר)",
     "/invite — קישור להזמנת חברים",
+    "/catalog — קטלוג אירועים מותאם",
     "/help — להציג את התפריט הזה שוב",
+    "",
+    "📅 *קטלוג* — כפתור «קטלוג אירועים» למטה, או בתפריט ליד שדה ההקלדה",
     "",
     `*נתחיל מתחומי העניין שלך* — אפתח לך כעת את הפיקר. בסיומו ${youCan} לספר לי על המשפחה (גילאי ילדים, בן/בת זוג) כדי שאתאים את האירועים.`,
   ];
-  // No inline keyboard — the welcome is followed immediately by
-  // `openOnboarding`, so the picker arrives on its own without
-  // requiring an explicit button tap. /help and /start (first-touch)
-  // both route through here, and both auto-open the picker after
-  // sending this message.
-  await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+  // Persistent reply keyboard for the catalog; onboarding picker follows
+  // in a separate message. /help and first-touch /start both route here.
+  await ctx.reply(lines.join("\n"), {
+    parse_mode: "Markdown",
+    ...catalogReplyKeyboardMarkup(),
+  });
 }
 
 // Button on /start welcome — routes into the multi-step onboarding
@@ -1646,6 +1672,13 @@ async function sendWelcome(ctx) {
 // "ip:" for backwards-compat with older messages that pre-date the
 // onboarding refactor; we don't want to leave dead buttons in user
 // chat histories.
+bot.action("prof:kids", async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const session = sessionStore.ensureSession(ctx.from.id);
+  startKidsCapture(session, ctx.from.id);
+  await ctx.reply(KIDS_AGE_PROMPT);
+});
+
 bot.action("ip:start_from_welcome", async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
@@ -1691,6 +1724,14 @@ bot.action(/^gnd:(female|male|neutral)$/, async (ctx) => {
       `[Bot] gnd:${choice} persist failed for ${ctx.from?.id}: ${err.message}`,
     );
     // Continue anyway — fall through to the age prompt.
+  }
+
+  const menuSession = sessionStore.getSession(ctx.from.id);
+  if (menuSession?.menuReturnTo === "profile:edit") {
+    delete menuSession.menuReturnTo;
+    await ctx.reply("✅ עודכן המגדר");
+    await showProfileEditMenu(ctx);
+    return;
   }
 
   // Chain into the age-range prompt — the second pre-welcome
@@ -1755,6 +1796,14 @@ bot.action(/^age:(young_adult|mid_adult|senior|skip)$/, async (ctx) => {
       `[Bot] age:${choice} persist failed for ${ctx.from?.id}: ${err.message}`,
     );
     // Continue anyway — fall through to the welcome.
+  }
+
+  const menuSession = sessionStore.getSession(ctx.from.id);
+  if (menuSession?.menuReturnTo === "profile:edit") {
+    delete menuSession.menuReturnTo;
+    await ctx.reply("✅ עודכן טווח הגיל");
+    await showProfileEditMenu(ctx);
+    return;
   }
 
   try {
@@ -1898,6 +1947,14 @@ bot.command("saved", async (ctx) => {
   }
 });
 
+bot.command("search", async (ctx) => {
+  await showSearchHub(ctx);
+});
+
+bot.command("menu", async (ctx) => {
+  await showMainMenu(ctx);
+});
+
 bot.command("match", async (ctx) => {
   await ctx.reply("🔍 מחפשת התאמות...");
   try {
@@ -1911,95 +1968,378 @@ bot.command("match", async (ctx) => {
   }
 });
 
-bot.command("profile", async (ctx) => {
+async function showProfileView(ctx) {
+  const profile = await getProfile(ctx.from.id).catch(() => null);
+  let watched = [];
   try {
-    const profile = await getProfile(ctx.from.id);
-    if (!profile) {
-      await ctx.reply("אין לי פרופיל שלך עדיין. שלחו הודעה ואלמד אתכם!");
+    watched = await getWatchedEvents(ctx.from.id);
+  } catch {
+    /* ok */
+  }
+  const lines = [...formatProfileLines(profile)];
+  if (profile?.user_context) {
+    lines.push(...(await formatFavoriteLocationsLines(profile.user_context)));
+  }
+  if (watched.length) {
+    lines.push("");
+    lines.push(`🔔 אירועים במעקב (${watched.length}):`);
+  }
+  await ctx.reply(lines.join("\n"), {
+    parse_mode: "Markdown",
+    ...buildProfileViewKeyboard(),
+  });
+  const setupKb = buildProfileViewKeyboardExtra(profile);
+  if (setupKb) {
+    await ctx.reply("💡 כדי להתאים טוב יותר — אפשר להשלים:", setupKb);
+  }
+  if (watched.length) await sendWatchListCards(ctx, watched);
+}
+
+async function showProfileEditMenu(ctx) {
+  const profile = await getProfile(ctx.from.id).catch(() => null);
+  await ctx.reply("✏️ *מה לערוך?*", {
+    parse_mode: "Markdown",
+    ...buildProfileEditKeyboard(profile),
+  });
+}
+
+async function showTypingActionsMenu(ctx, { draftText = null } = {}) {
+  await showMainMenu(ctx, { draftText });
+}
+
+async function openOnboardingAtStep(ctx, step, { editReturn = null } = {}) {
+  const telegramId = ctx.from.id;
+  sessionStore.clearInterestsPicker(telegramId);
+  const state = await loadOnboardingInitialState(telegramId, "manual");
+  state.step = step;
+  if (editReturn) state.editReturn = editReturn;
+  if (step === "communities") {
+    const profile = await getProfile(telegramId).catch(() => null);
+    const comm = profile?.user_context?.communities || {};
+    const { memberKeysForCommunityPicker } = require("../lib/communityAccess");
+    state.communityMember = new Set(memberKeysForCommunityPicker(comm));
+  }
+  sessionStore.setOnboarding(telegramId, state);
+  await renderOnboardingStep(ctx, state);
+}
+
+async function dispatchMenuAction(ctx, action) {
+  const telegramId = ctx.from.id;
+  const session = sessionStore.ensureSession(telegramId);
+  const draft = session.typingMenuDraft || null;
+
+  switch (action) {
+    case "search": {
+      await showSearchHub(ctx, { draftText: draft });
+      if (draft) {
+        const { routeMessage } = require("../lib/searchRouter");
+        const lastFilters = sessionStore.getLastSearchFilters(telegramId);
+        const hasExtensionHint = !!sessionStore.getLastExtensionHint(telegramId);
+        const routed = routeMessage(draft, { lastFilters, hasExtensionHint });
+        if (routed.kind === "search" || routed.kind === "refine" || routed.kind === "extend") {
+          await withLiveness(ctx, async ({ markResponded }) => {
+            const agentCtx = buildAgentCtx(ctx, { markResponded });
+            await runRouterTextTurn(telegramId, agentCtx, ctx, draft);
+          });
+        }
+      }
       return;
     }
+    case "profile":
+      await showProfileView(ctx);
+      return;
+    case "saved": {
+      const items = await listSavedSearches(telegramId);
+      if (!items.length) {
+        await ctx.reply(
+          "עדיין לא שמרת חיפושים.\nחפשי קודם (🔍 חיפוש אירוע), ואז «שמור מעקב» בתוצאות.",
+        );
+        return;
+      }
+      await ctx.reply(`📂 ${items.length} חיפושים שמורים:`);
+      for (const item of items.slice(0, 8)) {
+        const summary = describeSnapshot({
+          query: item.query,
+          tokens: item.tokens,
+          tickets_needed: item.tickets_needed,
+          filters: item.filters || {},
+        });
+        const modeLabel = item.mode === "one_time" ? "🎯 פעם אחת" : "♾️ קבוע";
+        const lines = [`🔍 ${item.query} — ${modeLabel}`];
+        if (summary) lines.push(rtlLine(`📋 ${summary}`));
+        await ctx.reply(lines.join("\n"));
+      }
+      if (items.length > 8) {
+        await ctx.reply(`… ועוד ${items.length - 8}. לרשימה מלאה: /saved`);
+      }
+      return;
+    }
+    case "watching": {
+      const watched = await getWatchedEvents(telegramId);
+      if (!watched.length) {
+        await ctx.reply("אין אירועים במעקב כרגע.");
+        return;
+      }
+      await ctx.reply(`👀 ${watched.length} אירועים במעקב:`);
+      await sendWatchListCards(ctx, watched);
+      return;
+    }
+    case "interests":
+      await openInterestsPicker(ctx, { target: "self" });
+      return;
+    case "catalog":
+      if (!getMiniAppCatalogUrl()) {
+        await ctx.reply("הקטלוג עדיין לא מוגדר.");
+        return;
+      }
+      await ctx.reply("פתחי את קטלוג האירועים 👇", catalogReplyKeyboardMarkup());
+      return;
+    case "help":
+      await sendWelcome(ctx);
+      return;
+    case "agent": {
+      if (!isAgentEnabled()) {
+        await ctx.reply("הסוכן כבוי — השתמשי בחיפוש מהתפריט או ב-/search.");
+        return;
+      }
+      const text = draft || "";
+      if (!text) {
+        await ctx.reply("כתבי הודעה קודם, ואז בחרי «שלחי לבוט».");
+        return;
+      }
+      delete session.typingMenuDraft;
+      sessionStore.appendUserMessage(telegramId, text);
+      await withLiveness(ctx, async ({ markResponded }) => {
+        const traceId = await tracing.startTrace({
+          telegramId,
+          inputText: text,
+          kind: "text",
+        }).catch(() => null);
+        try {
+          await runAgent(telegramId, buildAgentCtx(ctx, { traceId, markResponded }));
+        } finally {
+          if (traceId) tracing.finishTrace(traceId).catch(() => {});
+        }
+      });
+      return;
+    }
+    case "close":
+      delete session.typingMenuDraft;
+      await ctx.reply("👍 סגרתי את התפריט. אפשר לכתוב שוב מתי שרוצים.");
+      return;
+    default:
+      await ctx.reply("לא מוכר — נסי שוב מהתפריט.");
+  }
+}
 
-    const lines = [`📋 הפרופיל שלך:`];
-    if (profile.first_name) lines.push(`👤 ${profile.first_name}`);
-    const c = profile.user_context || {};
-    if (c.age_range) {
-      // Hebrew labels mirror the onboarding buttons (May-2026 age_range
-      // step). Unset → don't show a line; legacy behaviour.
-      const ageLabel =
-        c.age_range === "young_adult" ? "18-35"
-        : c.age_range === "mid_adult" ? "35-60"
-        : c.age_range === "senior" ? "60+"
-        : null;
-      if (ageLabel) lines.push(`🎂 טווח גיל: ${ageLabel}`);
-    }
-    if (c.kids?.length) {
-      lines.push(`👧 ילדים: ${c.kids.map((k) => (k.age ? `${k.name} (${k.age})` : k.name)).join(", ")}`);
-    }
-    if (c.constraints) {
-      if (c.constraints.home_address) {
-        const coords = c.constraints.home_coordinates;
-        const coordSuffix = coords ? ` ✓` : ` ⚠️ (לא אותר במפה)`;
-        lines.push(`🏠 בית: ${c.constraints.home_address}${coordSuffix}`);
-      }
-      if (c.constraints.proximity_preference) {
-        lines.push(`📏 העדפה: ${c.constraints.proximity_preference}`);
-      }
-    }
-    if (c.interests?.length) lines.push(`⭐ תחומי עניין: ${c.interests.join(", ")}`);
-    if (c.partner?.name) {
-      const partnerInterests = Array.isArray(c.partner.interests) && c.partner.interests.length
-        ? ` — ${c.partner.interests.join(", ")}`
-        : "";
-      lines.push(
-        `❤️ בן/בת זוג: ${c.partner.name}${c.partner.age != null ? ` (${c.partner.age})` : ""}${partnerInterests}`,
-      );
-    }
-
-    // Learned preferences (from feedback buttons)
-    const prefs = c.preferences || {};
-    const suppressedCats = Object.entries(prefs.category_weights || {})
-      .filter(([, w]) => w < 0.8) // only show meaningfully suppressed
-      .sort(([, a], [, b]) => a - b) // most suppressed first
-      .map(([cat]) => cat);
-    const suppressedSeries = prefs.series_suppress || [];
-    const suppressedLocations = prefs.suppressed_locations || [];
-    if (suppressedCats.length || suppressedSeries.length || suppressedLocations.length) {
-      lines.push("");
-      lines.push("🎛️ *העדפות שנלמדו:*");
-      if (suppressedCats.length) {
-        lines.push(`📉 פחות מזה: ${suppressedCats.join(", ")}`);
-      }
-      if (suppressedSeries.length) {
-        lines.push(`🔇 סדרות מושתקות: ${suppressedSeries.join(", ")}`);
-      }
-      if (suppressedLocations.length) {
-        lines.push(`📍 מקומות שסומנו כרחוקים: ${suppressedLocations.join(", ")}`);
-      }
-      lines.push("_לאיפוס: כתבו לבוט \"אפס העדפות\"_");
-    }
-
-    let watched = [];
-    try { watched = await getWatchedEvents(ctx.from.id); } catch {}
-    if (watched.length) lines.push(`\n🔔 אירועים במעקב (${watched.length}):`);
-
-    // Quick action: jump straight into the interests picker. Most
-    // /profile views end with "what can I edit?" — the interests
-    // picker is the most common edit target and giving it a single-tap
-    // shortcut beats forcing users to type /interests on the next
-    // line.
-    await ctx.reply(lines.join("\n"), {
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "⭐ ערכי תחומי עניין", callback_data: "ip:start_from_welcome" }],
-        ],
-      },
-    });
-    if (watched.length) await sendWatchListCards(ctx, watched);
+bot.command("profile", async (ctx) => {
+  try {
+    await showProfileView(ctx);
   } catch (err) {
     console.error("[Bot] /profile error:", err.message);
     await ctx.reply("⚠️ שגיאה.");
   }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Typing menu (`menu:*`) — shown when the user sends free text
+// ──────────────────────────────────────────────────────────────────────────
+bot.action(`${MENU}:main`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const session = sessionStore.getSession(ctx.from.id);
+  await showMainMenu(ctx, { draftText: session?.typingMenuDraft });
+});
+
+bot.action(`${MENU}:close`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await dispatchMenuAction(ctx, "close");
+});
+
+bot.action(`${MENU}:search`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await dispatchMenuAction(ctx, "search");
+});
+
+bot.action(`${MENU}:profile`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await dispatchMenuAction(ctx, "profile");
+});
+
+bot.action(`${MENU}:saved`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await dispatchMenuAction(ctx, "saved");
+});
+
+bot.action(`${MENU}:watching`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await dispatchMenuAction(ctx, "watching");
+});
+
+bot.action(`${MENU}:interests`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await dispatchMenuAction(ctx, "interests");
+});
+
+bot.action(`${MENU}:catalog`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await dispatchMenuAction(ctx, "catalog");
+});
+
+bot.action(`${MENU}:help`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await dispatchMenuAction(ctx, "help");
+});
+
+bot.action(`${MENU}:agent`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await dispatchMenuAction(ctx, "agent");
+});
+
+bot.action(`${MENU}:profile:edit`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await showProfileEditMenu(ctx);
+});
+
+bot.action(`${MENU}:edit:kids`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const session = sessionStore.ensureSession(ctx.from.id);
+  startKidsCapture(session, ctx.from.id);
+  await ctx.reply(KIDS_AGE_PROMPT);
+});
+
+bot.action(`${MENU}:edit:interests`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await openInterestsPicker(ctx, { target: "self" });
+});
+
+bot.action(`${MENU}:edit:communities`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await openOnboardingAtStep(ctx, "communities", { editReturn: "profile" });
+});
+
+bot.action(`${MENU}:edit:location`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await openOnboardingAtStep(ctx, "location", { editReturn: "profile" });
+});
+
+bot.action(`${MENU}:edit:favorites`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await openFavoriteLocationsPicker(ctx, sessionStore, { returnTo: "profile:edit" });
+});
+
+bot.action(/^floc:tog:(\d+)$/, async (ctx) => {
+  const idx = parseInt(ctx.match[1], 10);
+  try {
+    await ctx.answerCbQuery().catch(() => {});
+    const state = sessionStore.getFavoriteLocationsPicker(ctx.from.id);
+    if (!state) {
+      await ctx.answerCbQuery("הבחירה פגה — פתחי שוב מפרופיל", { show_alert: true }).catch(() => {});
+      return;
+    }
+    const loc = state.loaded.find((l) => l.index === idx);
+    if (!loc) return;
+    const selectedKeys = new Set(state.selectedKeys);
+    if (selectedKeys.has(loc.key)) selectedKeys.delete(loc.key);
+    else selectedKeys.add(loc.key);
+    sessionStore.updateFavoriteLocationsPicker(ctx.from.id, { selectedKeys });
+    await editFavoriteLocationsPicker(ctx, sessionStore);
+  } catch (err) {
+    console.error("[Bot] floc:tog error:", err.message);
+  }
+});
+
+bot.action("floc:more", async (ctx) => {
+  try {
+    await ctx.answerCbQuery().catch(() => {});
+    const telegramId = ctx.from.id;
+    let state = sessionStore.getFavoriteLocationsPicker(telegramId);
+    if (!state) return;
+    const { appendLocationsPage, MAX_LOADED } = require("../lib/favoriteLocationsPicker");
+    if (state.loaded.length >= MAX_LOADED) {
+      await ctx.answerCbQuery("הגעת למקסימום — שמרי או נקי הכל", { show_alert: true }).catch(() => {});
+      return;
+    }
+    state = await appendLocationsPage(state);
+    sessionStore.updateFavoriteLocationsPicker(telegramId, state);
+    await editFavoriteLocationsPicker(ctx, sessionStore);
+  } catch (err) {
+    console.error("[Bot] floc:more error:", err.message);
+  }
+});
+
+bot.action("floc:save", async (ctx) => {
+  try {
+    await ctx.answerCbQuery("נשמר ✓").catch(() => {});
+    const keys = await saveFavoriteLocationsPicker(ctx, sessionStore);
+    const n = keys.length;
+    await ctx.reply(
+      n
+        ? `📍 נשמרו ${n} מקומות — מעכשיו תקבלי אירועים *רק* מהם (בנוסף לשאר מסנני הפרופיל).`
+        : "📍 נוקו המקומות — חזרת לקבל אירועים מכל מקום (לפי מרחק ושאר ההגדרות).",
+      { parse_mode: "Markdown" },
+    );
+    await showProfileView(ctx);
+  } catch (err) {
+    console.error("[Bot] floc:save error:", err.message);
+    await ctx.reply("⚠️ לא הצלחתי לשמור — נסי שוב.").catch(() => {});
+  }
+});
+
+bot.action("floc:clear", async (ctx) => {
+  try {
+    await ctx.answerCbQuery().catch(() => {});
+    sessionStore.updateFavoriteLocationsPicker(ctx.from.id, { selectedKeys: new Set() });
+    await editFavoriteLocationsPicker(ctx, sessionStore);
+  } catch (err) {
+    console.error("[Bot] floc:clear error:", err.message);
+  }
+});
+
+bot.action("floc:cancel", async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  sessionStore.clearFavoriteLocationsPicker(ctx.from.id);
+});
+
+bot.action(`${MENU}:edit:address`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  sessionStore.ensureSession(ctx.from.id).pendingProfileField = "home_address";
+  await ctx.reply(
+    "🏠 *כתובת בית*\n\nכתבי כתובת מלאה (רחוב, עיר). אבטל אוטומטית אחרי השמירה.",
+    { parse_mode: "Markdown" },
+  );
+});
+
+bot.action(`${MENU}:edit:gender`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  sessionStore.ensureSession(ctx.from.id).menuReturnTo = "profile:edit";
+  await ctx.reply("⚧ בחרי מגדר לניסוח בעברית:", buildGenderEditKeyboard());
+});
+
+bot.action(`${MENU}:edit:age`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  sessionStore.ensureSession(ctx.from.id).menuReturnTo = "profile:edit";
+  await ctx.reply("🎂 בחרי טווח גיל:", buildAgeEditKeyboard());
+});
+
+bot.action(`${MENU}:edit:audiences`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await openOnboardingAtStep(ctx, "audiences", { editReturn: "profile" });
+});
+
+bot.action(`${MENU}:edit:partner`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const profile = await getProfile(ctx.from.id).catch(() => null);
+  const partnerName = profile?.user_context?.partner?.name || null;
+  if (!partnerName) {
+    await ctx.reply("אין בן/בת זוג בפרופיל — אפשר להוסיף בשיחה עם הבוט.");
+    return;
+  }
+  await openInterestsPicker(ctx, { target: "partner", partnerName });
+});
+
+bot.action(`${MENU}:edit:wizard`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await openOnboarding(ctx, { triggeredBy: "manual" });
 });
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -2041,8 +2381,8 @@ function buildInterestsKeyboard(selectedLabels) {
   const rows = [];
   // Two chips per row keeps each button wide enough that Hebrew labels
   // don't truncate on narrow phone screens.
-  for (let i = 0; i < INTEREST_CATEGORIES.length; i += 2) {
-    const row = INTEREST_CATEGORIES.slice(i, i + 2).map((cat) => {
+  for (let i = 0; i < TOPIC_CATEGORIES.length; i += 2) {
+    const row = TOPIC_CATEGORIES.slice(i, i + 2).map((cat) => {
       const checked = selected.has(cat.label);
       const prefix = checked ? "✅ " : "";
       return {
@@ -2109,7 +2449,7 @@ async function openInterestsPicker(ctx, { target = "self", partnerName = null } 
   const extraLabels = [];
   for (const raw of existing) {
     if (typeof raw !== "string") continue;
-    const chip = getInterestByLabel(raw);
+    const chip = getTopicByLabel(raw);
     if (chip) selected.push(chip.label);
     else extraLabels.push(raw.trim());
   }
@@ -2139,7 +2479,7 @@ async function openInterestsPicker(ctx, { target = "self", partnerName = null } 
 
 bot.command("interests", async (ctx) => {
   try {
-    await openOnboarding(ctx, { triggeredBy: "manual" });
+    await openInterestsPicker(ctx, { target: "self" });
   } catch (err) {
     console.error("[Bot] /interests error:", err.message);
     await ctx.reply("⚠️ שגיאה בפתיחת בחירת תחומי עניין.");
@@ -2155,7 +2495,7 @@ bot.action(/^ip:tog:(.+)$/, async (ctx) => {
   const telegramId = ctx.from.id;
   const chipId = ctx.match[1];
   const state = sessionStore.getInterestsPicker(telegramId);
-  const chip = getInterestById(chipId);
+  const chip = getTopicById(chipId);
   if (!state || !chip) {
     await ctx.answerCbQuery("⏰ פג תוקף — שלחו /interests מחדש");
     return;
@@ -2348,7 +2688,13 @@ bot.action("ip:partner:skip", async (ctx) => {
 // in-flight messages that still surface those buttons, but neither
 // is generated by the current keyboard builders.
 
-const ONBOARDING_STEPS = ["toplabels", "topics", "audiences", "location"];
+const ONBOARDING_STEPS = ["toplabels", "topics", "audiences", "kids", "communities", "location"];
+const {
+  buildOnboardingKidsBody,
+  buildOnboardingKidsKeyboard,
+  registerOnboardingKidsHandlers,
+  handleOnboardingKidsText,
+} = require("../lib/onboardingKidsFlow");
 
 function onboardingProgressLabel(step) {
   const idx = ONBOARDING_STEPS.indexOf(step);
@@ -2403,11 +2749,7 @@ function buildOnboardingHeader(step, { extraLabels, triggeredBy, gender } = {}) 
     lines.push("");
     lines.push(`${mark} את הקבוצות ${youOrFamily} אליהן.`);
     lines.push("");
-    // The 3 access-flagged chips (LGBTQ+ / seniors / disabilities) are
-    // gated by the catalog's access filter — without the explicit flag
-    // those events stay hidden. Surfacing this here makes the consent
-    // visible instead of buried in the agent's prompt.
-    lines.push("_סימון של 🏳️‍🌈 / 🌷 / 🧩 יחשוף אירועים שמוגדרים לקהילות אלה._");
+    lines.push("_בשלב הבא: גילאי ילדים וקהילות._");
   } else if (step === "location") {
     lines.push(`📍 *כמה רחוק מהבית ${youAreReady} ללכת?* ${progress}`);
     lines.push("");
@@ -2551,6 +2893,9 @@ function buildLocationChipsRows(selectedId) {
 
 function buildOnboardingKeyboard(state) {
   const step = state.step;
+  const kidsKb = buildOnboardingKidsKeyboard(state);
+  if (kidsKb) return kidsKb;
+
   let rows;
   if (step === "toplabels") {
     rows = buildTopLabelsKeyboard(state);
@@ -2612,6 +2957,27 @@ function buildOnboardingSummaryText(state) {
   } else {
     lines.push("👥 *קהלים:* _ללא סינון_");
   }
+  if (Array.isArray(state.kids) && state.kids.length) {
+    const kidStr = state.kids
+      .map((k) => {
+        const st = k.stages?.length ? ` (${k.stages.join("/")})` : "";
+        return `${k.name} — גיל ${k.age}${st}`;
+      })
+      .join(" • ");
+    lines.push(`👧 *ילדים:* ${kidStr}`);
+  } else {
+    lines.push("👧 *ילדים:* _לא הוזנו_");
+  }
+  const commKeys = state.communityMember instanceof Set
+    ? [...state.communityMember]
+    : state.communityMember || [];
+  if (commKeys.length) {
+    const { COMMUNITY_CHIPS } = require("../lib/kidsWizardUi");
+    const labels = commKeys
+      .map((k) => COMMUNITY_CHIPS.find((c) => c.key === k)?.label)
+      .filter(Boolean);
+    if (labels.length) lines.push(`🏳️ *קהילות:* ${labels.join(" • ")}`);
+  }
   if (state.location?.preference) {
     lines.push(`📍 *מיקום:* ${state.location.preference}`);
   } else {
@@ -2629,9 +2995,13 @@ function buildOnboardingSummaryText(state) {
 // edit fails (e.g., message too old, or content unchanged), fall back
 // to a fresh reply so the user always sees an actionable card.
 async function renderOnboardingStep(ctx, state) {
+  const isKidsStep =
+    state.step === "communities" || state.step === "kids" || String(state.step).startsWith("kids_");
   const text = state.step === "summary"
     ? buildOnboardingSummaryText(state)
-    : buildOnboardingHeader(state.step, { extraLabels: state.extraLabels, gender: state.gender });
+    : isKidsStep
+      ? buildOnboardingKidsBody(state, state.gender)
+      : buildOnboardingHeader(state.step, { extraLabels: state.extraLabels, gender: state.gender });
   const keyboard = buildOnboardingKeyboard(state);
   const opts = { parse_mode: "Markdown", reply_markup: keyboard };
 
@@ -2742,8 +3112,9 @@ async function loadOnboardingInitialState(telegramId, triggeredBy) {
   // Backfill audience picks from access flags — a user who set
   // community-lgbtq:'member' via the agent in a previous turn should
   // see "קהילה גאה" already checked when re-opening the picker.
+  const { isCommunityMember } = require("../lib/communityAccess");
   for (const aud of AUDIENCE_CATEGORIES.filter((a) => a.community)) {
-    if (existingCommunities[aud.community] === "member") {
+    if (isCommunityMember(existingCommunities, aud.community)) {
       audiences.add(aud.label);
     }
   }
@@ -2770,6 +3141,12 @@ async function loadOnboardingInitialState(telegramId, triggeredBy) {
     }
   }
 
+  const existingKids = Array.isArray(profile?.user_context?.kids)
+    ? profile.user_context.kids
+    : [];
+  const { memberKeysForCommunityPicker } = require("../lib/communityAccess");
+  const communityMember = new Set(memberKeysForCommunityPicker(existingCommunities));
+
   return {
     step: "toplabels",
     topLabelNames,
@@ -2778,6 +3155,9 @@ async function loadOnboardingInitialState(telegramId, triggeredBy) {
     topLabelsTotal,
     topics,
     audiences,
+    kids: existingKids,
+    kidsDraft: null,
+    communityMember,
     location,
     extraLabels,
     // Captured once at state-load so re-renders don't re-fetch the
@@ -2850,13 +3230,13 @@ async function openOnboarding(ctx, { triggeredBy = "manual" } = {}) {
 // fields that are explicitly represented by the user's current
 // selection — NEVER volunteer a 'not-member' just because the user
 // skipped. The rule for communities is:
-//   - chip CHECKED in state              → flag set to 'member'
-//   - chip UNCHECKED AND was 'member'    → flag set to 'not-member'
-//                                          (user explicitly opted out)
-//   - chip UNCHECKED AND was null/unset  → flag stays null
-// This avoids the failure mode where a user who never engaged with a
-// community chip silently gets opted out of those events forever.
-async function persistOnboardingState(telegramId, state, { touchCommunities, touchLocation, touchTopLabels } = {}) {
+//   - community picker ✅                → `member` only (positive snapshot)
+//   - all communities ✅                 → `{}` (default = all)
+async function persistOnboardingState(
+  telegramId,
+  state,
+  { touchCommunities, touchCommunitiesOnly, touchKids, touchLocation, touchTopLabels } = {},
+) {
   const existingProfile = await getProfile(telegramId);
   const existingShape = existingProfile
     ? profileToBrainShape(existingProfile)
@@ -2877,18 +3257,20 @@ async function persistOnboardingState(telegramId, state, { touchCommunities, tou
 
   let communities;
   if (touchCommunities) {
-    communities = {};
-    const existingCommunities = existingProfile?.user_context?.communities || {};
+    const memberKeys = [];
     for (const aud of AUDIENCE_CATEGORIES) {
-      if (!aud.community) continue;
-      const checked = state.audiences.has(aud.label);
-      if (checked) {
-        communities[aud.community] = "member";
-      } else if (existingCommunities[aud.community] === "member") {
-        communities[aud.community] = "not-member";
+      if (aud.community && state.audiences.has(aud.label)) {
+        memberKeys.push(aud.community);
       }
-      // else: leave alone (don't volunteer 'not-member')
     }
+    const { communitiesFromPickerSelection } = require("../bot/profileService");
+    communities = communitiesFromPickerSelection(memberKeys);
+  } else if (touchCommunitiesOnly) {
+    const { communitiesFromPickerSelection } = require("../bot/profileService");
+    const member = state.communityMember instanceof Set
+      ? [...state.communityMember]
+      : state.communityMember || [];
+    communities = communitiesFromPickerSelection(member);
   }
 
   // Constraints: only touch location-related fields when the location
@@ -2912,9 +3294,9 @@ async function persistOnboardingState(telegramId, state, { touchCommunities, tou
     ...existingShape,
     interests,
     constraints,
-    // communities is partial-merged by saveProfile's mergeCommunities,
-    // so passing undefined leaves it untouched. Pass only when the
-    // audiences step has been engaged.
+    ...(touchKids && Array.isArray(state.kids)
+      ? { kids: state.kids, suppress_child_audiences: false }
+      : {}),
     ...(communities ? { communities } : {}),
   };
 
@@ -2950,7 +3332,9 @@ async function persistOnboardingState(telegramId, state, { touchCommunities, tou
 function nextStepAfter(step) {
   if (step === "toplabels") return "topics";
   if (step === "topics") return "audiences";
-  if (step === "audiences") return "location";
+  if (step === "audiences") return "kids";
+  if (step === "kids") return "communities";
+  if (step === "communities") return "location";
   if (step === "location" || step === "location_other") return "summary";
   return null;
 }
@@ -2958,7 +3342,9 @@ function nextStepAfter(step) {
 function prevStepBefore(step) {
   if (step === "topics") return "toplabels";
   if (step === "audiences") return "topics";
-  if (step === "location") return "audiences";
+  if (step === "kids") return "audiences";
+  if (step === "communities") return "kids";
+  if (step === "location") return "communities";
   if (step === "location_other") return "location";
   if (step === "summary") return "location";
   return null;
@@ -2968,6 +3354,15 @@ function prevStepBefore(step) {
 // button on returning users' /start. Routes through openOnboarding so
 // the full multi-step flow (toplabels → topics → audiences → location)
 // fires, with the existing profile pre-hydrated.
+registerOnboardingKidsHandlers(bot, {
+  sessionStore,
+  renderOnboardingStep,
+  persistOnboardingState,
+  getProfile,
+  ensureOnboardingState,
+  finishProfileEdit: showProfileView,
+});
+
 bot.action("onb:open", async (ctx) => {
   try {
     await ctx.answerCbQuery();
@@ -3154,8 +3549,12 @@ bot.action(/^onb:loc:(.+)$/, async (ctx) => {
     };
     sessionStore.updateOnboarding(telegramId, { location: state.location });
     await ctx.answerCbQuery(`✅ ${opt.label}`);
-    // Persist + advance to summary in one move.
     await persistOnboardingState(telegramId, state, { touchLocation: true });
+    if (state.editReturn === "profile") {
+      sessionStore.clearOnboarding(telegramId);
+      await showProfileView(ctx);
+      return;
+    }
     sessionStore.updateOnboarding(telegramId, { step: "summary" });
     const next = sessionStore.getOnboarding(telegramId);
     await renderOnboardingStep(ctx, next);
@@ -3182,6 +3581,12 @@ bot.action(/^onb:next(?::([a-z_]+))?$/, async (ctx) => {
       touchTopLabels: state.step === "toplabels",
     };
     await persistOnboardingState(telegramId, state, persistOpts);
+    if (state.editReturn === "profile" && state.step === "audiences") {
+      sessionStore.clearOnboarding(telegramId);
+      await ctx.answerCbQuery("✅");
+      await showProfileView(ctx);
+      return;
+    }
     const next = nextStepAfter(state.step);
     if (!next) {
       await ctx.answerCbQuery();
@@ -3423,34 +3828,31 @@ function buildLocationNavUrl(event) {
 
 function buildConsolidatedEventBlock(event) {
   const lines = [];
-  const icon = getEventIcon(event);
-  // Two-tier title — same logic as sendEventCard (sql/056 cleanup).
-  // Primary is the umbrella's branding (or the event name when not
-  // under an umbrella); secondary is `name` when this row is under
-  // an umbrella AND `name` is distinct from `umbrella_title`. The
-  // primary is the one that gets hyperlinked to the booking URL —
-  // anchoring on the parent is what the user expects from the
-  // umbrella's perspective ("here's the umbrella's page; this child
-  // happens on date X").
-  const umbrellaTitleTrim =
-    (typeof event.umbrella_title === "string" && event.umbrella_title.trim())
-      ? event.umbrella_title.trim()
-      : null;
-  const nameTrim =
-    typeof event.name === "string" ? event.name.trim() : "";
-  const primaryTitle = umbrellaTitleTrim || nameTrim || "ללא שם";
-  const secondaryTitle =
-    umbrellaTitleTrim && nameTrim && nameTrim !== umbrellaTitleTrim
-      ? nameTrim
-      : null;
-  const primaryEsc = escHtml(primaryTitle);
+  const { primaryTitle, secondaryTitle, icon, iconOnSecondary } =
+    resolveEventTitleParts(event);
+  const primaryEsc = escHtml(primaryTitle || "ללא שם");
   const url = getBookingUrl(event);
-  lines.push(
-    url
-      ? `${icon} <b><a href="${escHtml(url)}">${primaryEsc}</a></b>`
-      : `${icon} <b>${primaryEsc}</b>`,
-  );
-  if (secondaryTitle) lines.push(`<b>${escHtml(secondaryTitle)}</b>`);
+  if (iconOnSecondary) {
+    lines.push(
+      url
+        ? `<b><a href="${escHtml(url)}">${primaryEsc}</a></b>`
+        : primaryEsc,
+    );
+    lines.push(`${icon} <b>${escHtml(secondaryTitle)}</b>`);
+  } else if (secondaryTitle) {
+    lines.push(
+      url
+        ? `${icon} <b><a href="${escHtml(url)}">${primaryEsc}</a></b>`
+        : `${icon} <b>${primaryEsc}</b>`,
+    );
+    lines.push(`<b>${escHtml(secondaryTitle)}</b>`);
+  } else {
+    lines.push(
+      url
+        ? `${icon} <b><a href="${escHtml(url)}">${primaryEsc}</a></b>`
+        : `${icon} <b>${primaryEsc}</b>`,
+    );
+  }
 
   // Date + time on their OWN lines (May-2026 request — match the
   // event card's vertical layout instead of the previously-compact
@@ -3458,6 +3860,9 @@ function buildConsolidatedEventBlock(event) {
   if (event.date) lines.push(`📅 ${escHtml(formatHebrewDate(event.date))}`);
   const timeStr = formatTimeRange(event.start_time, event.end_time);
   if (timeStr) lines.push(`🕐 ${escHtml(timeStr)}`);
+
+  const audienceLine = formatAdultAgeGate(event);
+  if (audienceLine) lines.push(escHtml(audienceLine));
 
   // Location → maps deep-link. Use 📷 instead of 📍 for online events.
   const locIcon = event.online_url ? "📷" : "📍";
@@ -3483,13 +3888,6 @@ function buildConsolidatedEventBlock(event) {
       : formatTicketsLine(event.tickets_left);
   if (ticketsLine) lines.push(escHtml(ticketsLine));
 
-  // Adult-tier age gate — same line as the live event card. We mirror
-  // it on the digest block so the newsletter and the card surface the
-  // exact same restriction signal; users who only read the digest
-  // shouldn't be blindsided by "לגילאי 35+ בלבד" at the door.
-  const ageGateLine = formatAdultAgeGate(event);
-  if (ageGateLine) lines.push(escHtml(ageGateLine));
-
   // Description gets its OWN 📝 prefix (May-2026 user request) so
   // it visually parallels the date/time/location/tickets/tags
   // lines — a labeled facet, not an orphan paragraph. Normalised
@@ -3501,12 +3899,8 @@ function buildConsolidatedEventBlock(event) {
   // Order matters: description comes BEFORE the tag line so 🏷️
   // remains the final line of the block — the visual "footer"
   // that summarises the topic at a glance.
-  if (typeof event.description === "string" && event.description.trim()) {
-    const desc = event.description.replace(/\s+/g, " ").trim();
-    const capped =
-      desc.length > 280 ? desc.slice(0, 280).trimEnd() + "…" : desc;
-    lines.push(`📝 ${escHtml(capped)}`);
-  }
+  const descSnippet = formatDescriptionSnippet(event.description);
+  if (descSnippet) lines.push(`📝 ${escHtml(descSnippet)}`);
 
   // Tag line — same formatter the event card uses. Without
   // per-user `highlight`/`searchHits` we just render the plain
@@ -3725,6 +4119,10 @@ function buildSingleEventKeyboard(event) {
   const topRow = [...navBtns, detailsBtn].filter(Boolean);
   const rows = [];
   if (topRow.length) rows.push(topRow);
+  const readMore = buildReadMoreButton(event.id);
+  if (readMore && descriptionNeedsReadMore(event.description)) {
+    rows.push([readMore]);
+  }
   const semRow = buildSemanticMatchRow(event);
   if (semRow) rows.push(semRow);
   rows.push([{ text: "❌ לא מתאים", callback_data: `fb:reasons:${event.id}` }]);
@@ -3822,6 +4220,8 @@ function buildNewsletterCardText(event) {
   if (event.date) lines.push(`📅 ${formatHebrewDate(event.date)}`);
   const timeStr = formatTimeRange(event.start_time, event.end_time);
   if (timeStr) lines.push(rtlLine(`🕐 ${timeStr}`));
+  const audienceLine = formatAdultAgeGate(event);
+  if (audienceLine) lines.push(audienceLine);
   if (event.location) lines.push(`📍 ${event.location}`);
   // Shared ticket-line helper — handles low-stock urgency inline
   // ("🎫 N כרטיסים אחרונים ❗️") and skips null counts (free
@@ -3829,6 +4229,8 @@ function buildNewsletterCardText(event) {
   // don't need a separate "🚫 אזלו" branch here.
   const ticketsLine = formatTicketsLine(event.tickets_left);
   if (ticketsLine) lines.push(ticketsLine);
+  const descSnippet = formatDescriptionSnippet(event.description);
+  if (descSnippet) lines.push(`📝 ${descSnippet}`);
   if (Array.isArray(event.tags) && event.tags.length) {
     const tagLine = formatTagLine(event.tags, { highlight: [], searchHits: [] });
     if (tagLine) lines.push(tagLine);
@@ -3873,6 +4275,10 @@ function buildNewsletterCardKeyboard(event, selectedSet) {
   const topRow = [...navBtns, detailsBtn].filter(Boolean);
   const rows = [];
   if (topRow.length) rows.push(topRow);
+  const readMore = buildReadMoreButton(event.id);
+  if (readMore && descriptionNeedsReadMore(event.description)) {
+    rows.push([readMore]);
+  }
   rows.push([buildSelectButton(event.id, selectedSet)]);
   const semRow = buildSemanticMatchRow(event);
   if (semRow) rows.push(semRow);
@@ -4992,6 +5398,47 @@ bot.on("text", async (ctx) => {
     // specific.
     const session = sessionStore.getSession(telegramId);
 
+    // Profile field capture (home address from menu:edit:address).
+    if (session?.pendingProfileField === "home_address") {
+      const addr = message.trim();
+      if (!addr) {
+        await ctx.reply("כתבי כתובת, או /profile לביטול.");
+        tracing.setOutput(traceId, "[profile_address_empty]");
+        return;
+      }
+      delete session.pendingProfileField;
+      try {
+        const existing = await getProfile(telegramId);
+        const shape = existing ? profileToBrainShape(existing) : {};
+        await saveProfile(
+          telegramId,
+          {
+            constraints: {
+              ...(shape.constraints || {}),
+              home_address: addr,
+            },
+          },
+          existing,
+        );
+        await ctx.reply("✅ שמרתי את כתובת הבית");
+        await showProfileView(ctx);
+      } catch (err) {
+        console.error("[Bot] profile address save:", err.message);
+        await ctx.reply("⚠️ לא הצלחתי לשמור. נסי שוב.");
+      }
+      tracing.setOutput(traceId, "[profile_address_saved]");
+      return;
+    }
+
+    // Reply-keyboard quick actions (same as typing menu).
+    const replyAction = resolveReplyAction(message);
+    if (replyAction) {
+      tracing.addStep(traceId, `reply_action:${replyAction}`);
+      await dispatchMenuAction(ctx, replyAction);
+      tracing.setOutput(traceId, `[reply_action:${replyAction}]`);
+      return;
+    }
+
     // SAVE-PREVIEW FREE TEXT — when the user is on a free-text view of
     // the editable save card (title / venue / tags / tokens), the next
     // text message is captured and merged into pendingSave. Handled
@@ -5058,6 +5505,17 @@ bot.on("text", async (ctx) => {
     // Handled BEFORE the agent path so it doesn't get interpreted as
     // a search query.
     const onbState = sessionStore.getOnboarding(telegramId);
+    if (
+      onbState &&
+      (await handleOnboardingKidsText(ctx, message, sessionStore, {
+        renderOnboardingStep,
+        persistOnboardingState,
+      }))
+    ) {
+      tracing.setOutput(traceId, "[onboarding_kids_text]");
+      return;
+    }
+
     if (onbState && onbState.step === "location_other") {
       const m = message.match(/(\d+)/); // first integer, anywhere
       const minutes = m ? parseInt(m[1], 10) : NaN;
@@ -5079,9 +5537,15 @@ bot.on("text", async (ctx) => {
       };
       sessionStore.updateOnboarding(telegramId, { location: onbState.location });
       await persistOnboardingState(telegramId, onbState, { touchLocation: true });
-      sessionStore.updateOnboarding(telegramId, { step: "summary" });
-      const refreshed = sessionStore.getOnboarding(telegramId);
-      await renderOnboardingStep(ctx, refreshed);
+      if (onbState.editReturn === "profile") {
+        sessionStore.clearOnboarding(telegramId);
+        await ctx.reply(`✅ ${onbState.location.preference}`);
+        await showProfileView(ctx);
+      } else {
+        sessionStore.updateOnboarding(telegramId, { step: "summary" });
+        const refreshed = sessionStore.getOnboarding(telegramId);
+        await renderOnboardingStep(ctx, refreshed);
+      }
       tracing.addStep(traceId, "onboarding_other_accepted");
       tracing.setOutput(traceId, "[onboarding_other_accepted]");
       return;
@@ -5107,7 +5571,7 @@ bot.on("text", async (ctx) => {
         // user sees their input reflected in the keyboard.
         const nextSelected = new Set(state.selected || []);
         for (const label of raw) {
-          const chip = getInterestByLabel(label);
+          const chip = getTopicByLabel(label);
           if (chip) nextSelected.add(chip.label);
         }
         sessionStore.updateInterestsPicker(telegramId, {
@@ -5149,14 +5613,52 @@ bot.on("text", async (ctx) => {
       }
     }
 
-    // Free-text feedback explanation — inject event context so the agent
-    // knows what event the user is reacting to and can update the profile
-    // (e.g. set community-lgbtq = not-member) based on the explanation.
-    const feedbackCtx = session?.pendingFeedbackExplain;
-    if (feedbackCtx) {
-      delete session.pendingFeedbackExplain;
-      message =
-        `[הקשר: המשתמש ציין שהאירוע "${feedbackCtx.eventName}" (מזהה ${feedbackCtx.eventId}) לא מתאים לו/ה. הסברו:]\n${message}`;
+    if (await handlePendingKidsCaptureText(ctx, message, sessionStore)) {
+      tracing.setOutput(traceId, "[kids_capture]");
+      return;
+    }
+
+    if (await handlePendingFeedbackKidWizardText(ctx, message, sessionStore)) {
+      tracing.setOutput(traceId, "[fb_kid_wizard]");
+      return;
+    }
+
+    if (await handlePendingFeedbackText(ctx, message, sessionStore)) {
+      tracing.setOutput(traceId, "[feedback_other_db]");
+      return;
+    }
+
+    if (!isAgentEnabled()) {
+      const lastFilters = sessionStore.getLastSearchFilters(telegramId);
+      const hasExtensionHint = !!sessionStore.getLastExtensionHint(telegramId);
+      const { routeMessage } = require("../lib/searchRouter");
+      const routed = routeMessage(message, { lastFilters, hasExtensionHint });
+      if (routed.kind === "search" || routed.kind === "refine" || routed.kind === "extend") {
+        tracing.addStep(traceId, `router_${routed.kind}`);
+        await withLiveness(ctx, async ({ markResponded }) => {
+          const agentCtx = buildAgentCtx(ctx, { traceId, markResponded });
+          await runRouterTextTurn(telegramId, agentCtx, ctx, message);
+        });
+        tracing.setOutput(traceId, `[router_${routed.kind}]`);
+        return;
+      }
+    }
+
+    const onbForMenu = sessionStore.getOnboarding(telegramId);
+    if (shouldShowTypingMenu({ session, message, onbState: onbForMenu })) {
+      tracing.addStep(traceId, "typing_menu");
+      await showMainMenu(ctx, { draftText: message });
+      tracing.setOutput(traceId, "[typing_menu]");
+      return;
+    }
+
+    if (!isAgentEnabled()) {
+      await withLiveness(ctx, async ({ markResponded }) => {
+        const agentCtx = buildAgentCtx(ctx, { traceId, markResponded });
+        await runRouterTextTurn(telegramId, agentCtx, ctx, message);
+      });
+      tracing.setOutput(traceId, "[router_fallback]");
+      return;
     }
 
     // Append the new user input to history and run the agent.
@@ -5218,16 +5720,27 @@ bot.on("text", async (ctx) => {
 // The helper falls back to a plain reply if called outside a callback
 // context (defensive — every current call site IS a callback, but the
 // guard is cheap insurance against a future caller).
-function replyAsCallbackResult(ctx, text, opts = {}) {
-  const replyToId = ctx.callbackQuery?.message?.message_id || null;
-  if (!replyToId) return ctx.reply(text, opts);
-  return ctx.reply(text, {
-    reply_parameters: {
-      message_id: replyToId,
-      allow_sending_without_reply: true,
-    },
+/** Message id of the inline-keyboard message the user tapped (callback context). */
+function getCallbackSourceMessageId(ctx) {
+  return ctx.callbackQuery?.message?.message_id || null;
+}
+
+function withReplyToMessageId(opts = {}, replyToMessageId = null) {
+  if (!replyToMessageId) return opts;
+  return {
     ...opts,
-  });
+    reply_parameters: {
+      message_id: replyToMessageId,
+      allow_sending_without_reply: true,
+      ...(opts.reply_parameters || {}),
+    },
+  };
+}
+
+function replyAsCallbackResult(ctx, text, opts = {}) {
+  const replyToId = getCallbackSourceMessageId(ctx);
+  if (!replyToId) return ctx.reply(text, opts);
+  return ctx.reply(text, withReplyToMessageId(opts, replyToId));
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -5292,8 +5805,17 @@ bot.action(/^clr:(\d+)$/, async (ctx) => {
     sessionStore.clearLastResolveVenue(telegramId);
   }
 
-  sessionStore.appendUserMessage(telegramId, `[בחירה] ${opt.label} (value=${opt.value})`);
   sessionStore.clearPendingClarification(telegramId);
+
+  if (!isAgentEnabled()) {
+    await ctx.reply(
+      "הסוכן כבוי — בחרי חיפוש מ-/search או כתבי «מוזיקה השבוע». לפרופיל: /profile",
+      searchMenuKeyboard(),
+    );
+    return;
+  }
+
+  sessionStore.appendUserMessage(telegramId, `[בחירה] ${opt.label} (value=${opt.value})`);
 
   const traceId = await tracing.startTrace({
     telegramId,
@@ -5940,10 +6462,38 @@ async function commitPendingSave(ctx) {
     return;
   }
 
+  sessionStore.clearPendingClarification(telegramId);
+
+  if (!isAgentEnabled()) {
+    try {
+      const mode = snapshot.filters?.date_to ? "one_time" : "recurring";
+      let expiresAt = null;
+      if (mode === "one_time" && snapshot.filters?.date_to) {
+        expiresAt = new Date(`${snapshot.filters.date_to}T23:59:59+03:00`).toISOString();
+      }
+      await createSavedSearch(telegramId, {
+        query: snapshot.query,
+        tokens: snapshot.tokens,
+        filters: snapshot.filters,
+        tickets_needed: snapshot.tickets_needed,
+        mode,
+        expires_at: expiresAt,
+      });
+      sessionStore.clearPendingSave(telegramId);
+      await replyAsCallbackResult(
+        ctx,
+        `✅ שמרתי מעקב: «${snapshot.query || "ללא כותרת"}»`,
+      );
+    } catch (err) {
+      console.error("[Bot] pse:save (router) failed:", err.message);
+      await replyAsCallbackResult(ctx, "⚠️ שגיאה בשמירת המעקב. אפשר לנסות שוב.");
+    }
+    return;
+  }
+
   // CREATE path — synthesise the cue + resume the agent loop. The
   // agent's create_saved_search reads pendingSave and persists.
   sessionStore.appendUserMessage(telegramId, "[אישור שמירה] המשתמשת אישרה את החיפוש השמור.");
-  sessionStore.clearPendingClarification(telegramId);
 
   const traceId = await tracing.startTrace({
     telegramId,
@@ -6020,8 +6570,34 @@ bot.action("ss:confirm", async (ctx) => {
   await ctx.answerCbQuery("✅ אישרת");
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
 
-  sessionStore.appendUserMessage(telegramId, "[אישור שמירה] המשתמשת אישרה את החיפוש השמור.");
   sessionStore.clearPendingClarification(telegramId);
+
+  if (!isAgentEnabled()) {
+    const snapshot = session.pendingSave;
+    try {
+      const mode = snapshot.filters?.date_to ? "one_time" : "recurring";
+      let expiresAt = null;
+      if (mode === "one_time" && snapshot.filters?.date_to) {
+        expiresAt = new Date(`${snapshot.filters.date_to}T23:59:59+03:00`).toISOString();
+      }
+      await createSavedSearch(telegramId, {
+        query: snapshot.query,
+        tokens: snapshot.tokens,
+        filters: snapshot.filters,
+        tickets_needed: snapshot.tickets_needed,
+        mode,
+        expires_at: expiresAt,
+      });
+      sessionStore.clearPendingSave(telegramId);
+      await ctx.reply(`✅ שמרתי מעקב: «${snapshot.query || "ללא כותרת"}»`);
+    } catch (err) {
+      console.error("[Bot] ss:confirm (router) failed:", err.message);
+      await ctx.reply("⚠️ שגיאה בשמירת המעקב.");
+    }
+    return;
+  }
+
+  sessionStore.appendUserMessage(telegramId, "[אישור שמירה] המשתמשת אישרה את החיפוש השמור.");
 
   const traceId = await tracing.startTrace({
     telegramId,
@@ -6295,7 +6871,7 @@ async function rebuildSeriesPayloadFromDb(seriesId) {
   const { data: rep, error: repErr } = await supabase
     .from("events")
     .select(
-      "id, source, external_slug, external_url, online_url, name, location_key, min_months, max_months, " +
+      "id, source, external_slug, external_url, online_url, name, location_key, min_months, max_months, audience, " +
         "locations:location_key(raw_address, lat, lng, found)"
     )
     .eq("id", seriesId)
@@ -6317,7 +6893,7 @@ async function rebuildSeriesPayloadFromDb(seriesId) {
     .from("events")
     .select(
       "id, source, external_slug, external_url, online_url, name, date, start_time, end_time, " +
-        "tickets_left, description, location_key, min_months, max_months, " +
+        "tickets_left, description, location_key, min_months, max_months, audience, " +
         // Per-occurrence venue join. lat/lng/found feed `venueIdentity`
         // so two rows that resolved the same physical place from
         // different `raw_address` strings still collapse into one
@@ -6358,6 +6934,9 @@ async function rebuildSeriesPayloadFromDb(seriesId) {
       // rows with identical title/time/venue (umbrella siblings under
       // the same name) still differ visibly in the listing.
       description: r.description ?? null,
+      min_months: r.min_months ?? null,
+      max_months: r.max_months ?? null,
+      audience: r.audience ?? null,
       location_key: r.location_key ?? null,
       location: r.locations?.raw_address || null,
       // Flat lat/lng so `venueIdentity` below (which probes both
@@ -6383,6 +6962,137 @@ async function rebuildSeriesPayloadFromDb(seriesId) {
     occurrences,
   };
 }
+
+// "קרא עוד" — re-send the full event card with the complete description.
+bot.action(/^ev:more:(\d+)$/, async (ctx) => {
+  const eventId = parseInt(ctx.match[1], 10);
+  try {
+    await ctx.answerCbQuery().catch(() => {});
+    let event =
+      sessionStore.getLastSearchHits(ctx.from.id).find((e) => e.id === eventId) ||
+      null;
+    if (!event) event = await getEventById(eventId);
+    if (!event) {
+      await replyAsCallbackResult(ctx, "לא מצאתי את האירוע — אפשר לחפש שוב.");
+      return;
+    }
+    await sendEventCard(ctx, event, {
+      fullDescription: true,
+      replyToMessageId: getCallbackSourceMessageId(ctx),
+    });
+  } catch (err) {
+    console.error("[Bot] ev:more error:", err.message);
+    try {
+      await ctx.answerCbQuery("⚠️ שגיאה");
+    } catch {}
+  }
+});
+
+const SERIES_FILTER_SELECT =
+  "id, source, external_slug, external_url, name, date, start_time, end_time, tickets_left, description, min_months, max_months, audience, tag_ids, access, category, location_key, locations:location_key(raw_address, lat, lng, found)";
+
+bot.action(/^seq:me:(\d+)$/, async (ctx) => {
+  const seriesId = parseInt(ctx.match[1], 10);
+  try {
+    let payload = sessionStore.getShownSeries(ctx.from.id, seriesId);
+    if (!payload || !Array.isArray(payload.occurrences) || payload.occurrences.length === 0) {
+      payload = await rebuildSeriesPayloadFromDb(seriesId);
+    }
+    if (!payload || payload.occurrences.length === 0) {
+      await safeAck(ctx, "המופעים פגו, חיפשי שוב 🙏", { show_alert: true });
+      return;
+    }
+    const ids = payload.occurrences.map((o) => o.id);
+    const { data: fullRows, error: fetchErr } = await supabase
+      .from("events")
+      .select(SERIES_FILTER_SELECT)
+      .in("id", ids);
+    if (fetchErr) {
+      console.error(`[Bot] seq:me fetch failed: ${fetchErr.message}`);
+      await safeAck(ctx, "⚠️ שגיאה בטעינה", { show_alert: true });
+      return;
+    }
+    const profile = await getProfile(ctx.from.id).catch(() => null);
+    const flats = (fullRows || []).map((r) => flattenEvent(r));
+    await expandLabels(flats);
+    const { events: matched, total } = await filterAndRankForProfile(flats, profile);
+    if (!matched.length) {
+      await safeAck(ctx, "אין כרגע מופעים בסדרה שמתאימים לפרופיל שלך 🙏", {
+        show_alert: true,
+      });
+      return;
+    }
+    await safeAck(ctx, "✨ שלחתי את המופעים המתאימים לך למטה ⬇️");
+    const order = new Map(matched.map((e, i) => [e.id, i]));
+    const matchedOccs = payload.occurrences
+      .filter((o) => order.has(o.id))
+      .sort((a, b) => order.get(a.id) - order.get(b.id));
+    payload = { ...payload, occurrences: matchedOccs };
+
+    const multiVenue = Boolean(payload.multiVenue);
+    const occsWithUrl = payload.occurrences.map((occ) => ({
+      occ,
+      url: getBookingUrl(occ),
+    }));
+    const uniqueUrls = new Set(occsWithUrl.map((x) => x.url));
+    const sharedUrl = uniqueUrls.size === 1 ? [...uniqueUrls][0] : null;
+    const nameEsc = escHtml(payload.name);
+    const lines = [
+      sharedUrl
+        ? `✨ ${matched.length} מתוך ${total} מתאימים לך — <a href="${sharedUrl}">${nameEsc}</a>`
+        : `✨ ${matched.length} מתוך ${total} מתאימים לך — ${nameEsc}`,
+    ];
+    if (!multiVenue && payload.location) lines.push(`📍 ${payload.location}`);
+    lines.push("");
+
+    for (const { occ, url } of occsWithUrl) {
+      const dateStr = occ.date ? formatHebrewDate(occ.date) : "";
+      const timeStr = formatTimeRange(occ.start_time, occ.end_time);
+      const lowStock =
+        occ.tickets_left != null && occ.tickets_left > 0 && occ.tickets_left <= 10;
+      const ticketsStr =
+        occ.tickets_left === 0
+          ? "🚫 אזל"
+          : occ.tickets_left != null
+          ? `🎫 ${occ.tickets_left}${lowStock ? "❗️" : ""}`
+          : "";
+      const meta = [dateStr, timeStr].filter(Boolean).join(" — ");
+      const trailing = ticketsStr ? `  ${ticketsStr}` : "";
+      const metaEsc = escHtml(meta);
+      const bullet = sharedUrl
+        ? `• ${metaEsc}`
+        : `• <a href="${url}">${metaEsc}</a>`;
+      lines.push(`${bullet}${trailing}`);
+      const flat = matched.find((e) => e.id === occ.id);
+      if (flat?._proximity?.label) lines.push(`   ${escHtml(flat._proximity.label)}`);
+      const audienceLine = formatAdultAgeGate(occ);
+      if (audienceLine) lines.push(`   ${escHtml(audienceLine)}`);
+      if (multiVenue && occ.location) lines.push(`   📍 ${occ.location}`);
+      const descSnippet = formatDescriptionSnippet(occ.description);
+      if (descSnippet) lines.push(`   📝 ${escHtml(descSnippet)}`);
+    }
+
+    const readMoreRows = payload.occurrences
+      .filter((o) => descriptionNeedsReadMore(o.description))
+      .slice(0, 8)
+      .map((o) => [buildReadMoreButton(o.id)])
+      .filter((row) => row[0]);
+
+    const seqOpts = {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+    };
+    if (readMoreRows.length) seqOpts.reply_markup = { inline_keyboard: readMoreRows };
+    await replyAsCallbackResult(ctx, lines.map(rtlLine).join("\n"), seqOpts);
+  } catch (err) {
+    if (isStaleCallbackQuery(err)) {
+      console.warn(`[Bot] seq:me stale ack (user ${ctx.from?.id || "?"}): ${err.message}`);
+      return;
+    }
+    console.error("[Bot] seq:me error:", err.message);
+    try { await safeAck(ctx, "⚠️ שגיאה"); } catch {}
+  }
+});
 
 bot.action(/^seq:(\d+)$/, async (ctx) => {
   const seriesId = parseInt(ctx.match[1], 10);
@@ -6499,21 +7209,20 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
         ? `• ${metaEsc}`
         : `• <a href="${url}">${metaEsc}</a>`;
       lines.push(`${bullet}${trailing}`);
+      const audienceLine = formatAdultAgeGate(occ);
+      if (audienceLine) lines.push(`   ${escHtml(audienceLine)}`);
       if (multiVenue && occ.location) {
         lines.push(`   📍 ${occ.location}`);
       }
-      // Per-occurrence description (only the DB-rebuild path populates
-      // this; the in-memory cached payload from rememberShownSeries
-      // lacks the field and silently skips). Same compact treatment
-      // as the umb: handler — normalise whitespace, cap at 220 chars,
-      // tap-through for the rest.
-      if (typeof occ.description === "string" && occ.description.trim()) {
-        const desc = occ.description.replace(/\s+/g, " ").trim();
-        const capped =
-          desc.length > 220 ? desc.slice(0, 220).trimEnd() + "…" : desc;
-        lines.push(`   ${escHtml(capped)}`);
-      }
+      const descSnippet = formatDescriptionSnippet(occ.description);
+      if (descSnippet) lines.push(`   📝 ${escHtml(descSnippet)}`);
     }
+
+    const readMoreRows = payload.occurrences
+      .filter((o) => descriptionNeedsReadMore(o.description))
+      .slice(0, 8)
+      .map((o) => [buildReadMoreButton(o.id)])
+      .filter((row) => row[0]);
 
     // Reply TO the card — see replyAsCallbackResult above for why.
     // This is the original motivating case for the helper: a tapped
@@ -6526,12 +7235,16 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
     // trailing time + ticket-count runs are pure LTR and bidi will
     // group them, so applying RLM at the start of every line keeps
     // every line's paragraph direction explicitly RTL.
-    await replyAsCallbackResult(ctx, lines.map(rtlLine).join("\n"), {
+    const seqOpts = {
       parse_mode: "HTML",
       // Suppress Telegram's automatic link previews so the message
       // stays compact even with many occurrences.
       link_preview_options: { is_disabled: true },
-    });
+    };
+    if (readMoreRows.length) {
+      seqOpts.reply_markup = { inline_keyboard: readMoreRows };
+    }
+    await replyAsCallbackResult(ctx, lines.map(rtlLine).join("\n"), seqOpts);
   } catch (err) {
     if (isStaleCallbackQuery(err)) {
       // Benign: ack window closed while we were rendering. The
@@ -6546,6 +7259,178 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
     try { await safeAck(ctx, "⚠️ שגיאה"); } catch {}
   }
 });
+
+const UMBRELLA_SIBLING_SELECT =
+  "id, source, external_slug, external_url, online_url, umbrella_title, name, date, start_time, end_time, tickets_left, description, min_months, max_months, audience, tag_ids, access, location_key, locations:location_key(raw_address, lat, lng)";
+
+async function fetchUmbrellaSiblingRows(slug) {
+  const today = DateTime.now().setZone("Asia/Jerusalem").toISODate();
+  return supabase
+    .from("events")
+    .select(UMBRELLA_SIBLING_SELECT)
+    .eq("umbrella_slug", slug)
+    .eq("archived", false)
+    .gte("date", today)
+    .order("date", { ascending: true })
+    .order("start_time", { ascending: true });
+}
+
+/** Build chunked HTML body for umbrella sibling list (all or profile-filtered). */
+async function buildUmbrellaExpansionPayload(slug, rows, {
+  profileFiltered = false,
+  matchedCount = 0,
+  totalCount = 0,
+  proximityById = null,
+  interestHighlight = [],
+} = {}) {
+  const umbrellaTitle = rows[0]?.umbrella_title || slug;
+  const allTagIds = new Set();
+  for (const r of rows) for (const id of r.tag_ids || []) allTagIds.add(id);
+  const tagDict = await require("../lib/labelStore").fetchLabelDict([...allTagIds]);
+
+  const occsWithUrl = rows.map((occ) => ({
+    occ,
+    url: getBookingUrl({
+      source: occ.source,
+      external_slug: occ.external_slug,
+      external_url: occ.external_url,
+    }),
+  }));
+  const uniqueUrls = new Set(occsWithUrl.map((x) => x.url));
+  const sharedUrl = uniqueUrls.size === 1 ? [...uniqueUrls][0] : null;
+
+  const umbrellaTitleEsc = escHtml(umbrellaTitle);
+  const lines = [];
+  const parentCityUrl =
+    !sharedUrl && rows[0]?.source === "rg-muni"
+      ? `https://www.ramat-gan.muni.il/events/${encodeURIComponent(slug)}/`
+      : null;
+  const headerUrl = sharedUrl || parentCityUrl;
+  if (profileFiltered) {
+    const headerText = `✨ ${matchedCount} מתוך ${totalCount} מתאימים לך — ${umbrellaTitleEsc}`;
+    if (headerUrl) {
+      lines.push(`<a href="${headerUrl}">${headerText}</a>`);
+    } else {
+      lines.push(headerText);
+    }
+  } else if (headerUrl) {
+    lines.push(`📋 כל אירועי <a href="${headerUrl}">${umbrellaTitleEsc}</a>`);
+  } else {
+    lines.push(`📋 כל אירועי ${umbrellaTitleEsc}`);
+  }
+  lines.push("");
+
+  function resolveChildTitle(occ) {
+    const n = (occ.name || "").trim();
+    if (!n || n === umbrellaTitle) return "";
+    return n;
+  }
+
+  for (let i = 0; i < occsWithUrl.length; i++) {
+    const { occ, url: occUrl } = occsWithUrl[i];
+    if (i > 0) lines.push("");
+
+    const tagsForRow = (occ.tag_ids || [])
+      .map((id) => tagDict.get(id)?.name)
+      .filter(Boolean);
+    const iconEventShape = { name: occ.name, tags: tagsForRow };
+    const icon = getEventIcon(iconEventShape);
+    const childTitle = resolveChildTitle(occ);
+    const titleText = childTitle || umbrellaTitle;
+    const titleEsc = escHtml(titleText);
+    lines.push(
+      sharedUrl
+        ? `${icon} <b>${titleEsc}</b>`
+        : `${icon} <b><a href="${occUrl}">${titleEsc}</a></b>`,
+    );
+
+    if (occ.date) lines.push(`📅 ${escHtml(formatHebrewDate(occ.date))}`);
+    const timeStr = formatTimeRange(occ.start_time, occ.end_time);
+    if (timeStr) lines.push(`🕐 ${escHtml(timeStr)}`);
+    const audienceLine = formatAdultAgeGate(occ);
+    if (audienceLine) lines.push(escHtml(audienceLine));
+    const prox = proximityById?.get(occ.id);
+    if (prox?.label) lines.push(escHtml(prox.label));
+    const venue = occ.locations?.raw_address || "";
+    if (venue) {
+      const lat = occ.locations?.lat;
+      const lng = occ.locations?.lng;
+      const navUrl =
+        lat != null && lng != null
+          ? `https://www.google.com/maps?q=${lat},${lng}`
+          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue)}`;
+      lines.push(`📍 <a href="${escHtml(navUrl)}">${escHtml(venue)}</a>`);
+    }
+    const ticketsLine =
+      occ.tickets_left === 0
+        ? "🚫 אזלו הכרטיסים"
+        : formatTicketsLine(occ.tickets_left);
+    if (ticketsLine) lines.push(escHtml(ticketsLine));
+    const descSnippet = formatDescriptionSnippet(occ.description);
+    if (descSnippet) lines.push(`📝 ${escHtml(descSnippet)}`);
+    if (tagsForRow.length) {
+      const tagLine = formatTagLine(tagsForRow, {
+        highlight: interestHighlight,
+        searchHits: [],
+      });
+      if (tagLine) lines.push(escHtml(tagLine));
+    }
+  }
+
+  const bodyText = lines.map(rtlLine).join("\n");
+  const MAX_CHUNK = 3800;
+  let chunks;
+  if (bodyText.length <= MAX_CHUNK) {
+    chunks = [bodyText];
+  } else {
+    const rtlLines = lines.map(rtlLine);
+    chunks = [];
+    let current = "";
+    for (let li = 0; li < rtlLines.length; li++) {
+      const ln = rtlLines[li];
+      const candidate = current ? `${current}\n${ln}` : ln;
+      if (candidate.length > MAX_CHUNK && current) {
+        chunks.push(current);
+        current = ln;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current) chunks.push(current);
+  }
+
+  const readMoreRows = occsWithUrl
+    .filter(({ occ }) => descriptionNeedsReadMore(occ.description))
+    .slice(0, 8)
+    .map(({ occ }) => [buildReadMoreButton(occ.id)])
+    .filter((row) => row[0]);
+
+  return { chunks, readMoreRows };
+}
+
+async function deliverUmbrellaExpansion(ctx, payload) {
+  const { chunks, readMoreRows } = payload;
+  const replyToId = getCallbackSourceMessageId(ctx);
+  for (let i = 0; i < chunks.length; i++) {
+    const umbOpts = withReplyToMessageId(
+      {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      },
+      replyToId,
+    );
+    if (i === 0 && readMoreRows.length) {
+      umbOpts.reply_markup = { inline_keyboard: readMoreRows };
+    }
+    if (i === 0 && replyToId) {
+      await replyAsCallbackResult(ctx, chunks[i], umbOpts);
+    } else if (replyToId) {
+      await ctx.telegram.sendMessage(ctx.chat.id, chunks[i], umbOpts);
+    } else {
+      await ctx.reply(chunks[i], umbOpts);
+    }
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Umbrella expansion — "📋 כל אירועי <umbrella>" button
@@ -6568,252 +7453,72 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
 // relationship is small enough to query on demand (typically 5-30
 // rows per umbrella), and rebuilding from a synthetic-slug child is
 // awkward anyway since the parent row was deleted at scrape time.
-bot.action(/^umb:(.+)$/, async (ctx) => {
+bot.action(/^umb:me:(.+)$/, async (ctx) => {
   const slug = ctx.match[1];
   try {
-    const today = DateTime.now().setZone("Asia/Jerusalem").toISODate();
-    const supabase = require("../lib/supabase");
-    const labelStore = require("../lib/labelStore");
-    // The user explicitly opted for "all events in the umbrella, not
-    // just this week" — past-date filter only, no future cap. Each
-    // sibling renders as a multi-line "mini-card" (May-2026 user
-    // request: same shape as a regular event card, sans buttons).
-    // Pulled fields are everything that feeds the card body — title,
-    // date/time, venue + coords for the nav hyperlink, tickets,
-    // tag_ids for the tag line, and description. After sql/056 the
-    // child's own title lives in `name` (with `umbrella_title`
-    // carrying the parent), so no extra column is needed for the
-    // per-row title.
-    const { data: rows, error } = await supabase
-      .from("events")
-      .select(
-        "id, source, external_slug, external_url, online_url, umbrella_title, name, date, start_time, end_time, tickets_left, description, tag_ids, location_key, locations:location_key(raw_address, lat, lng)",
-      )
-      .eq("umbrella_slug", slug)
-      .eq("archived", false)
-      .gte("date", today)
-      .order("date", { ascending: true })
-      .order("start_time", { ascending: true });
+    const { data: rows, error } = await fetchUmbrellaSiblingRows(slug);
+    if (error) {
+      console.error(`[Bot] umb:me fetch failed for slug=${slug}: ${error.message}`);
+      await safeAck(ctx, "⚠️ שגיאה בטעינה", { show_alert: true });
+      return;
+    }
+    if (!rows?.length) {
+      await safeAck(ctx, "אין כרגע אירועים פעילים בקטגוריה הזו 🙏", { show_alert: true });
+      return;
+    }
+    const profile = await getProfile(ctx.from.id).catch(() => null);
+    const flats = rows.map((r) => flattenEvent(r));
+    await expandLabels(flats);
+    const { events: matched, total } = await filterAndRankForProfile(flats, profile);
+    if (!matched.length) {
+      await safeAck(ctx, "אין כרגע אירועים בסדרה שמתאימים לפרופיל שלך 🙏", {
+        show_alert: true,
+      });
+      return;
+    }
+    await safeAck(ctx, "✨ שלחתי את המתאימים לך למטה ⬇️");
+    const order = new Map(matched.map((e, i) => [e.id, i]));
+    const proximityById = new Map(matched.map((e) => [e.id, e._proximity]));
+    const filteredRows = rows
+      .filter((r) => order.has(r.id))
+      .sort((a, b) => order.get(a.id) - order.get(b.id));
+    const interests = (profile?.user_context?.interests || []).filter(Boolean);
+    const payload = await buildUmbrellaExpansionPayload(slug, filteredRows, {
+      profileFiltered: true,
+      matchedCount: matched.length,
+      totalCount: total,
+      proximityById,
+      interestHighlight: interests,
+    });
+    await deliverUmbrellaExpansion(ctx, payload);
+  } catch (err) {
+    if (isStaleCallbackQuery(err)) {
+      console.warn(`[Bot] umb:me stale ack (user ${ctx.from?.id || "?"}): ${err.message}`);
+      return;
+    }
+    console.error("[Bot] umb:me error:", err.stack || err.message);
+    try { await safeAck(ctx, "⚠️ שגיאה"); } catch {}
+  }
+});
+
+bot.action(/^umb:(?!me:)(.+)$/, async (ctx) => {
+  const slug = ctx.match[1];
+  try {
+    const { data: rows, error } = await fetchUmbrellaSiblingRows(slug);
     if (error) {
       console.error(`[Bot] umb fetch failed for slug=${slug}: ${error.message}`);
       await safeAck(ctx, "⚠️ שגיאה בטעינה", { show_alert: true });
       return;
     }
-    if (!rows || rows.length === 0) {
-      // Either the umbrella was archived in full, or this is an old
-      // child whose siblings are all in the past. Honest empty-state
-      // beats a confusing "loading" toast that never resolves.
+    if (!rows?.length) {
       await safeAck(ctx, "אין כרגע אירועים פעילים בקטגוריה הזו 🙏", {
         show_alert: true,
       });
       return;
     }
     await safeAck(ctx, "📋 שלחתי לך את כל האירועים למטה ⬇️");
-
-    // Header line uses the umbrella_title from the FIRST row (every
-    // sibling has the same value, so any row works; first is just
-    // deterministic). Falling back to the raw slug if titles are
-    // missing keeps the header non-empty.
-    const umbrellaTitle = rows[0]?.umbrella_title || slug;
-
-    // Expand tag_ids → tag names across the whole batch in one round
-    // trip. The mini-card render below reads `event.tags` (names)
-    // exactly like the event-card renderer does — formatTagLine and
-    // getEventIcon both operate on names.
-    const allTagIds = new Set();
-    for (const r of rows) for (const id of r.tag_ids || []) allTagIds.add(id);
-    const tagDict = await labelStore.fetchLabelDict([...allTagIds]);
-
-    // Resolve every sibling's booking URL once up-front. We need the
-    // result both for per-row rendering AND to decide whether to
-    // collapse the (otherwise repeated) link into a single header
-    // anchor. Same routing logic the card keyboard uses (external_url
-    // wins, else city slug page, else smarticket).
-    const occsWithUrl = rows.map((occ) => ({
-      occ,
-      url: getBookingUrl({
-        source: occ.source,
-        external_slug: occ.external_slug,
-        external_url: occ.external_url,
-      }),
-    }));
-    // "Shared URL" case: when every sibling lands on the same page
-    // (the umbrella's parent slug page, typical when none of the
-    // children have an external_url), the booking link appears
-    // ONCE at the top — not repeated on every row, which previously
-    // made the list look like duplicates. When some children have
-    // their own registration provider (paykal / bina / ...) the URLs
-    // diverge and per-row title hyperlinks come back.
-    const uniqueUrls = new Set(occsWithUrl.map((x) => x.url));
-    const sharedUrl = uniqueUrls.size === 1 ? [...uniqueUrls][0] : null;
-
-    const umbrellaTitleEsc = escHtml(umbrellaTitle);
-    const lines = [];
-    // Prefer the shared booking URL (all children point to the same page).
-    // Fallback for city events: always show a link to the umbrella's parent
-    // page on the municipality website even when children have different
-    // per-child booking URLs (e.g. paid Smarticket / external links).
-    const parentCityUrl =
-      !sharedUrl && rows[0]?.source === "rg-muni"
-        ? `https://www.ramat-gan.muni.il/events/${encodeURIComponent(slug)}/`
-        : null;
-    const headerUrl = sharedUrl || parentCityUrl;
-    if (headerUrl) {
-      lines.push(
-        `📋 כל אירועי <a href="${headerUrl}">${umbrellaTitleEsc}</a>`,
-      );
-    } else {
-      lines.push(`📋 כל אירועי ${umbrellaTitleEsc}`);
-    }
-    lines.push("");
-
-    // Per-row title resolution. After sql/056 the child's
-    // distinguishing title is `name` itself; the only case where we
-    // fall back to the umbrella title is the active-garden pattern,
-    // where every child echoes the parent and `name === umbrella`.
-    function resolveChildTitle(occ) {
-      const n = (occ.name || "").trim();
-      if (!n || n === umbrellaTitle) return "";
-      return n;
-    }
-
-    for (let i = 0; i < occsWithUrl.length; i++) {
-      const { occ, url: occUrl } = occsWithUrl[i];
-      // Visual separator BETWEEN events. Blank line — no bullets, no
-      // horizontal rules. Skipping for the first event preserves the
-      // 1-line gap after the umbrella header.
-      if (i > 0) lines.push("");
-
-      // ── Title line ──────────────────────────────────────────────
-      // Icon picked from the same TOPIC_RULES the regular card uses;
-      // it reads tags + name, so we feed it the expanded shape.
-      const tagsForRow = (occ.tag_ids || [])
-        .map((id) => tagDict.get(id)?.name)
-        .filter(Boolean);
-      const iconEventShape = { name: occ.name, tags: tagsForRow };
-      const icon = getEventIcon(iconEventShape);
-      const childTitle = resolveChildTitle(occ);
-      const titleText = childTitle || umbrellaTitle;
-      const titleEsc = escHtml(titleText);
-      // Title is hyperlinked to the per-row booking URL only when
-      // the umbrella's URLs diverge across siblings. With sharedUrl
-      // the header already carries the one link to the umbrella
-      // page, so per-row anchors would just repeat it.
-      lines.push(
-        sharedUrl
-          ? `${icon} <b>${titleEsc}</b>`
-          : `${icon} <b><a href="${occUrl}">${titleEsc}</a></b>`,
-      );
-
-      // ── Date ──
-      if (occ.date) {
-        lines.push(`📅 ${escHtml(formatHebrewDate(occ.date))}`);
-      }
-      // ── Time ──
-      const timeStr = formatTimeRange(occ.start_time, occ.end_time);
-      if (timeStr) {
-        lines.push(`🕐 ${escHtml(timeStr)}`);
-      }
-      // ── Location (hyperlinked to navigation) ──
-      // Coords win when present (Google Maps `?q=lat,lng` resolves
-      // to the exact pin and lets the user pick Waze / Apple Maps /
-      // Google Maps via the OS picker once they tap it). Without
-      // coords we fall back to a maps text search of the address —
-      // less precise but still routes correctly for well-known
-      // street addresses.
-      const venue = occ.locations?.raw_address || "";
-      if (venue) {
-        const lat = occ.locations?.lat;
-        const lng = occ.locations?.lng;
-        const navUrl =
-          lat != null && lng != null
-            ? `https://www.google.com/maps?q=${lat},${lng}`
-            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue)}`;
-        lines.push(`📍 <a href="${escHtml(navUrl)}">${escHtml(venue)}</a>`);
-      }
-      // ── Tickets ──
-      // Same formatter the event card uses — emits "🎫 N כרטיסים"
-      // / "🎫 N כרטיסים אחרונים ❗️" / "🚫 אזלו הכרטיסים" / null
-      // (free events). The null path silently skips the line.
-      const ticketsLine =
-        occ.tickets_left === 0
-          ? "🚫 אזלו הכרטיסים"
-          : formatTicketsLine(occ.tickets_left);
-      if (ticketsLine) lines.push(escHtml(ticketsLine));
-      // ── Description ──
-      // Per-child blurb (sql/053). Gets its own 📝 prefix so the
-      // line slots into the labeled-facet grid (📅/🕐/📍/🎫/📝/🏷️)
-      // instead of looking like a stray paragraph. Normalised
-      // whitespace + soft cap so a verbose umbrella doesn't blow
-      // past Telegram's 4096-char message limit. The cap is
-      // per-event; the chunking guarantee below handles totals.
-      if (typeof occ.description === "string" && occ.description.trim()) {
-        const desc = occ.description.replace(/\s+/g, " ").trim();
-        const capped =
-          desc.length > 280 ? desc.slice(0, 280).trimEnd() + "…" : desc;
-        lines.push(`📝 ${escHtml(capped)}`);
-      }
-      // ── Tags ── (ALWAYS last line — May-2026 user request).
-      // The 🏷️ row is the visual "footer" that summarises the
-      // topic at a glance, so it must sit below the description.
-      if (tagsForRow.length) {
-        const tagLine = formatTagLine(tagsForRow, {
-          highlight: [],
-          searchHits: [],
-        });
-        if (tagLine) lines.push(escHtml(tagLine));
-      }
-    }
-
-    // Telegram caps single-message bodies at 4096 chars. For umbrellas
-    // with ~10 children the rendered body sits at ~2-3KB, but a 20-
-    // child Shavuot blob crosses the limit. Chunk on event-block
-    // boundaries (any blank line preceded by the umbrella header or
-    // an event title — i.e. between events) so we never split a
-    // single event across messages.
-    const bodyText = lines.map(rtlLine).join("\n");
-    const MAX_CHUNK = 3800;
-    let chunks;
-    if (bodyText.length <= MAX_CHUNK) {
-      chunks = [bodyText];
-    } else {
-      // Walk the lines array re-applying rtlLine at chunk boundaries;
-      // we already produced an RTL-anchored bodyText so splitting
-      // here uses the SAME RLM-prefixed lines.
-      const rtlLines = lines.map(rtlLine);
-      chunks = [];
-      let current = "";
-      for (let li = 0; li < rtlLines.length; li++) {
-        const ln = rtlLines[li];
-        const candidate = current ? `${current}\n${ln}` : ln;
-        if (candidate.length > MAX_CHUNK && current) {
-          chunks.push(current);
-          current = ln;
-        } else {
-          current = candidate;
-        }
-      }
-      if (current) chunks.push(current);
-    }
-
-    // First chunk replies to the card the user tapped; follow-up
-    // chunks are plain sendMessage so they queue up beneath, without
-    // re-quoting the card.
-    let firstSent = false;
-    for (const chunk of chunks) {
-      if (!firstSent) {
-        await replyAsCallbackResult(ctx, chunk, {
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-        });
-        firstSent = true;
-      } else {
-        await ctx.telegram.sendMessage(ctx.chat.id, chunk, {
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-        });
-      }
-    }
+    const payload = await buildUmbrellaExpansionPayload(slug, rows);
+    await deliverUmbrellaExpansion(ctx, payload);
   } catch (err) {
     if (isStaleCallbackQuery(err)) {
       console.warn(`[Bot] umb stale ack (user ${ctx.from?.id || "?"}): ${err.message}`);
@@ -6821,6 +7526,126 @@ bot.action(/^umb:(.+)$/, async (ctx) => {
     }
     console.error("[Bot] umb error:", err.stack || err.message);
     try { await safeAck(ctx, "⚠️ שגיאה"); } catch {}
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Deterministic search router (`rtr:*`) — when AGENT_ENABLED=false
+// ──────────────────────────────────────────────────────────────────────────
+bot.action(/^rtr:(.+)$/, async (ctx) => {
+  const telegramId = ctx.from.id;
+  const action = ctx.match[1];
+  const {
+    applyDraftToggle,
+    applyLegacyRouterAction,
+    draftToFilters,
+    emptyDraft,
+    editSearchDraftHub,
+    openSearchDraftHub,
+  } = require("../lib/searchDraftPicker");
+
+  try {
+    const agentCtx = buildAgentCtx(ctx, {});
+
+    if (action === "menu") {
+      await ctx.answerCbQuery().catch(() => {});
+      await openSearchDraftHub(ctx, sessionStore);
+      return;
+    }
+    if (action === "save") {
+      await ctx.answerCbQuery().catch(() => {});
+      await startSaveFromLastSearch(telegramId, agentCtx);
+      return;
+    }
+    if (action === "profile" || action === "profile_hint") {
+      await ctx.answerCbQuery().catch(() => {});
+      await showProfileView(ctx);
+      return;
+    }
+    if (action === "go") {
+      const state = sessionStore.getSearchDraft(telegramId);
+      const filters = draftToFilters(state?.draft);
+      if (!filters) {
+        await ctx.answerCbQuery("בחרי לפחות מסנן אחד (תאריך, נושא, קהל…)", { show_alert: true }).catch(() => {});
+        return;
+      }
+      await ctx.answerCbQuery("מחפש…").catch(() => {});
+      await runSearchWithFilters(telegramId, agentCtx, filters);
+      return;
+    }
+    if (action === "clear") {
+      await ctx.answerCbQuery().catch(() => {});
+      sessionStore.updateSearchDraft(telegramId, { draft: emptyDraft() });
+      await editSearchDraftHub(ctx, sessionStore);
+      return;
+    }
+    if (action.startsWith("tog:")) {
+      let state = sessionStore.getSearchDraft(telegramId);
+      if (!state) {
+        await ctx.answerCbQuery().catch(() => {});
+        await openSearchDraftHub(ctx, sessionStore);
+        state = sessionStore.getSearchDraft(telegramId);
+      }
+      const nextDraft = applyDraftToggle(state.draft, action.slice(4));
+      sessionStore.updateSearchDraft(telegramId, { draft: nextDraft });
+      await ctx.answerCbQuery().catch(() => {});
+      await editSearchDraftHub(ctx, sessionStore);
+      return;
+    }
+    if (action.startsWith("runref:")) {
+      await ctx.answerCbQuery().catch(() => {});
+      await runRouterPreset(telegramId, agentCtx, ctx, action.slice(7));
+      return;
+    }
+    if (action === "extend") {
+      await ctx.answerCbQuery().catch(() => {});
+      const hint = sessionStore.getLastExtensionHint(telegramId);
+      const last = sessionStore.getLastSearchFilters(telegramId) || {};
+      if (!hint?.suggested_date_to) {
+        await ctx.reply("אין הרחבה פעילה — נסי חיפוש חדש.", searchMenuKeyboard());
+        return;
+      }
+      const { weekRangeIL, todayISO } = require("../lib/timeContext");
+      const filters = { ...last, date_to: hint.suggested_date_to };
+      delete filters.date_preset;
+      if (!filters.date_from) {
+        if (last.date_preset === "this_week") {
+          filters.date_from = weekRangeIL().startISO;
+        } else {
+          filters.date_from = todayISO();
+        }
+      }
+      await runSearchWithFilters(telegramId, agentCtx, filters);
+      return;
+    }
+    // Legacy keyboards (single-tap) — toggle draft, don't search until «חפשי».
+    if (
+      action.startsWith("preset:") ||
+      action.startsWith("refine:") ||
+      action.startsWith("tag:") ||
+      action.startsWith("kw:") ||
+      action.startsWith("aud:") ||
+      action.startsWith("act:")
+    ) {
+      let state = sessionStore.getSearchDraft(telegramId);
+      if (!state) {
+        await ctx.answerCbQuery().catch(() => {});
+        await openSearchDraftHub(ctx, sessionStore);
+        state = sessionStore.getSearchDraft(telegramId);
+      }
+      const nextDraft = applyLegacyRouterAction(state.draft, action);
+      sessionStore.updateSearchDraft(telegramId, { draft: nextDraft });
+      await ctx.answerCbQuery().catch(() => {});
+      await editSearchDraftHub(ctx, sessionStore);
+      return;
+    }
+
+    await ctx.answerCbQuery().catch(() => {});
+  } catch (err) {
+    console.error("[Bot] rtr callback failed:", err.message);
+    try {
+      await ctx.reply("⚠️ משהו נתקע בחיפוש — נסי שוב או /search");
+    } catch {}
   }
 });
 
@@ -6893,6 +7718,10 @@ bot.action(/^pgn:next$/, async (ctx) => {
               start_time: o.start_time,
               end_time: o.end_time,
               tickets_left: o.tickets_left,
+              description: o.description ?? null,
+              min_months: o.min_months ?? null,
+              max_months: o.max_months ?? null,
+              audience: o.audience ?? null,
               location: o.location ?? null,
               location_key: o.location_key ?? null,
               lat: o._coords?.lat ?? null,
@@ -6903,6 +7732,7 @@ bot.action(/^pgn:next$/, async (ctx) => {
         await sendEventCard(ctx, event, {
           seriesOccurrenceCount: s.occurrences.length,
           seriesMultiVenue: multiVenue,
+          replyToMessageId: getCallbackSourceMessageId(ctx),
         });
         for (const o of s.occurrences) {
           if (o?.id != null) renderedIds.push(o.id);
@@ -7085,174 +7915,15 @@ bot.action(/^sa:(.+)$/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
 });
 
-// ──────────────────────────────────────────────────────────────────────────
-// Event-feedback flow ("❌ לא מתאים" → reason picker → save)
-// ──────────────────────────────────────────────────────────────────────────
-//
-// IMPORTANT: only the `wrong_audience` reason ever gets aggregated into
-// audience tags, and even then with high evidence thresholds (handled in
-// feedbackService later). All other reasons are pure data — we collect
-// them so we can analyse usage, but they do NOT influence what events
-// the user sees in subsequent searches. This is on purpose: someone
-// flagging "too far" tells us about THEIR proximity preference, not about
-// the event itself, and we already have explicit proximity filters.
-// Order matters — this is the picker's vertical layout.
-// `already_known` sits ABOVE `already_seen` because it's the more
-// impactful click (suppresses an entire recurring series) and the
-// most-frequent reason a user wants to silence the משחקיית רגעים-
-// style "I know about this, stop reminding me" pattern.
-// Only already_known is surfaced as a direct button today.
-// The other reason codes are kept for the fb:save validation guard
-// and may be promoted to buttons again if usage patterns warrant it.
-const REASON_KEYS = ["already_known"];
-
-bot.action(/^fb:reasons:(\d+)$/, async (ctx) => {
-  const eventId = ctx.match[1];
-  // safeAck: if the user tapped while the bot was busy or just
-  // restarted, the ack TTL (~15s) may have passed by the time we
-  // run. We still want to render the reasons keyboard — the ack is
-  // cosmetic, the keyboard is the feature.
-  await safeAck(ctx);
-  console.log(`[Bot] fb:reasons: user=${ctx.from?.id} event=${eventId}`);
-  try {
-    const rows = [
-      [Markup.button.callback("🔁 כבר מכיר — אל תציג שוב", `fb:save:${eventId}:already_known`)],
-      [Markup.button.callback("✏️ אחר...", `fb:explain:${eventId}`)],
-      [Markup.button.callback("↩️ חזרה", `fb:cancel:${eventId}`)],
-    ];
-    await replyAsCallbackResult(
-      ctx,
-      "מה הסיבה? (זה עוזר לי ללמוד)",
-      Markup.inlineKeyboard(rows),
-    );
-  } catch (err) {
-    console.error(`[Bot] fb:reasons error (event=${eventId}):`, err.stack || err.message);
-    await ctx.reply("⚠️ אופס — נסי שוב בעוד רגע").catch(() => {});
-  }
-});
-
-bot.action(/^fb:cancel:(\d+)$/, async (ctx) => {
-  await ctx.answerCbQuery("👍");
-  await ctx.deleteMessage().catch(() => {});
-});
-
-// Free-text feedback path — user chose to explain in their own words
-// rather than pick one of the preset reasons. We store the event
-// context on the session so the next text message is automatically
-// forwarded to the agent with that context injected.
-bot.action(/^fb:explain:(\d+)$/, async (ctx) => {
-  const eventId = ctx.match[1];
-  await safeAck(ctx);
-  try {
-    const { data: ev } = await supabase
-      .from("events")
-      .select("name")
-      .eq("id", parseInt(eventId, 10))
-      .maybeSingle();
-    const session = sessionStore.ensureSession(ctx.from.id);
-    session.pendingFeedbackExplain = {
-      eventId,
-      eventName: ev?.name || `אירוע #${eventId}`,
-    };
-    await ctx.reply("ספר/י לנו מה לא התאים — נשתמש בזה כדי להתאים לך אירועים טוב יותר 🎯");
-  } catch (err) {
-    console.error(`[Bot] fb:explain error (event=${eventId}):`, err.stack || err.message);
-    await ctx.reply("⚠️ אופס — נסי שוב בעוד רגע").catch(() => {});
-  }
-});
-
-bot.action(/^fb:save:(\d+):([a-z_]+)$/, async (ctx) => {
-  const [, eventId, reason] = ctx.match;
-  if (!REASON_KEYS.includes(reason)) {
-    await ctx.answerCbQuery("⚠️");
-    return;
-  }
-  // Save first, surface UI update separately. Otherwise an edit-message
-  // failure (Telegram rate-limit, message-too-old, "message is not
-  // modified", schema-cache transient, …) would surface as the misleading
-  // "⚠️ לא הצלחתי לשמור" toast even though the feedback row DID land in
-  // Postgres. Keeping the two failure modes distinct also keeps Sentry
-  // signal clean.
-  let saved = false;
-  try {
-    await recordFeedback({
-      eventId,
-      telegramId: ctx.from.id,
-      reason,
-    });
-    saved = true;
-  } catch (err) {
-    console.error("[Bot] fb:save error:", err.message);
-    alertAdmin({
-      severity: "error",
-      code: "feedback_save_failed",
-      message: "Failed to persist event feedback",
-      context: {
-        eventId,
-        reason,
-        telegramId: ctx.from?.id,
-        error: err.message,
-      },
-    }).catch(() => {});
-    await ctx.answerCbQuery("⚠️ לא הצלחתי לשמור");
-    return;
-  }
-
-  // `already_known` is the SERIES-level suppressor. The feedback
-  // row above stops this specific event from re-surfacing, but
-  // recurring events (משחקיית רגעים every Shabbat is the canonical
-  // example) get new event_ids per occurrence — so per-event dedup
-  // alone wouldn't silence the series. We extract the series
-  // identity (name + location_key) and append it to
-  // profile.user_context.known_series; newsletterService filters
-  // against that list on every send.
-  if (reason === "already_known") {
-    try {
-      await rememberKnownSeries(ctx.from.id, eventId);
-    } catch (err) {
-      // Non-fatal — the user got the toast, and per-event dedup
-      // still suppresses THIS specific row. Log for ops insight.
-      console.warn(`[Bot] rememberKnownSeries failed: ${err.message}`);
-    }
-  }
-
-  if (reason === "not_interested") {
-    // Fire-and-forget: compound-reduce the event's category weight in
-    // the user's preference profile. Each click applies a ×0.7 factor
-    // (clamped to 0.2 floor) so repeated "not interested" signals on
-    // the same category sink it progressively lower in search results.
-    recordNotInterestedSignal(ctx.from.id, eventId).catch((err) =>
-      console.warn(`[Bot] recordNotInterestedSignal failed: ${err.message}`),
-    );
-  }
-
-  if (reason === "too_far") {
-    // Permanently suppress the venue: add location_key to
-    // user_context.preferences.suppressed_locations. search_events
-    // will skip events at this location in all future queries.
-    recordTooFarSignal(ctx.from.id, eventId).catch((err) =>
-      console.warn(`[Bot] recordTooFarSignal failed: ${err.message}`),
-    );
-  }
-
-  const ack = ACK_LABELS[reason] || "✅ תודה";
-  await ctx.answerCbQuery(ack);
-  // Best-effort UI cleanup. If the edit fails we already toasted the
-  // user, so swallow the error rather than re-surfacing it as a save
-  // failure.
-  try {
-    await ctx.editMessageText(ack);
-  } catch (err) {
-    // "message is not modified" / "message to edit not found" / 429s
-    // are benign here — the data is saved and the user has the toast.
-    if (!/not modified|message to edit not found|too many requests/i.test(err.message || "")) {
-      console.warn("[Bot] fb:save edit-ui failed (data saved):", err.message);
-    }
-  }
-
-  // Follow-up chat message — lets the user know they can always reverse
-  // the feedback by writing to the bot.
-  await ctx.reply("💡 תמיד אפשר לשנות — פשוט כתבו לי!").catch(() => {});
+registerFeedbackHandlers(bot, {
+  supabase,
+  sessionStore,
+  getProfile,
+  rememberKnownSeries,
+  recordTooFarSignal,
+  recordNotInterestedSignal,
+  alertAdmin,
+  replyAsCallbackResult,
 });
 
 async function notifySeller(ticket, buyerName) {
@@ -7523,6 +8194,18 @@ bot.action(/^tint:(.+)$/, async (ctx) => {
 // Boot
 // ──────────────────────────────────────────────────────────────────────────
 console.log("[Bot] Starting...");
+
+// Railway (and browsers hitting /miniapp) probe $PORT immediately. The
+// HTTP server must listen before Telegram long-polling connects — otherwise
+// deploy health checks fail with "Application failed to respond" while
+// runCleanup() or getMe() are still in flight.
+try {
+  const oauthServer = require("../lib/oauthServer");
+  oauthServer.start({ bot });
+} catch (err) {
+  console.error("[Bot] Express server failed to start:", err.message);
+}
+
 runCleanup()
   .then(({ deleted, archived }) => {
     console.log(`[Bot] Boot cleanup: deleted=${deleted}, archived=${archived}`);
@@ -7543,8 +8226,16 @@ runCleanup()
     // `.catch()` on the outer promise so launch failures still
     // crash visibly.
     bot
-      .launch({}, () => {
-        console.log("[Bot] Running");
+      .launch({}, async () => {
+        try {
+          const me = await bot.telegram.getMe();
+          console.log(
+            `[Bot] Running as @${me.username} (id ${me.id}) | ` +
+              `AGENT_ENABLED=${isAgentEnabled()} GEMINI_ONLY_ENRICHER=${(process.env.GEMINI_ONLY_ENRICHER ?? "true")}`,
+          );
+        } catch {
+          console.log("[Bot] Running");
+        }
         try {
           const newsletterScheduler = require("../lib/newsletterScheduler");
           newsletterScheduler.start({
@@ -7553,15 +8244,6 @@ runCleanup()
           });
         } catch (err) {
           console.error("[Bot] Newsletter scheduler failed to start:", err.message);
-        }
-        // Express server — hosts the Mini App + Google OAuth callback.
-        // Always started so the Mini App catalog is available regardless
-        // of whether Google Calendar is configured.
-        try {
-          const oauthServer = require("../lib/oauthServer");
-          oauthServer.start({ bot });
-        } catch (err) {
-          console.error("[Bot] Express server failed to start:", err.message);
         }
         if (!process.env.GOOGLE_OAUTH_CLIENT_ID || !process.env.GOOGLE_OAUTH_REDIRECT_URI) {
           console.log(
@@ -7575,7 +8257,7 @@ runCleanup()
         // Only registers when MINIAPP_URL is configured (set this to the
         // public URL of the deployed service + /miniapp, e.g.
         // https://your-service.up.railway.app/miniapp).
-        const miniAppUrl = process.env.MINIAPP_URL;
+        const miniAppUrl = getMiniAppCatalogUrl();
         if (miniAppUrl) {
           bot.telegram
             .setChatMenuButton({
