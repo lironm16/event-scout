@@ -109,9 +109,14 @@ async function getProfile(telegramId) {
 async function saveProfile(telegramId, updatedProfile, existing = null) {
   const id = String(telegramId);
 
-  const constraints = updatedProfile.constraints
-    ? { ...updatedProfile.constraints }
-    : null;
+  const constraints =
+    updatedProfile.constraints !== undefined
+      ? updatedProfile.constraints
+        ? { ...updatedProfile.constraints }
+        : null
+      : existing?.user_context?.constraints
+        ? { ...existing.user_context.constraints }
+        : null;
 
   // Geocode the home address if it changed (or if we don't have coords yet)
   if (constraints?.home_address) {
@@ -164,7 +169,10 @@ async function saveProfile(telegramId, updatedProfile, existing = null) {
       ? updatedProfile.partner
       : (existing?.user_context?.partner || null),
     constraints,
-    interests: updatedProfile.interests || [],
+    interests:
+      updatedProfile.interests !== undefined
+        ? updatedProfile.interests
+        : existing?.user_context?.interests || [],
     communities: mergeCommunities(
       updatedProfile.communities,
       existing?.user_context?.communities,
@@ -174,11 +182,18 @@ async function saveProfile(telegramId, updatedProfile, existing = null) {
   const row = {
     telegram_id: id,
     user_context,
-    active_watch_list: updatedProfile.watch_list || [],
+    active_watch_list:
+      updatedProfile.watch_list !== undefined
+        ? updatedProfile.watch_list
+        : existing?.active_watch_list || [],
     last_seen: new Date().toISOString(),
   };
 
-  if (updatedProfile.first_name) row.first_name = updatedProfile.first_name;
+  if (updatedProfile.first_name !== undefined) {
+    row.first_name = updatedProfile.first_name;
+  } else if (existing?.first_name) {
+    row.first_name = existing.first_name;
+  }
 
   const { data, error } = await supabase
     .from("profiles")

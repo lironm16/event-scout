@@ -1699,6 +1699,8 @@ bot.action(/^gnd:(female|male|neutral)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
 
+  const existingProfile = await getProfile(ctx.from.id).catch(() => null);
+
   try {
     await saveProfile(
       ctx.from.id,
@@ -1706,7 +1708,7 @@ bot.action(/^gnd:(female|male|neutral)$/, async (ctx) => {
         gender: genderValue,
         first_name: ctx.from?.first_name || undefined,
       },
-      null,
+      existingProfile,
     );
   } catch (err) {
     console.error(
