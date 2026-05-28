@@ -2007,6 +2007,9 @@ async function openOnboardingAtStep(ctx, step, { editReturn = null } = {}) {
     const { memberKeysForCommunityPicker } = require("../lib/communityAccess");
     state.communityMember = new Set(memberKeysForCommunityPicker(comm));
   }
+  if (step === "kids" && editReturn === "profile" && (state.kids || []).length > 0) {
+    state.step = "kids_manage";
+  }
   sessionStore.setOnboarding(telegramId, state);
   await renderOnboardingStep(ctx, state);
 }
