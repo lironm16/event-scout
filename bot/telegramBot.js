@@ -1674,9 +1674,7 @@ async function sendWelcome(ctx) {
 // chat histories.
 bot.action("prof:kids", async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  const session = sessionStore.ensureSession(ctx.from.id);
-  startKidsCapture(session, ctx.from.id);
-  await ctx.reply(KIDS_AGE_PROMPT);
+  await openOnboardingAtStep(ctx, "kids", { editReturn: "profile" });
 });
 
 bot.action("ip:start_from_welcome", async (ctx) => {
@@ -2202,9 +2200,7 @@ bot.action(`${MENU}:profile:edit`, async (ctx) => {
 
 bot.action(`${MENU}:edit:kids`, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  const session = sessionStore.ensureSession(ctx.from.id);
-  startKidsCapture(session, ctx.from.id);
-  await ctx.reply(KIDS_AGE_PROMPT);
+  await openOnboardingAtStep(ctx, "kids", { editReturn: "profile" });
 });
 
 bot.action(`${MENU}:edit:interests`, async (ctx) => {
