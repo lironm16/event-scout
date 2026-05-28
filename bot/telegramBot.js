@@ -62,6 +62,7 @@ const {
   buildProfileViewKeyboard,
   buildProfileEditKeyboard,
   buildGenderEditKeyboard,
+  buildDisplayNameEditKeyboard,
   buildAddressEditKeyboard,
   buildAgeEditKeyboard,
   resolveReplyAction,
@@ -1701,15 +1702,13 @@ bot.action(/^gnd:(female|male|neutral)$/, async (ctx) => {
 
   const existingProfile = await getProfile(ctx.from.id).catch(() => null);
 
+  const gndPayload = { gender: genderValue };
+  if (!existingProfile) {
+    gndPayload.first_name = ctx.from?.first_name || undefined;
+  }
+
   try {
-    await saveProfile(
-      ctx.from.id,
-      {
-        gender: genderValue,
-        first_name: ctx.from?.first_name || undefined,
-      },
-      existingProfile,
-    );
+    await saveProfile(ctx.from.id, gndPayload, existingProfile);
   } catch (err) {
     console.error(
       `[Bot] gnd:${choice} persist failed for ${ctx.from?.id}: ${err.message}`,
@@ -1769,19 +1768,14 @@ bot.action(/^age:(young_adult|mid_adult|senior|skip)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
 
+  const existingProfile = await getProfile(ctx.from.id).catch(() => null);
+  const agePayload = { age_range: ageRangeValue };
+  if (!existingProfile) {
+    agePayload.first_name = ctx.from?.first_name || undefined;
+  }
+
   try {
-    await saveProfile(
-      ctx.from.id,
-      {
-        age_range: ageRangeValue,
-        first_name: ctx.from?.first_name || undefined,
-      },
-      // Pass the existing profile so gender (saved in the gnd: step)
-      // survives this save — without it the sticky-merge in
-      // profileService.js still works (it re-reads existing), but
-      // it's clearer to be explicit here.
-      await getProfile(ctx.from.id).catch(() => null),
-    );
+    await saveProfile(ctx.from.id, agePayload, existingProfile);
   } catch (err) {
     console.error(
       `[Bot] age:${choice} persist failed for ${ctx.from?.id}: ${err.message}`,
@@ -2290,6 +2284,40 @@ bot.action("floc:clear", async (ctx) => {
 bot.action("floc:cancel", async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   sessionStore.clearFavoriteLocationsPicker(ctx.from.id);
+});
+
+bot.action(`${MENU}:edit:name`, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const telegramId = ctx.from.id;
+  const profile = await getProfile(telegramId).catch(() => null);
+  const current = profile?.first_name || ctx.from.first_name || "—";
+  const tgName = String(ctx.from.first_name || "").trim();
+  sessionStore.ensureSession(telegramId).pendingProfileField = "display_name";
+  await ctx.reply(
+    `👤 שם בתצוגה\n\nכרגע: ${current}\n\nכתבי שם חדש (2–40 תווים).`,
+    buildDisplayNameEditKeyboard({ telegramName: tgName || null }),
+  );
+});
+
+bot.action(`${MENU}:edit:name:telegram`, async (ctx) => {
+  const telegramId = ctx.from.id;
+  await ctx.answerCbQuery("עודכן").catch(() => {});
+  const tgName = String(ctx.from.first_name || "").trim();
+  if (!tgName) {
+    await ctx.reply("אין שם בחשבון הטלגרם שלך — כתבי שם ידנית.");
+    return;
+  }
+  const session = sessionStore.getSession(telegramId);
+  if (session) delete session.pendingProfileField;
+  try {
+    const existing = await getProfile(telegramId);
+    await saveProfile(telegramId, { first_name: tgName }, existing);
+    await ctx.reply(`✅ השם חזר לשם מטלגרם: ${tgName}`);
+    await showProfileView(ctx);
+  } catch (err) {
+    console.error("[Bot] name telegram reset:", err.message);
+    await ctx.reply("⚠️ לא הצלחתי לשמור. נסי שוב.");
+  }
 });
 
 bot.action(`${MENU}:edit:address`, async (ctx) => {
@@ -5436,7 +5464,28 @@ bot.on("text", async (ctx) => {
     // specific.
     const session = sessionStore.getSession(telegramId);
 
-    // Profile field capture (home address from menu:edit:address).
+    // Profile field capture (display name / home address).
+    if (session?.pendingProfileField === "display_name") {
+      const name = message.trim().slice(0, 40);
+      if (name.length < 2) {
+        await ctx.reply("נא שם של לפחות 2 תווים, או «↩️ חזרה» בכפתורים.");
+        tracing.setOutput(traceId, "[profile_name_too_short]");
+        return;
+      }
+      delete session.pendingProfileField;
+      try {
+        const existing = await getProfile(telegramId);
+        await saveProfile(telegramId, { first_name: name }, existing);
+        await ctx.reply(`✅ שמרתי: ${name}`);
+        await showProfileView(ctx);
+      } catch (err) {
+        console.error("[Bot] profile name save:", err.message);
+        await ctx.reply("⚠️ לא הצלחתי לשמור. נסי שוב.");
+      }
+      tracing.setOutput(traceId, "[profile_name_saved]");
+      return;
+    }
+
     if (session?.pendingProfileField === "home_address") {
       const addr = message.trim();
       if (!addr) {
