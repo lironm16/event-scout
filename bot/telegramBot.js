@@ -1426,17 +1426,7 @@ function buildAgentCtx(ctx, { traceId, markResponded } = {}) {
 // `f` = feminine, `m` = masculine, `n` = neutral fallback. Accepts the
 // full profile object, a bare gender string, or null — so call sites
 // can pass whichever shape is in hand without an extra hop.
-function genderForm(profileOrGender, { f, m, n }) {
-  const g =
-    typeof profileOrGender === "string"
-      ? profileOrGender
-      : profileOrGender?.user_context?.gender ||
-        profileOrGender?.gender ||
-        null;
-  if (g === "female") return f;
-  if (g === "male") return m;
-  return n;
-}
+const { genderForm } = require("../lib/genderForm");
 
 // ──────────────────────────────────────────────────────────────────────────
 // Commands
