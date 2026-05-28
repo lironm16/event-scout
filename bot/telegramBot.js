@@ -62,6 +62,7 @@ const {
   buildProfileViewKeyboard,
   buildProfileEditKeyboard,
   buildGenderEditKeyboard,
+  buildAddressEditKeyboard,
   buildAgeEditKeyboard,
   resolveReplyAction,
   shouldShowTypingMenu,
@@ -2293,9 +2294,29 @@ bot.action(`${MENU}:edit:address`, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   sessionStore.ensureSession(ctx.from.id).pendingProfileField = "home_address";
   await ctx.reply(
-    "🏠 *כתובת בית*\n\nכתבי כתובת מלאה (רחוב, עיר). אבטל אוטומטית אחרי השמירה.",
-    { parse_mode: "Markdown" },
+    "🏠 *כתובת בית*\n\nכתבי כתובת מלאה (רחוב, עיר), או מחקי את הכתובת השמורה.",
+    { parse_mode: "Markdown", ...buildAddressEditKeyboard() },
   );
+});
+
+bot.action(`${MENU}:edit:address:clear`, async (ctx) => {
+  const telegramId = ctx.from.id;
+  await ctx.answerCbQuery("נמחק").catch(() => {});
+  const session = sessionStore.getSession(telegramId);
+  if (session) delete session.pendingProfileField;
+  try {
+    const existing = await getProfile(telegramId);
+    const shape = profileToBrainShape(existing);
+    const constraints = { ...(shape.constraints || {}) };
+    delete constraints.home_address;
+    delete constraints.home_coordinates;
+    await saveProfile(telegramId, { constraints }, existing);
+    await ctx.reply("✅ מחקתי את כתובת הבית");
+    await showProfileView(ctx);
+  } catch (err) {
+    console.error("[Bot] address clear:", err.message);
+    await ctx.reply("⚠️ לא הצלחתי למחוק. נסי שוב.");
+  }
 });
 
 bot.action(`${MENU}:edit:gender`, async (ctx) => {
@@ -2894,6 +2915,9 @@ function buildOnboardingKeyboard(state) {
     rows = buildChipsKeyboard(AUDIENCE_CATEGORIES, state.audiences, "onb:tog:audiences");
   } else if (step === "location") {
     rows = buildLocationChipsRows(state.location?.id || null);
+    if (state.editReturn === "profile") {
+      rows.push([{ text: "🗑️ הסר העדפת מרחק", callback_data: "onb:loc:clear" }]);
+    }
   } else if (step === "location_other") {
     // Free-text capture — only a back/cancel option, no chips.
     return {
@@ -3509,6 +3533,27 @@ bot.action(/^onb:tog:(topics|audiences):(.+)$/, async (ctx) => {
     await renderOnboardingStep(ctx, state);
   } catch (err) {
     console.error("[Bot] onb:tog error:", err.message);
+    await ctx.answerCbQuery("⚠️");
+  }
+});
+
+bot.action("onb:loc:clear", async (ctx) => {
+  const telegramId = ctx.from.id;
+  try {
+    const state = await ensureOnboardingState(ctx, "location");
+    await ctx.answerCbQuery("הוסר");
+    state.location = null;
+    sessionStore.updateOnboarding(telegramId, { location: null });
+    await persistOnboardingState(telegramId, state, { touchLocation: true });
+    if (state.editReturn === "profile") {
+      sessionStore.clearOnboarding(telegramId);
+      await showProfileView(ctx);
+      return;
+    }
+    sessionStore.updateOnboarding(telegramId, { step: "summary" });
+    await renderOnboardingStep(ctx, sessionStore.getOnboarding(telegramId));
+  } catch (err) {
+    console.error("[Bot] onb:loc:clear error:", err.message);
     await ctx.answerCbQuery("⚠️");
   }
 });
