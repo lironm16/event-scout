@@ -1428,7 +1428,13 @@ function buildAgentCtx(ctx, { traceId, markResponded } = {}) {
 // `f` = feminine, `m` = masculine, `n` = neutral fallback. Accepts the
 // full profile object, a bare gender string, or null — so call sites
 // can pass whichever shape is in hand without an extra hop.
-const { genderForm } = require("../lib/genderForm");
+const {
+  genderForm,
+  searchGoLabel,
+  searchMarkVerb,
+  tryAgainVerb,
+  pickActionVerb,
+} = require("../lib/genderForm");
 
 // ──────────────────────────────────────────────────────────────────────────
 // Commands
@@ -1613,11 +1619,14 @@ async function sendWelcome(ctx) {
   // profile fetch fails or the user hasn't been through the /start
   // gender prompt — better than guessing and getting it wrong.
   const profile = await getProfile(ctx.from.id).catch(() => null);
-  const youCan = genderForm(profile, {
+  const gender = profile?.user_context?.gender || null;
+  const youCan = genderForm(gender, {
     f: "תוכלי",
     m: "תוכל",
     n: "אפשר",
   });
+  const mark = searchMarkVerb(gender);
+  const go = searchGoLabel(gender);
 
   const lines = [
     `שלום${firstName}! 🎟️ אני הבוט של Event Scout — עוזרת למצוא אירועים, חוגים וכרטיסים ברמת גן.`,
@@ -1627,7 +1636,7 @@ async function sendWelcome(ctx) {
     "🎫 *זמינות כרטיסים מראש* — מראה כאן אם נשארו כרטיסים, בלי לגלות באמצע הדרך שהכל אזל",
     "",
     "*✨ מה אפשר לעשות בכפתורים:*",
-    "🔍 *חיפוש* — כפתור «חיפוש אירוע» או /search (סמני מסננים, ואז «חפשי»)",
+    `🔍 *חיפוש* — כפתור «חיפוש אירוע» או /search (${mark} מסננים, ואז «${go}»)`,
     "📋 *פרופיל* — ילדים, קהילות, כתובת, תחומי עניין",
     "🔔 *מעקבים שמורים* · 👀 *אירועים במעקב*",
     "⭐ *תחומי עניין* — /interests",
@@ -2039,8 +2048,10 @@ async function dispatchMenuAction(ctx, action) {
     case "saved": {
       const items = await listSavedSearches(telegramId);
       if (!items.length) {
+        const profile = await getProfile(telegramId).catch(() => null);
+        const go = searchGoLabel(profile?.user_context?.gender);
         await ctx.reply(
-          "עדיין לא שמרת חיפושים.\nחפשי קודם (🔍 חיפוש אירוע), ואז «שמור מעקב» בתוצאות.",
+          `עדיין לא שמרת חיפושים.\n${go} קודם (🔍 חיפוש אירוע), ואז «שמור מעקב» בתוצאות.`,
         );
         return;
       }
@@ -5895,9 +5906,13 @@ bot.action(/^clr:(\d+)$/, async (ctx) => {
   sessionStore.clearPendingClarification(telegramId);
 
   if (!isAgentEnabled()) {
+    const profile = await getProfile(telegramId).catch(() => null);
+    const gender = profile?.user_context?.gender || null;
+    const pick = pickActionVerb(gender);
+    const write = genderForm(gender, { f: "כתבי", m: "כתוב", n: "כתוב/י" });
     await ctx.reply(
-      "הסוכן כבוי — בחרי חיפוש מ-/search או כתבי «מוזיקה השבוע». לפרופיל: /profile",
-      searchMenuKeyboard(),
+      `הסוכן כבוי — ${pick} חיפוש מ-/search או ${write} «מוזיקה השבוע». לפרופיל: /profile`,
+      searchMenuKeyboard(gender),
     );
     return;
   }
@@ -7633,6 +7648,8 @@ bot.action(/^rtr:(.+)$/, async (ctx) => {
 
   try {
     const agentCtx = buildAgentCtx(ctx, {});
+    const profile = await getProfile(telegramId).catch(() => null);
+    const gender = profile?.user_context?.gender || null;
 
     if (action === "menu") {
       await ctx.answerCbQuery().catch(() => {});
@@ -7653,7 +7670,11 @@ bot.action(/^rtr:(.+)$/, async (ctx) => {
       const state = sessionStore.getSearchDraft(telegramId);
       const filters = draftToFilters(state?.draft);
       if (!filters) {
-        await ctx.answerCbQuery("בחרי לפחות מסנן אחד (תאריך, נושא, קהל…)", { show_alert: true }).catch(() => {});
+        const pick = pickActionVerb(gender);
+        await ctx.answerCbQuery(
+          `${pick} לפחות מסנן אחד (תאריך, נושא, קהל…)`,
+          { show_alert: true },
+        ).catch(() => {});
         return;
       }
       await ctx.answerCbQuery("מחפש…").catch(() => {});
@@ -7689,7 +7710,11 @@ bot.action(/^rtr:(.+)$/, async (ctx) => {
       const hint = sessionStore.getLastExtensionHint(telegramId);
       const last = sessionStore.getLastSearchFilters(telegramId) || {};
       if (!hint?.suggested_date_to) {
-        await ctx.reply("אין הרחבה פעילה — נסי חיפוש חדש.", searchMenuKeyboard());
+        const retry = tryAgainVerb(gender);
+        await ctx.reply(
+          `אין הרחבה פעילה — ${retry} חיפוש חדש.`,
+          searchMenuKeyboard(gender),
+        );
         return;
       }
       const { weekRangeIL, todayISO } = require("../lib/timeContext");
@@ -7731,7 +7756,9 @@ bot.action(/^rtr:(.+)$/, async (ctx) => {
   } catch (err) {
     console.error("[Bot] rtr callback failed:", err.message);
     try {
-      await ctx.reply("⚠️ משהו נתקע בחיפוש — נסי שוב או /search");
+      const p = await getProfile(telegramId).catch(() => null);
+      const retry = tryAgainVerb(p?.user_context?.gender);
+      await ctx.reply(`⚠️ משהו נתקע בחיפוש — ${retry} שוב או /search`);
     } catch {}
   }
 });
