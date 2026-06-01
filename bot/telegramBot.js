@@ -7194,18 +7194,12 @@ bot.action(/^seq:me:(\d+)$/, async (ctx) => {
     for (const { occ, url } of occsWithUrl) {
       const dateStr = occ.date ? formatHebrewDate(occ.date) : "";
       const timeStr = formatTimeRange(occ.start_time, occ.end_time);
-      const lowStock =
-        occ.tickets_left != null && occ.tickets_left > 0 && occ.tickets_left <= 10;
       const ticketsStr =
         occ.tickets_left === 0
           ? "🚫 אזל"
-          : occ.tickets_left != null
-          ? lowStock
-            ? `🎫 ${occ.tickets_left} כרטיסים אחרונים❗️`
-            : `🎫 ${occ.tickets_left} כרטיסים`
-          : "";
+          : formatTicketsLine(occ.tickets_left) || "";
       const meta = [dateStr, timeStr].filter(Boolean).join(" — ");
-      const trailing = ticketsStr ? ` · ${ticketsStr}` : "";
+      const trailing = ticketsStr ? ` · ${escHtml(ticketsStr)}` : "";
       const metaEsc = escHtml(meta);
       const bullet = sharedUrl
         ? `• ${metaEsc}`
@@ -7338,18 +7332,12 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
     for (const { occ, url } of occsWithUrl) {
       const dateStr = occ.date ? formatHebrewDate(occ.date) : "";
       const timeStr = formatTimeRange(occ.start_time, occ.end_time);
-      const lowStock =
-        occ.tickets_left != null && occ.tickets_left > 0 && occ.tickets_left <= 10;
       const ticketsStr =
         occ.tickets_left === 0
           ? "🚫 אזל"
-          : occ.tickets_left != null
-          ? lowStock
-            ? `🎫 ${occ.tickets_left} כרטיסים אחרונים❗️`
-            : `🎫 ${occ.tickets_left} כרטיסים`
-          : "";
+          : formatTicketsLine(occ.tickets_left) || "";
       const meta = [dateStr, timeStr].filter(Boolean).join(" — ");
-      const trailing = ticketsStr ? ` · ${ticketsStr}` : "";
+      const trailing = ticketsStr ? ` · ${escHtml(ticketsStr)}` : "";
       // Per-row link suppressed when the header already carries the
       // shared anchor; otherwise the date+time is hyperlinked as
       // before (one-tap booking for each Smarticket occurrence).
