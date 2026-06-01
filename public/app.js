@@ -421,7 +421,7 @@
     const t = ev.ticketsLeft;
     if (t != null) {
       if (t <= 0)       ticketHtml = `<div class="ticket-line sold-out">🚫 אזלו הכרטיסים</div>`;
-      else if (t <= 10) ticketHtml = `<div class="ticket-line low-stock">🎫 ${t} כרטיסים אחרונים ❗️</div>`;
+      else if (t <= 10) ticketHtml = `<div class="ticket-line low-stock">🎫 ${t} כרטיסים אחרונים</div>`;
       else              ticketHtml = `<div class="ticket-line">🎫 ${t} כרטיסים</div>`;
     }
 
