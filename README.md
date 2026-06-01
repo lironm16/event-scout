@@ -43,7 +43,7 @@ cadence: as soon as a newly-discovered event qualifies for a user
 (audience/age/access/proximity/no series-suppression), it lands in
 that user's buffer. After 5 minutes the buffer flushes — as a single
 card (1 event) or as a multi-select newsletter (≥ 2 events).
-Low-stock alerts (≤10 tickets) bypass the buffer entirely. Users can
+Low-stock alerts (≤9 tickets) bypass the buffer entirely. Users can
 mark batches for bulk actions and add them straight into Google
 Calendar.
 
@@ -100,7 +100,7 @@ when the list overflows.
 ### Low-stock alerts
 
 Independent of the weekly digest: any event whose stock crosses to
-**≤ 10 tickets** triggers an immediate push to interested users
+**≤ 9 tickets** triggers an immediate push to interested users
 (per-event watchers + saved-search topic matches). Dedup is per
 `(event_id, telegram_id)` so a stock value bouncing around the
 threshold never re-pings the same user.

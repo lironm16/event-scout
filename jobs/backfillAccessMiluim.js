@@ -1,33 +1,21 @@
 #!/usr/bin/env node
-// One-off backfill: stamp `access='community-miluim'` onto events
-// that were ingested BEFORE the title-based classifier in
-// api/check.js#upsertEvents (sql/057 era) landed.
+// One-off backfill: add `community-miluim` to events.access where the
+// title (or מילואימניקים tag) signals a reservist-community event.
 //
-// Two selection paths, OR'd together so we catch both:
+// Two selection paths, OR'd together:
+//   1. Title regex — same rules as lib/access.js (live scraper).
+//   2. Tag membership — tag_ids[] includes the "מילואימניקים" label.
 //
-//   1. Title regex — same regex the live scraper now uses. Picks
-//      up the 3 explicit "למילואימניקים.ות" Smarticket titles on
-//      ramat-gan.
-//   2. Tag membership — events whose tag_ids[] include the
-//      "מילואימניקים" label (id 357 in production, looked up by
-//      name so dev/preview DBs work too). This is how we catch
-//      events with opaque military-slang titles like "פק״ל קפה
-//      וקראש" (#3740) — the title doesn't shout the audience but
-//      the enricher tagged it correctly months ago.
+// events.access is access_t[] (sql/060). Updates are additive merges,
+// never scalar strings — see backfillAccessRussian.js / backfillAccessOlim.js.
 //
-// Idempotent: only rows that aren't already 'community-miluim' are
-// updated. Re-running prints "0 rows" once the world is consistent.
-//
-// Prereq: sql/057_access_miluim.sql MUST be applied first, otherwise
-// the UPDATE rejects with `invalid input value for enum access_t`.
+// Prereq: sql/057_access_miluim.sql (enum value) + sql/060_access_array.sql.
 
 require("dotenv").config();
 const supabase = require("../lib/supabase");
-const { classifyAccessForEvent } = require("../lib/access");
+const { classifyAllAccessForEvent } = require("../lib/access");
 
 async function resolveMiluimLabelId() {
-  // Lookup by canonical name so we don't hardcode a numeric id that
-  // differs between environments (dev DB ≠ prod DB).
   const { data, error } = await supabase
     .from("labels")
     .select("id, name")
@@ -40,6 +28,11 @@ async function resolveMiluimLabelId() {
   return data?.id || null;
 }
 
+function hasMiluimScope(access) {
+  const arr = Array.isArray(access) ? access : [access || "open"];
+  return arr.includes("community-miluim");
+}
+
 async function main() {
   const labelId = await resolveMiluimLabelId();
   if (labelId) {
@@ -48,10 +41,6 @@ async function main() {
     console.log(`[Backfill] no 'מילואימניקים' label in DB — tag path will be skipped.`);
   }
 
-  // Pull every non-archived event so we can apply both rules in JS.
-  // It's small (~hundreds of rows) and lets us reuse the exact same
-  // classifier the live scraper runs — drift between the two would
-  // be a regression waiting to happen.
   const { data: rows, error } = await supabase
     .from("events")
     .select("id, name, access, tag_ids")
@@ -63,26 +52,43 @@ async function main() {
 
   const updates = [];
   for (const r of rows) {
-    if (r.access === "community-miluim") continue; // already set
-    const titleHit = classifyAccessForEvent({ name: r.name }) === "community-miluim";
-    const tagHit = labelId && Array.isArray(r.tag_ids) && r.tag_ids.includes(labelId);
-    if (titleHit || tagHit) {
-      updates.push({ id: r.id, name: r.name, via: titleHit ? "title" : "tag" });
-    }
+    if (hasMiluimScope(r.access)) continue;
+
+    const titleHit = classifyAllAccessForEvent({ name: r.name })?.includes(
+      "community-miluim",
+    );
+    const tagHit =
+      labelId && Array.isArray(r.tag_ids) && r.tag_ids.includes(labelId);
+    if (!titleHit && !tagHit) continue;
+
+    const existing = Array.isArray(r.access) ? r.access : [r.access || "open"];
+    const merged = Array.from(new Set([...existing, "community-miluim"]));
+    const finalScopes = merged.some((s) => s !== "open")
+      ? merged.filter((s) => s !== "open")
+      : merged;
+
+    const existingKey = [...existing].sort().join(",");
+    const targetKey = [...finalScopes].sort().join(",");
+    if (existingKey === targetKey) continue;
+
+    updates.push({
+      id: r.id,
+      name: r.name,
+      via: titleHit ? "title" : "tag",
+      existing,
+      target: finalScopes,
+    });
   }
+
   console.log(`[Backfill] ${updates.length} events to update.`);
   if (!updates.length) return;
 
-  // Update one at a time so a single-row enum failure surfaces with
-  // its id instead of taking the whole batch down. The volume here
-  // is tiny (single digits at the start; dozens at most after a few
-  // months) — no need for bulk optimisation.
-  let ok = 0,
-    err = 0;
+  let ok = 0;
+  let err = 0;
   for (const u of updates) {
     const { error: upErr } = await supabase
       .from("events")
-      .update({ access: "community-miluim" })
+      .update({ access: u.target })
       .eq("id", u.id);
     if (upErr) {
       console.error(`[Backfill] #${u.id} failed: ${upErr.message}`);
@@ -90,7 +96,8 @@ async function main() {
       continue;
     }
     console.log(
-      `[Backfill] #${u.id} (${u.via}) "${(u.name || "").slice(0, 60)}" → community-miluim`,
+      `[Backfill] #${u.id} (${u.via}) "${(u.name || "").slice(0, 60)}" ` +
+        `${u.existing.join(",")} → ${u.target.join(",")}`,
     );
     ok++;
   }

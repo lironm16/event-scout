@@ -782,7 +782,7 @@ async function check() {
   }
 
   // Low-stock urgency push — per May-2026 spec, fire immediately
-  // when an event crosses to ≤10 tickets (transition, not steady-
+  // when an event crosses to ≤9 tickets (transition, not steady-
   // state). Deduped per (event_id, telegram_id) via
   // low_stock_notifications. Audience: per-event watchers + saved-
   // search topic matches. Broader profile-interest matches fall to
@@ -883,7 +883,7 @@ async function check() {
   //   - lib/savedSearchNotifier.js#notifySavedSearchMatchesForTicket
   //     (WhatsApp 2nd-hand ticket matches — different domain, kept live)
   //   - lib/lowStockNotifier.js (low-stock urgency push — bypasses
-  //     the buffer for ≤10-ticket events)
+  //     the buffer for ≤9-ticket events)
   // notifyWatchers (already invoked above) still fires live for
   // per-EVENT subscriptions — those are explicit one-event opt-ins,
   // not topic-level digests.

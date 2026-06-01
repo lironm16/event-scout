@@ -24,7 +24,64 @@ const VALID_COMMUNITY_STATUSES = new Set(["member", "not-member"]);
 const {
   accessScopesForCommunities,
 } = require("../lib/communityAccess");
+const { AUDIENCE_CATEGORIES } = require("../lib/interestCategories");
 const { normalizeKids } = require("../lib/profileDisplay");
+
+function audienceCategoryForCommunityKey(communityKey) {
+  return AUDIENCE_CATEGORIES.find((a) => a.community === communityKey) || null;
+}
+
+/** Map a Hebrew audience/topic label to a community-* key when unambiguous. */
+function communityKeyForAudienceLabel(label) {
+  const t = String(label || "").trim();
+  if (!t) return null;
+  const exact = AUDIENCE_CATEGORIES.find((a) => a.community && a.label === t);
+  return exact?.community || null;
+}
+
+/**
+ * Persist "not part of this community" — merges communities, clears the
+ * matching audience chip / interest line, and adds a suppressed label so
+ * tag-based events are filtered too.
+ */
+async function setCommunityNotMember(telegramId, communityKey) {
+  if (!communityKey || typeof communityKey !== "string") return;
+  const profile = await getProfile(telegramId);
+  if (!profile) throw new Error("Profile not found");
+
+  const ctx = { ...(profile.user_context || {}) };
+  const communities = mergeCommunities({ [communityKey]: "not-member" }, ctx.communities);
+  const aud = audienceCategoryForCommunityKey(communityKey);
+
+  let interests = Array.isArray(ctx.interests) ? [...ctx.interests] : [];
+  let chipIds = Array.isArray(ctx.target_audience_chip_ids)
+    ? [...ctx.target_audience_chip_ids]
+    : [];
+  const suppressed = new Set(
+    Array.isArray(ctx.suppressed_labels) ? ctx.suppressed_labels : [],
+  );
+
+  if (aud) {
+    interests = interests.filter((i) => i !== aud.label);
+    chipIds = chipIds.filter((id) => id !== aud.id);
+    suppressed.add(aud.label);
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      user_context: {
+        ...ctx,
+        communities,
+        interests,
+        target_audience_chip_ids: chipIds,
+        suppressed_labels: [...suppressed],
+      },
+    })
+    .eq("telegram_id", String(telegramId));
+
+  if (error) throw new Error(`setCommunityNotMember failed: ${error.message}`);
+}
 
 // Normalise an incoming `communities` payload. Drops unknown
 // statuses (so a Gemini hallucination of "maybe" doesn't end up
@@ -32,15 +89,30 @@ const { normalizeKids } = require("../lib/profileDisplay");
 // agent can update one community at a time without having to
 // resend the full object.
 // Community picker snapshot: ✅ = `member` only; all checked → `{}` (default all).
-function communitiesFromPickerSelection(selectedKeys) {
+function communitiesFromPickerSelection(selectedKeys, existingCommunities = null) {
   const selected = new Set(selectedKeys || []);
   const { COMMUNITY_CHIPS } = require("../lib/kidsWizardUi");
   if (COMMUNITY_CHIPS.every((c) => selected.has(c.key))) {
-    return {};
+    const prev =
+      existingCommunities && typeof existingCommunities === "object"
+        ? existingCommunities
+        : {};
+    const kept = {};
+    for (const [key, status] of Object.entries(prev)) {
+      if (status === "not-member") kept[key] = "not-member";
+    }
+    return Object.keys(kept).length ? kept : {};
   }
   const out = {};
   for (const c of COMMUNITY_CHIPS) {
     if (selected.has(c.key)) out[c.key] = "member";
+  }
+  const prev =
+    existingCommunities && typeof existingCommunities === "object"
+      ? existingCommunities
+      : {};
+  for (const [key, status] of Object.entries(prev)) {
+    if (status === "not-member") out[key] = "not-member";
   }
   return out;
 }
@@ -54,7 +126,12 @@ function isPickerCommunitiesSnapshot(incoming) {
 
 function mergeCommunities(incoming, existing) {
   if (isPickerCommunitiesSnapshot(incoming)) {
-    return { ...incoming };
+    const out = { ...incoming };
+    const prev = existing && typeof existing === "object" ? existing : {};
+    for (const [key, status] of Object.entries(prev)) {
+      if (status === "not-member") out[key] = "not-member";
+    }
+    return out;
   }
   const merged = { ...(existing && typeof existing === "object" ? existing : {}) };
   if (incoming && typeof incoming === "object") {
@@ -386,5 +463,9 @@ module.exports = {
   saveFavoriteLocationKeys,
   getFavoriteLocationKeys,
   communitiesFromPickerSelection,
+  mergeCommunities,
+  setCommunityNotMember,
+  communityKeyForAudienceLabel,
+  audienceCategoryForCommunityKey,
   WEIGHT_PRESETS,
 };

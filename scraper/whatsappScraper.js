@@ -195,7 +195,7 @@ async function notifyEventWatchers(ticket, eventId) {
 
   for (const w of watchers) {
     const lines = [
-      `🎟️ *כרטיס חדש לאירוע שאת/ה עוקב/ת אחריו*`,
+      `🎟️ *כרטיס חדש לאירוע שבמעקב שלך*`,
       "",
       displayTitle,
     ];

@@ -175,7 +175,7 @@
   function updateTypeChipAvailability() {
     if (!typeBar) return;
     const hasOnline   = allEvents.some(e => e.onlineUrl);
-    const hasLowStock = allEvents.some(e => e.ticketsLeft != null && e.ticketsLeft > 0 && e.ticketsLeft <= 10);
+    const hasLowStock = allEvents.some(e => e.ticketsLeft != null && e.ticketsLeft > 0 && e.ticketsLeft <= 9);
     typeBar.querySelectorAll(".chip[data-type]").forEach(chip => {
       const type = chip.dataset.type;
       let available = true;
@@ -275,7 +275,7 @@
       if (activeType === "online"       && !e.onlineUrl) return false;
       if (activeType === "low_stock") {
         const t = e.ticketsLeft;
-        if (t == null || t <= 0 || t > 10) return false;
+        if (t == null || t <= 0 || t > 9) return false;
       }
       // Profile tag chip filter.
       if (activeTag && !(e.tags || []).includes(activeTag)) return false;
@@ -467,7 +467,7 @@
     const t = ev.ticketsLeft;
     if (t != null) {
       if (t <= 0)       ticketHtml = `<div class="ticket-line sold-out">🚫 אזלו הכרטיסים</div>`;
-      else if (t <= 10) ticketHtml = `<div class="ticket-line low-stock">🎫 ${t} כרטיסים אחרונים</div>`;
+      else if (t <= 9) ticketHtml = `<div class="ticket-line low-stock">🎫 ${t} כרטיסים אחרונים</div>`;
       else              ticketHtml = `<div class="ticket-line">🎫 ${t} כרטיסים</div>`;
     }
 

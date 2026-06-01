@@ -17,6 +17,7 @@
     "flush": "node jobs/flushNotifications.js",
     "warm-locations": "node jobs/warmLocations.js",
     "backfill-labels": "node jobs/backfillLabels.js",
+    "backfill-enrichment-retry": "node jobs/backfillEnrichmentRetry.js",
     "backfill-locations": "node jobs/backfillLocations.js all",
     "city-api-inspect": "node jobs/cityApiInspect.js",
     "city-api-scrape": "node lib/cityApiScraper.js",

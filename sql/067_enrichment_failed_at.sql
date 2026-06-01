@@ -8,9 +8,9 @@ ALTER TABLE events
   ADD COLUMN IF NOT EXISTS enrichment_failed_at TIMESTAMPTZ;
 
 COMMENT ON COLUMN events.enrichment_failed_at IS
-  'Set when Gemini failed to classify this event (e.g. two timeouts). '
+  'Permanent give-up after ENRICHMENT_MAX_FAILS (sql/072). '
   'The enrichment cron skips rows with a non-null value here. '
-  'audience and category are left NULL for manual review. '
-  'Reset to NULL to allow a re-enrichment attempt.';
+  'For transient failures see enrichment_next_retry_at. '
+  'Reset failure columns to allow a re-enrichment attempt.';
 
 NOTIFY pgrst, 'reload schema';
