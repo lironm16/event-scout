@@ -901,6 +901,8 @@ async function sendEventCard(ctx, event, opts = {}) {
   const timeStr = formatTimeRange(event.start_time, event.end_time);
   if (timeStr) lines.push(rtlLine(`🕐 ${timeStr}`));
   const profile = await getCachedUserProfile(ctx);
+  const { enrichProximityForCard } = require("../lib/locationPrefs");
+  await enrichProximityForCard(event, profile);
   const { formatAudienceLineWithHints } = require("../lib/audienceDisplay");
   const audienceLine = formatAudienceLineWithHints(event, { profile });
   if (audienceLine) lines.push(escapeHtml(audienceLine));
