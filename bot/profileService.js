@@ -71,8 +71,10 @@ function mergeCommunities(incoming, existing) {
   return merged;
 }
 
-// Sticky gender — once set, only an explicit, valid new value can override it.
+// Sticky gender — once set, only an explicit female/male pick overrides it.
+// Explicit `null` means neutral (UI "ניטרלי") and must clear a prior value.
 function normalizeGender(incoming, existing) {
+  if (incoming === null) return null;
   if (incoming && VALID_GENDERS.has(incoming)) return incoming;
   if (existing && VALID_GENDERS.has(existing)) return existing;
   return null;

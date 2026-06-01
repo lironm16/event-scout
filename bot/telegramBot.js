@@ -105,7 +105,9 @@ const {
   buildNavButtons,
   formatDescriptionForCard,
   buildReadMoreDeepLink,
+  buildEventCardDeepLink,
   parseReadMoreStartPayload,
+  parseEventCardStartPayload,
 } = require("../lib/eventCard");
 const { getEventById, flattenEvent, expandLabels } = require("./matchingService");
 const { filterAndRankForProfile } = require("../lib/profileEventFilter");
@@ -1475,6 +1477,23 @@ bot.start(async (ctx) => {
       }
     } catch (err) {
       console.error("[Bot] evmore start error:", err.message);
+    }
+  }
+
+  const cardEventId = parseEventCardStartPayload(payload);
+  if (cardEventId != null) {
+    try {
+      let event =
+        sessionStore.getLastSearchHits(ctx.from.id).find((e) => e.id === cardEventId) ||
+        null;
+      if (!event) event = await getEventById(cardEventId);
+      if (event) {
+        const seriesOpts = await cardSendOptsForEvent(ctx.from.id, event);
+        await sendEventCard(ctx, event, seriesOpts);
+        return;
+      }
+    } catch (err) {
+      console.error("[Bot] ev start error:", err.message);
     }
   }
 
@@ -7182,10 +7201,11 @@ bot.action(/^seq:me:(\d+)$/, async (ctx) => {
     }));
     const uniqueUrls = new Set(occsWithUrl.map((x) => x.url));
     const sharedUrl = uniqueUrls.size === 1 ? [...uniqueUrls][0] : null;
+    const cardHref = buildEventCardDeepLink(botUsername, seriesId);
     const nameEsc = escHtml(payload.name);
     const lines = [
-      sharedUrl
-        ? `✨ ${matched.length} מתוך ${total} מתאימים לך — <a href="${sharedUrl}">${nameEsc}</a>`
+      cardHref
+        ? `✨ ${matched.length} מתוך ${total} מתאימים לך — <a href="${escHtml(cardHref)}">${nameEsc}</a>`
         : `✨ ${matched.length} מתוך ${total} מתאימים לך — ${nameEsc}`,
     ];
     if (!multiVenue && payload.location) lines.push(`📍 ${payload.location}`);
@@ -7319,11 +7339,12 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
     }));
     const uniqueUrls = new Set(occsWithUrl.map((x) => x.url));
     const sharedUrl = uniqueUrls.size === 1 ? [...uniqueUrls][0] : null;
+    const cardHref = buildEventCardDeepLink(botUsername, seriesId);
 
     const nameEsc = escHtml(payload.name);
     const lines = [
-      sharedUrl
-        ? `📋 כל המופעים — <a href="${sharedUrl}">${nameEsc}</a>`
+      cardHref
+        ? `📋 כל המופעים — <a href="${escHtml(cardHref)}">${nameEsc}</a>`
         : `📋 כל המופעים — ${nameEsc}`,
     ];
     if (!multiVenue && payload.location) lines.push(`📍 ${payload.location}`);
@@ -7407,6 +7428,26 @@ async function fetchUmbrellaSiblingRows(slug) {
     .order("start_time", { ascending: true });
 }
 
+/** Series/umbrella opts for `ev_<id>` deep-links — same card as ungrouped search. */
+async function cardSendOptsForEvent(telegramId, event) {
+  if (!event?.id) return {};
+  if (event.umbrella_slug) {
+    const { data: rows } = await fetchUmbrellaSiblingRows(event.umbrella_slug);
+    const n = rows?.length || 0;
+    return n > 1 ? { seriesOccurrenceCount: n } : {};
+  }
+  let payload = sessionStore.getShownSeries(telegramId, event.id);
+  if (!payload?.occurrences?.length) {
+    payload = await rebuildSeriesPayloadFromDb(event.id);
+  }
+  const n = payload?.occurrences?.length || 0;
+  if (n <= 1) return {};
+  return {
+    seriesOccurrenceCount: n,
+    seriesMultiVenue: Boolean(payload.multiVenue),
+  };
+}
+
 /** Build chunked HTML body for umbrella sibling list (all or profile-filtered). */
 async function buildUmbrellaExpansionPayload(slug, rows, {
   profileFiltered = false,
@@ -7434,20 +7475,19 @@ async function buildUmbrellaExpansionPayload(slug, rows, {
 
   const umbrellaTitleEsc = escHtml(umbrellaTitle);
   const lines = [];
-  const parentCityUrl =
-    !sharedUrl && rows[0]?.source === "rg-muni"
-      ? `https://www.ramat-gan.muni.il/events/${encodeURIComponent(slug)}/`
-      : null;
-  const headerUrl = sharedUrl || parentCityUrl;
+  // Grouped-list title → bot card for the search representative (soonest row),
+  // not the external booking / city parent page.
+  const representativeId = rows[0]?.id ?? null;
+  const cardHref = buildEventCardDeepLink(botUsername, representativeId);
   if (profileFiltered) {
     const headerText = `✨ ${matchedCount} מתוך ${totalCount} מתאימים לך — ${umbrellaTitleEsc}`;
-    if (headerUrl) {
-      lines.push(`<a href="${headerUrl}">${headerText}</a>`);
+    if (cardHref) {
+      lines.push(`<a href="${escHtml(cardHref)}">${headerText}</a>`);
     } else {
       lines.push(headerText);
     }
-  } else if (headerUrl) {
-    lines.push(`📋 כל אירועי <a href="${headerUrl}">${umbrellaTitleEsc}</a>`);
+  } else if (cardHref) {
+    lines.push(`📋 כל אירועי <a href="${escHtml(cardHref)}">${umbrellaTitleEsc}</a>`);
   } else {
     lines.push(`📋 כל אירועי ${umbrellaTitleEsc}`);
   }
