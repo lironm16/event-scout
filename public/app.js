@@ -3,10 +3,52 @@
   "use strict";
 
   // ── Telegram SDK ────────────────────────────────────────────────────
-  const tg = window.Telegram?.WebApp;
-  if (tg) { tg.ready(); tg.expand(); }
-  const INIT_DATA = tg?.initData || "";
   const API_PREFIX = "/miniapp";
+  let INIT_DATA = "";
+
+  function parseInitDataFromLocation() {
+    for (const raw of [window.location.hash.slice(1), window.location.search.slice(1)]) {
+      if (!raw) continue;
+      const params = new URLSearchParams(raw);
+      const data = params.get("tgWebAppData");
+      if (data) return data;
+    }
+    return "";
+  }
+
+  function readInitDataOnce() {
+    const tg = window.Telegram?.WebApp;
+    if (!tg) return { initData: parseInitDataFromLocation(), hasSdk: false };
+    try {
+      tg.ready();
+      tg.expand();
+    } catch (_) { /* ignore */ }
+    const fromSdk = tg.initData || "";
+    if (fromSdk) return { initData: fromSdk, hasSdk: true };
+    const fromUrl = parseInitDataFromLocation();
+    return { initData: fromUrl, hasSdk: true };
+  }
+
+  async function ensureInitData(maxWaitMs = 800) {
+    const deadline = Date.now() + maxWaitMs;
+    do {
+      const { initData } = readInitDataOnce();
+      if (initData) return initData;
+      await new Promise((r) => setTimeout(r, 50));
+    } while (Date.now() < deadline);
+    return readInitDataOnce().initData;
+  }
+
+  function catalogAuthErrorMessage() {
+    const { hasSdk } = readInitDataOnce();
+    if (!hasSdk) {
+      return "פתחי את הקטלוג מתוך אפליקציית טלגרם (לא בדפדפן נפרד) — מהכפתור «📅 פתיחת קטלוג» בבוט.";
+    }
+    return (
+      "לא התקבלה הזדהות מטלגרם. סגרי את הקטלוג ופתחי שוב מהכפתור «📅 פתיחת קטלוג» בבוט " +
+      "(או מהכפתור ליד שדה ההקלדה). אם זה חוזר — ודאי שב-BotFather הוגדר דומיין ל-Mini App."
+    );
+  }
 
   // ── State ────────────────────────────────────────────────────────────
   let allEvents    = [];
@@ -98,7 +140,11 @@
 
   // ── Fetch ─────────────────────────────────────────────────────────────
   async function loadEvents() {
-    if (!INIT_DATA) { showError("פתח את הקטלוג דרך הבוט בטלגרם."); return; }
+    INIT_DATA = await ensureInitData();
+    if (!INIT_DATA) {
+      showError(catalogAuthErrorMessage());
+      return;
+    }
     try {
       const res  = await fetch(`${API_PREFIX}/events?${new URLSearchParams({ initData: INIT_DATA })}`);
       const body = await res.json();

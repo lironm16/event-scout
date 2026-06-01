@@ -103,9 +103,9 @@ const {
   formatTicketsLine,
   formatLowStockBadge,
   buildNavButtons,
-  formatDescriptionSnippet,
-  descriptionNeedsReadMore,
-  buildReadMoreButton,
+  formatDescriptionForCard,
+  buildReadMoreDeepLink,
+  parseReadMoreStartPayload,
 } = require("../lib/eventCard");
 const { getEventById, flattenEvent, expandLabels } = require("./matchingService");
 const { filterAndRankForProfile } = require("../lib/profileEventFilter");
@@ -221,6 +221,16 @@ function escapeHtml(s) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+async function readMoreHrefFor(telegram, eventId) {
+  if (eventId == null || !telegram) return null;
+  try {
+    const username = await referralService.getBotUsername(telegram);
+    return buildReadMoreDeepLink(username, eventId);
+  } catch {
+    return null;
+  }
 }
 
 async function alertAdmin({
@@ -928,15 +938,16 @@ async function sendEventCard(ctx, event, opts = {}) {
   if (event._proximity?.label) lines.push(escapeHtml(event._proximity.label));
   if (event._reason) lines.push(`💡 ${escapeHtml(event._reason)}`);
 
-  // Description (sql/053) — always surfaced when present. Short excerpt
-  // on the card; "קרא עוד" opens the full card (see `ev:more:` handler).
-  const descSnippet = formatDescriptionSnippet(event.description);
-  if (descSnippet) {
-    const descText = opts.fullDescription
-      ? event.description.replace(/\s+/g, " ").trim()
-      : descSnippet;
-    lines.push(`📝 ${escapeHtml(descText)}`);
-  }
+  // Description (sql/053) — excerpt + inline "קרא עוד" link when truncated.
+  const readMoreHref = opts.fullDescription
+    ? null
+    : await readMoreHrefFor(ctx.telegram, event.id);
+  const descLine = formatDescriptionForCard(event.description, {
+    fullDescription: Boolean(opts.fullDescription),
+    readMoreHref,
+    escapeHtml,
+  });
+  if (descLine) lines.push(`📝 ${descLine}`);
 
   // Tag line — surfaces the topic at-a-glance ("מוזיקה • התפתחות") so
   // the user gets the gist before tapping "פרטים". The renderer uses
@@ -982,11 +993,6 @@ async function sendEventCard(ctx, event, opts = {}) {
   const navBtns = buildNavButtons(event);
   const topRow = [...navBtns, detailsBtn].filter(Boolean);
   if (topRow.length) rows.push(topRow);
-
-  if (!opts.fullDescription && descriptionNeedsReadMore(event.description)) {
-    const readMore = buildReadMoreButton(event.id);
-    if (readMore) rows.push([Markup.button.callback(readMore.text, readMore.callback_data)]);
-  }
 
   // Online meeting join button — shown only when event has a Zoom/Meet link.
   if (event.online_url) {
@@ -1455,6 +1461,23 @@ bot.start(async (ctx) => {
   // never knows their attempt failed — that's fine, this is a
   // growth-metric not a transaction.
   const payload = ctx.startPayload || (ctx.message?.text?.split(/\s+/)?.[1] ?? null);
+
+  const readMoreEventId = parseReadMoreStartPayload(payload);
+  if (readMoreEventId != null) {
+    try {
+      let event =
+        sessionStore.getLastSearchHits(ctx.from.id).find((e) => e.id === readMoreEventId) ||
+        null;
+      if (!event) event = await getEventById(readMoreEventId);
+      if (event) {
+        await sendEventCard(ctx, event, { fullDescription: true });
+        return;
+      }
+    } catch (err) {
+      console.error("[Bot] evmore start error:", err.message);
+    }
+  }
+
   const inviterId = referralService.parseInviterFromPayload(payload);
   if (inviterId) {
     try {
@@ -1535,9 +1558,10 @@ bot.start(async (ctx) => {
   // later (it's just a regular inline keyboard).
 });
 
-function getMiniAppCatalogUrl() {
-  return process.env.MINIAPP_URL?.trim() || null;
-}
+const {
+  getMiniAppCatalogUrl,
+  catalogLaunchInlineKeyboard,
+} = require("../lib/miniAppUrl");
 
 /** Persistent reply keyboard — quick actions + optional Mini App catalog. */
 function catalogReplyKeyboardMarkup() {
@@ -1563,14 +1587,14 @@ function catalogReplyKeyboardMarkup() {
 // Works as a fallback entry point for users who dismissed the menu button
 // or are browsing from desktop Telegram where the menu button isn't prominent.
 bot.command("catalog", async (ctx) => {
-  if (!getMiniAppCatalogUrl()) {
+  const url = getMiniAppCatalogUrl();
+  if (!url) {
     await ctx.reply("הקטלוג עדיין לא מוגדר. פנה למפעיל הבוט.");
     return;
   }
-  await ctx.reply(
-    "פתח את קטלוג האירועים המותאם לך 👇",
-    catalogReplyKeyboardMarkup(),
-  );
+  await ctx.reply("לחצי לפתיחת הקטלוג המותאם אליך 👇", {
+    reply_markup: catalogLaunchInlineKeyboard(url),
+  });
 });
 
 // /help — manual trigger for the welcome / feature overview. Useful
@@ -2086,13 +2110,17 @@ async function dispatchMenuAction(ctx, action) {
     case "interests":
       await openInterestsPicker(ctx, { target: "self" });
       return;
-    case "catalog":
-      if (!getMiniAppCatalogUrl()) {
+    case "catalog": {
+      const url = getMiniAppCatalogUrl();
+      if (!url) {
         await ctx.reply("הקטלוג עדיין לא מוגדר.");
         return;
       }
-      await ctx.reply("פתחי את קטלוג האירועים 👇", catalogReplyKeyboardMarkup());
+      await ctx.reply("לחצי לפתיחת הקטלוג 👇", {
+        reply_markup: catalogLaunchInlineKeyboard(url),
+      });
       return;
+    }
     case "help":
       await sendWelcome(ctx);
       return;
@@ -3903,7 +3931,7 @@ function buildLocationNavUrl(event) {
   return null;
 }
 
-function buildConsolidatedEventBlock(event) {
+function buildConsolidatedEventBlock(event, botUsername = null) {
   const lines = [];
   const { primaryTitle, secondaryTitle, icon, iconOnSecondary } =
     resolveEventTitleParts(event);
@@ -3976,8 +4004,12 @@ function buildConsolidatedEventBlock(event) {
   // Order matters: description comes BEFORE the tag line so 🏷️
   // remains the final line of the block — the visual "footer"
   // that summarises the topic at a glance.
-  const descSnippet = formatDescriptionSnippet(event.description);
-  if (descSnippet) lines.push(`📝 ${escHtml(descSnippet)}`);
+  const readMoreHref = buildReadMoreDeepLink(botUsername, event.id);
+  const descLine = formatDescriptionForCard(event.description, {
+    readMoreHref,
+    escapeHtml: escHtml,
+  });
+  if (descLine) lines.push(`📝 ${descLine}`);
 
   // Tag line — same formatter the event card uses. Without
   // per-user `highlight`/`searchHits` we just render the plain
@@ -4046,19 +4078,19 @@ function partitionNewsletterEvents(events) {
   return { newEvents, recurringSeries };
 }
 
-function buildConsolidatedNewsletterBody(events) {
+function buildConsolidatedNewsletterBody(events, botUsername = null) {
   const { newEvents, recurringSeries } = partitionNewsletterEvents(events);
+  const block = (e) => buildConsolidatedEventBlock(e, botUsername);
   const sections = [];
   if (newEvents.length) {
     sections.push(
-      `🆕 <b>אירועים חדשים</b>\n\n` +
-        newEvents.map(buildConsolidatedEventBlock).join("\n\n"),
+      `🆕 <b>אירועים חדשים</b>\n\n` + newEvents.map(block).join("\n\n"),
     );
   }
   if (recurringSeries.length) {
     sections.push(
       `🔁 <b>אירועים חוזרים</b>\n\n` +
-        recurringSeries.map(buildConsolidatedEventBlock).join("\n\n"),
+        recurringSeries.map(block).join("\n\n"),
     );
   }
   // Empty-payload fallback shouldn't normally happen (the scheduler
@@ -4082,19 +4114,20 @@ function buildConsolidatedNewsletterBody(events) {
 // is so long that even its FIRST event tips us over the chunk limit,
 // the header lives alone on the previous chunk — better than
 // dropping the header to fit one extra block.
-function chunkConsolidatedBody(events) {
+function chunkConsolidatedBody(events, botUsername = null) {
   const { newEvents, recurringSeries } = partitionNewsletterEvents(events);
+  const block = (e) => buildConsolidatedEventBlock(e, botUsername);
   const segments = [];
   if (newEvents.length) {
     segments.push({
       header: `🆕 <b>אירועים חדשים</b>`,
-      blocks: newEvents.map(buildConsolidatedEventBlock),
+      blocks: newEvents.map(block),
     });
   }
   if (recurringSeries.length) {
     segments.push({
       header: `🔁 <b>אירועים חוזרים</b>`,
-      blocks: recurringSeries.map(buildConsolidatedEventBlock),
+      blocks: recurringSeries.map(block),
     });
   }
   if (!segments.length) {
@@ -4127,7 +4160,13 @@ function chunkConsolidatedBody(events) {
 }
 
 async function sendConsolidatedNewsletter(botInstance, tg, events) {
-  const chunks = chunkConsolidatedBody(events);
+  let botUsername = null;
+  try {
+    botUsername = await referralService.getBotUsername(botInstance.telegram);
+  } catch {
+    /* inline read-more links omitted when username lookup fails */
+  }
+  const chunks = chunkConsolidatedBody(events, botUsername);
   for (const chunk of chunks) {
     await botInstance.telegram.sendMessage(tg, chunk, {
       parse_mode: "HTML",
@@ -4196,10 +4235,6 @@ function buildSingleEventKeyboard(event) {
   const topRow = [...navBtns, detailsBtn].filter(Boolean);
   const rows = [];
   if (topRow.length) rows.push(topRow);
-  const readMore = buildReadMoreButton(event.id);
-  if (readMore && descriptionNeedsReadMore(event.description)) {
-    rows.push([readMore]);
-  }
   const semRow = buildSemanticMatchRow(event);
   if (semRow) rows.push(semRow);
   rows.push([{ text: "❌ לא מתאים", callback_data: `fb:reasons:${event.id}` }]);
@@ -4261,13 +4296,20 @@ function isUserBlockedError(err) {
 // in-place edits on toggle.
 async function sendNewsletterCard(botInstance, chatId, event) {
   const reply_markup = buildNewsletterCardKeyboard(event, new Set());
-  const text = buildNewsletterCardText(event);
+  let botUsername = null;
+  try {
+    botUsername = await referralService.getBotUsername(botInstance.telegram);
+  } catch {
+    /* read-more links omitted */
+  }
+  const text = buildNewsletterCardText(event, botUsername);
+  const msgOpts = { reply_markup, parse_mode: "HTML" };
   const photoUrl = normalizeImageUrl(event.image, event);
   if (photoUrl && text.length <= 1024) {
     try {
       return await botInstance.telegram.sendPhoto(chatId, photoUrl, {
         caption: text,
-        reply_markup,
+        ...msgOpts,
       });
     } catch (err) {
       if (isUserBlockedError(err)) throw err;
@@ -4276,7 +4318,7 @@ async function sendNewsletterCard(botInstance, chatId, event) {
       );
     }
   }
-  return await botInstance.telegram.sendMessage(chatId, text, { reply_markup });
+  return await botInstance.telegram.sendMessage(chatId, text, msgOpts);
 }
 
 // Text body for a newsletter card — same fields as the agent's
@@ -4289,28 +4331,28 @@ async function sendNewsletterCard(botInstance, chatId, event) {
 // ➕/📭 buttons live in buildNewsletterCardKeyboard /
 // buildSingleEventKeyboard so the user can opt-in or opt-out
 // without leaving the card.
-function buildNewsletterCardText(event) {
-  const lines = [`${getEventIcon(event)} ${event.name}`];
+function buildNewsletterCardText(event, botUsername = null) {
+  const lines = [`${getEventIcon(event)} ${escapeHtml(event.name)}`];
   if (event._semanticMatch?.label_name) {
-    lines.push(`🆕 חדש בקטלוג: ${event._semanticMatch.label_name}`);
+    lines.push(`🆕 חדש בקטלוג: ${escapeHtml(event._semanticMatch.label_name)}`);
   }
-  if (event.date) lines.push(`📅 ${formatHebrewDate(event.date)}`);
+  if (event.date) lines.push(`📅 ${escapeHtml(formatHebrewDate(event.date))}`);
   const timeStr = formatTimeRange(event.start_time, event.end_time);
-  if (timeStr) lines.push(rtlLine(`🕐 ${timeStr}`));
+  if (timeStr) lines.push(rtlLine(`🕐 ${escapeHtml(timeStr)}`));
   const audienceLine = formatAdultAgeGate(event);
-  if (audienceLine) lines.push(audienceLine);
-  if (event.location) lines.push(`📍 ${event.location}`);
-  // Shared ticket-line helper — handles low-stock urgency inline
-  // ("🎫 N כרטיסים אחרונים ❗️") and skips null counts (free
-  // events). Sold-out newsletter events get filtered upstream, so we
-  // don't need a separate "🚫 אזלו" branch here.
+  if (audienceLine) lines.push(escapeHtml(audienceLine));
+  if (event.location) lines.push(`📍 ${escapeHtml(event.location)}`);
   const ticketsLine = formatTicketsLine(event.tickets_left);
-  if (ticketsLine) lines.push(ticketsLine);
-  const descSnippet = formatDescriptionSnippet(event.description);
-  if (descSnippet) lines.push(`📝 ${descSnippet}`);
+  if (ticketsLine) lines.push(escapeHtml(ticketsLine));
+  const readMoreHref = buildReadMoreDeepLink(botUsername, event.id);
+  const descLine = formatDescriptionForCard(event.description, {
+    readMoreHref,
+    escapeHtml,
+  });
+  if (descLine) lines.push(`📝 ${descLine}`);
   if (Array.isArray(event.tags) && event.tags.length) {
     const tagLine = formatTagLine(event.tags, { highlight: [], searchHits: [] });
-    if (tagLine) lines.push(tagLine);
+    if (tagLine) lines.push(escapeHtml(tagLine));
   }
   return lines.map(rtlLine).join("\n");
 }
@@ -4352,10 +4394,6 @@ function buildNewsletterCardKeyboard(event, selectedSet) {
   const topRow = [...navBtns, detailsBtn].filter(Boolean);
   const rows = [];
   if (topRow.length) rows.push(topRow);
-  const readMore = buildReadMoreButton(event.id);
-  if (readMore && descriptionNeedsReadMore(event.description)) {
-    rows.push([readMore]);
-  }
   rows.push([buildSelectButton(event.id, selectedSet)]);
   const semRow = buildSemanticMatchRow(event);
   if (semRow) rows.push(semRow);
@@ -7125,6 +7163,12 @@ bot.action(/^seq:me:(\d+)$/, async (ctx) => {
       return;
     }
     await safeAck(ctx, "✨ שלחתי את המופעים המתאימים לך למטה ⬇️");
+    let botUsername = null;
+    try {
+      botUsername = await referralService.getBotUsername(ctx.telegram);
+    } catch {
+      /* inline read-more omitted */
+    }
     const order = new Map(matched.map((e, i) => [e.id, i]));
     const matchedOccs = payload.occurrences
       .filter((o) => order.has(o.id))
@@ -7172,21 +7216,18 @@ bot.action(/^seq:me:(\d+)$/, async (ctx) => {
       const audienceLine = formatAdultAgeGate(occ);
       if (audienceLine) lines.push(`   ${escHtml(audienceLine)}`);
       if (multiVenue && occ.location) lines.push(`   📍 ${occ.location}`);
-      const descSnippet = formatDescriptionSnippet(occ.description);
-      if (descSnippet) lines.push(`   📝 ${escHtml(descSnippet)}`);
+      const readMoreHref = buildReadMoreDeepLink(botUsername, occ.id);
+      const descLine = formatDescriptionForCard(occ.description, {
+        readMoreHref,
+        escapeHtml: escHtml,
+      });
+      if (descLine) lines.push(`   📝 ${descLine}`);
     }
-
-    const readMoreRows = payload.occurrences
-      .filter((o) => descriptionNeedsReadMore(o.description))
-      .slice(0, 8)
-      .map((o) => [buildReadMoreButton(o.id)])
-      .filter((row) => row[0]);
 
     const seqOpts = {
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
     };
-    if (readMoreRows.length) seqOpts.reply_markup = { inline_keyboard: readMoreRows };
     await replyAsCallbackResult(ctx, lines.map(rtlLine).join("\n"), seqOpts);
   } catch (err) {
     if (isStaleCallbackQuery(err)) {
@@ -7249,6 +7290,13 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
     // occurrences list to land (it's the actual feature) — the toast
     // is just a "look down" hint.
     await safeAck(ctx, "📋 שלחתי לך את כל המופעים למטה ⬇️");
+
+    let botUsername = null;
+    try {
+      botUsername = await referralService.getBotUsername(ctx.telegram);
+    } catch {
+      /* inline read-more omitted */
+    }
 
     // Multi-venue: occurrences span >1 venue (e.g. a workshop run
     // at 6 different community centres). We surface the venue
@@ -7315,15 +7363,13 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
       if (multiVenue && occ.location) {
         lines.push(`   📍 ${occ.location}`);
       }
-      const descSnippet = formatDescriptionSnippet(occ.description);
-      if (descSnippet) lines.push(`   📝 ${escHtml(descSnippet)}`);
+      const readMoreHref = buildReadMoreDeepLink(botUsername, occ.id);
+      const descLine = formatDescriptionForCard(occ.description, {
+        readMoreHref,
+        escapeHtml: escHtml,
+      });
+      if (descLine) lines.push(`   📝 ${descLine}`);
     }
-
-    const readMoreRows = payload.occurrences
-      .filter((o) => descriptionNeedsReadMore(o.description))
-      .slice(0, 8)
-      .map((o) => [buildReadMoreButton(o.id)])
-      .filter((row) => row[0]);
 
     // Reply TO the card — see replyAsCallbackResult above for why.
     // This is the original motivating case for the helper: a tapped
@@ -7342,9 +7388,6 @@ bot.action(/^seq:(\d+)$/, async (ctx) => {
       // stays compact even with many occurrences.
       link_preview_options: { is_disabled: true },
     };
-    if (readMoreRows.length) {
-      seqOpts.reply_markup = { inline_keyboard: readMoreRows };
-    }
     await replyAsCallbackResult(ctx, lines.map(rtlLine).join("\n"), seqOpts);
   } catch (err) {
     if (isStaleCallbackQuery(err)) {
@@ -7383,6 +7426,7 @@ async function buildUmbrellaExpansionPayload(slug, rows, {
   totalCount = 0,
   proximityById = null,
   interestHighlight = [],
+  botUsername = null,
 } = {}) {
   const umbrellaTitle = rows[0]?.umbrella_title || slug;
   const allTagIds = new Set();
@@ -7434,7 +7478,12 @@ async function buildUmbrellaExpansionPayload(slug, rows, {
     const tagsForRow = (occ.tag_ids || [])
       .map((id) => tagDict.get(id)?.name)
       .filter(Boolean);
-    const iconEventShape = { name: occ.name, tags: tagsForRow };
+    const iconEventShape = {
+      name: occ.name,
+      tags: tagsForRow,
+      description: occ.description || null,
+      category: occ.category || null,
+    };
     const icon = getEventIcon(iconEventShape);
     const childTitle = resolveChildTitle(occ);
     const titleText = childTitle || umbrellaTitle;
@@ -7467,8 +7516,12 @@ async function buildUmbrellaExpansionPayload(slug, rows, {
         ? "🚫 אזלו הכרטיסים"
         : formatTicketsLine(occ.tickets_left);
     if (ticketsLine) lines.push(escHtml(ticketsLine));
-    const descSnippet = formatDescriptionSnippet(occ.description);
-    if (descSnippet) lines.push(`📝 ${escHtml(descSnippet)}`);
+    const readMoreHref = buildReadMoreDeepLink(botUsername, occ.id);
+    const descLine = formatDescriptionForCard(occ.description, {
+      readMoreHref,
+      escapeHtml: escHtml,
+    });
+    if (descLine) lines.push(`📝 ${descLine}`);
     if (tagsForRow.length) {
       const tagLine = formatTagLine(tagsForRow, {
         highlight: interestHighlight,
@@ -7500,17 +7553,11 @@ async function buildUmbrellaExpansionPayload(slug, rows, {
     if (current) chunks.push(current);
   }
 
-  const readMoreRows = occsWithUrl
-    .filter(({ occ }) => descriptionNeedsReadMore(occ.description))
-    .slice(0, 8)
-    .map(({ occ }) => [buildReadMoreButton(occ.id)])
-    .filter((row) => row[0]);
-
-  return { chunks, readMoreRows };
+  return { chunks };
 }
 
 async function deliverUmbrellaExpansion(ctx, payload) {
-  const { chunks, readMoreRows } = payload;
+  const { chunks } = payload;
   const replyToId = getCallbackSourceMessageId(ctx);
   for (let i = 0; i < chunks.length; i++) {
     const umbOpts = withReplyToMessageId(
@@ -7520,9 +7567,6 @@ async function deliverUmbrellaExpansion(ctx, payload) {
       },
       replyToId,
     );
-    if (i === 0 && readMoreRows.length) {
-      umbOpts.reply_markup = { inline_keyboard: readMoreRows };
-    }
     if (i === 0 && replyToId) {
       await replyAsCallbackResult(ctx, chunks[i], umbOpts);
     } else if (replyToId) {
@@ -7578,6 +7622,12 @@ bot.action(/^umb:me:(.+)$/, async (ctx) => {
       return;
     }
     await safeAck(ctx, "✨ שלחתי את המתאימים לך למטה ⬇️");
+    let botUsername = null;
+    try {
+      botUsername = await referralService.getBotUsername(ctx.telegram);
+    } catch {
+      /* inline read-more omitted */
+    }
     const order = new Map(matched.map((e, i) => [e.id, i]));
     const proximityById = new Map(matched.map((e) => [e.id, e._proximity]));
     const filteredRows = rows
@@ -7590,6 +7640,7 @@ bot.action(/^umb:me:(.+)$/, async (ctx) => {
       totalCount: total,
       proximityById,
       interestHighlight: interests,
+      botUsername,
     });
     await deliverUmbrellaExpansion(ctx, payload);
   } catch (err) {
@@ -7618,7 +7669,13 @@ bot.action(/^umb:(?!me:)(.+)$/, async (ctx) => {
       return;
     }
     await safeAck(ctx, "📋 שלחתי לך את כל האירועים למטה ⬇️");
-    const payload = await buildUmbrellaExpansionPayload(slug, rows);
+    let botUsername = null;
+    try {
+      botUsername = await referralService.getBotUsername(ctx.telegram);
+    } catch {
+      /* inline read-more omitted */
+    }
+    const payload = await buildUmbrellaExpansionPayload(slug, rows, { botUsername });
     await deliverUmbrellaExpansion(ctx, payload);
   } catch (err) {
     if (isStaleCallbackQuery(err)) {
