@@ -906,13 +906,26 @@ async function sendEventCard(ctx, event, opts = {}) {
   const { formatAudienceLineWithHints } = require("../lib/audienceDisplay");
   const audienceLine = formatAudienceLineWithHints(event, { profile });
   if (audienceLine) lines.push(escapeHtml(audienceLine));
-  if (multiVenue || isCityWideLocation(event.location_key)) {
-    const locLabel = isCityWideLocation(event.location_key)
-      ? "ברחבי העיר"
-      : "מתקיים במספר מיקומים";
-    lines.push(`🗺️ ${locLabel}`);
-  } else if (event.location) {
-    lines.push(`📍 ${escapeHtml(event.location)}`);
+  if (isCityWideLocation(event.location_key)) {
+    lines.push(`🗺️ ברחבי העיר`);
+  } else {
+    // Show THIS card's actual venue, even for a multi-venue series —
+    // hiding it behind a bare "מתקיים במספר מיקומים" was more confusing
+    // than helpful. When the series runs elsewhere too, add a positive
+    // note below pointing at «כל המופעים».
+    if (event.location) {
+      // Link the venue straight to Google Maps (same as the newsletter
+      // card / series list), unless it's an online event.
+      const navUrl = event.online_url
+        ? null
+        : buildLocationNavUrl(event, navOptsFromProfile(profile, event));
+      lines.push(
+        navUrl
+          ? `📍 <a href="${escapeHtml(navUrl)}">${escapeHtml(event.location)}</a>`
+          : `📍 ${escapeHtml(event.location)}`,
+      );
+    }
+    if (multiVenue) lines.push(`🗺️ מתקיים גם במיקומים נוספים — ראו «כל המופעים»`);
   }
   // Tickets line — the helper handles all branches:
   //   sold out         → "🚫 אזלו הכרטיסים"
@@ -980,6 +993,10 @@ async function sendEventCard(ctx, event, opts = {}) {
   if (v && v.decision === "include" && v.confidence != null && v.confidence < 0.6 && v.reason) {
     lines.push(v.reason);
   }
+
+  // «חיפוש כללי» — highlight events that DO fit the profile. Placed last,
+  // below the labels, so it reads as a closing summary line.
+  if (opts.profileFit) lines.push("✨ מתאים לפרופיל שלך");
 
   // "🧭 ניווט" + "🔗 פרטים" share a row when both exist (compact and
   // visually paired — directions next to the event page link). If
@@ -1061,10 +1078,14 @@ async function sendEventCard(ctx, event, opts = {}) {
         `umb:${event.umbrella_slug}`,
       ),
     ]);
+    // "בשבילי" stays VISIBLE even when 0 match the profile — but a
+    // tap can't open an empty list, so we route it to a no-op that
+    // just explains why (effectively a disabled button; Telegram has
+    // no native disabled state for inline buttons).
     rows.push([
       Markup.button.callback(
         `✨ בשבילי מהסדרה (${meCountLabel})`,
-        `umb:me:${event.umbrella_slug}`,
+        meCount > 0 ? `umb:me:${event.umbrella_slug}` : "noop:nomine",
       ),
     ]);
   } else if (additionalOccurrences > 0) {
@@ -1075,8 +1096,12 @@ async function sendEventCard(ctx, event, opts = {}) {
     ]);
     const meCount = await resolveSeriesProfileMatchCountForCard(ctx, event.id);
     const meSuffix = ` (${formatSeriesListCountLabel(meCount)})`;
+    // Visible-but-disabled when nothing in the series fits the profile.
     rows.push([
-      Markup.button.callback(`✨ מופעים בשבילי${meSuffix}`, `seq:me:${event.id}`),
+      Markup.button.callback(
+        `✨ מופעים בשבילי${meSuffix}`,
+        meCount > 0 ? `seq:me:${event.id}` : "noop:nomine",
+      ),
     ]);
   }
 
@@ -1102,11 +1127,15 @@ async function sendEventCard(ctx, event, opts = {}) {
       : Markup.button.callback("⭐ מעניין אותי", `int:add:${event.id}`),
   ]);
 
-  // Always offer the "not relevant" feedback path. Clicks open a reason
-  // picker (`fb:reasons:<event_id>`); we use this both to suppress
-  // duplicate notifications for THIS user and to collect labeled data
-  // for future audience-classifier calibration.
-  rows.push([Markup.button.callback("❌ לא מתאים", `fb:reasons:${event.id}`)]);
+  // "Not relevant" feedback path — opens a reason picker
+  // (`fb:reasons:<event_id>`) to suppress future notifications + collect
+  // labelled data. Suppressed when `hideNotRelevant` is set: in a
+  // «חיפוש כללי» an event that's already OUTSIDE the user's profile
+  // (wouldn't show in «בשבילי») makes "אל תראה לי יותר" meaningless —
+  // they deliberately opted to see beyond their profile.
+  if (!opts.hideNotRelevant) {
+    rows.push([Markup.button.callback("🚫 אל תראה לי יותר", `fb:reasons:${event.id}`)]);
+  }
 
   // RTL anchoring: every card line gets an RLM prefix so Telegram lays
   // it out right-to-left regardless of which script the line happens
@@ -2470,7 +2499,7 @@ bot.action(`${MENU}:edit:suppressed`, async (ctx) => {
   const labels = listSuppressedLabelsForProfile(profile);
   if (!labels.length) {
     await ctx.reply(
-      "אין תגיות מושתקות — מה שלא מעוניינת מופיע אחרי «לא מתאים» על אירוע.",
+      "אין תגיות מושתקות — מה שלא מעוניינת מופיע אחרי «אל תראה לי יותר» על אירוע.",
       buildProfileEditKeyboard(profile),
     );
     return;
@@ -4367,23 +4396,13 @@ async function sendConsolidatedNewsletter(botInstance, tg, events) {
 // produces the multi-card path above.
 async function renderSingleEventFlush(botInstance, tg, event) {
   try {
-    await botInstance.telegram.sendMessage(
-      tg,
-      rtlLine("🆕 אירוע חדש שיכול לעניין אותך"),
-    );
-  } catch (err) {
-    if (isUserBlockedError(err)) {
-      console.warn(`[Newsletter] user ${tg} blocked — skipping single`);
-      return;
-    }
-    // Header failure isn't fatal — try the card anyway.
-    console.warn(`[Newsletter] single header failed for ${tg}: ${err.message}`);
-  }
-  try {
     const profile = await getProfile(tg).catch(() => null);
     const navOpts = navOptsFromProfile(profile, event);
     const reply_markup = buildSingleEventKeyboard(event, navOpts);
-    const text = buildNewsletterCardText(event);
+    // Fold the "🆕 אירוע חדש שיכול לעניין אותך" lead-in into the card
+    // itself instead of sending it as a separate message — one event,
+    // one message.
+    const text = `${rtlLine("🆕 אירוע חדש שיכול לעניין אותך")}\n\n${buildNewsletterCardText(event)}`;
     const photoUrl = normalizeImageUrl(event.image, event);
     if (photoUrl && text.length <= 1024) {
       try {
@@ -4417,7 +4436,7 @@ function buildSingleEventKeyboard(event, navOpts = {}) {
   if (topRow.length) rows.push(topRow);
   const semRow = buildSemanticMatchRow(event);
   if (semRow) rows.push(semRow);
-  rows.push([{ text: "❌ לא מתאים", callback_data: `fb:reasons:${event.id}` }]);
+  rows.push([{ text: "🚫 אל תראה לי יותר", callback_data: `fb:reasons:${event.id}` }]);
   return { inline_keyboard: rows };
 }
 
@@ -4579,7 +4598,7 @@ function buildNewsletterCardKeyboard(event, selectedSet, navOpts = {}) {
   rows.push([buildSelectButton(event.id, selectedSet)]);
   const semRow = buildSemanticMatchRow(event);
   if (semRow) rows.push(semRow);
-  rows.push([{ text: "❌ לא מתאים", callback_data: `fb:reasons:${event.id}` }]);
+  rows.push([{ text: "🚫 אל תראה לי יותר", callback_data: `fb:reasons:${event.id}` }]);
   return { inline_keyboard: rows };
 }
 
@@ -7175,7 +7194,13 @@ bot.action(/^bg:(\d+):(\d+)$/, async (ctx) => {
   }
 });
 
-bot.action(/^noop:/, async (ctx) => { await ctx.answerCbQuery(); });
+const NOOP_TOASTS = {
+  nomine: "אין כרגע מופעים מהסדרה שמתאימים לפרופיל שלך",
+};
+bot.action(/^noop:(.*)$/, async (ctx) => {
+  const toast = NOOP_TOASTS[ctx.match[1]];
+  await ctx.answerCbQuery(toast || undefined);
+});
 
 // ──────────────────────────────────────────────────────────────────────────
 // Series expansion: "📋 כל המופעים" button on a series-card
@@ -7365,8 +7390,6 @@ function buildSeriesExpansionLines({
   compact = false,
 }) {
   const multiVenue = Boolean(payload.multiVenue);
-  const uniqueUrls = new Set(occsWithUrl.map((x) => x.url));
-  const sharedUrl = uniqueUrls.size === 1 ? [...uniqueUrls][0] : null;
   const cardHref = buildEventCardDeepLink(botUsername, seriesId);
   const nameEsc = escHtml(payload.name);
   const total = occsWithUrl.length;
@@ -7397,7 +7420,7 @@ function buildSeriesExpansionLines({
   }
   lines.push("");
 
-  for (const { occ, url } of page) {
+  for (const { occ } of page) {
     const dateStr = occ.date ? formatHebrewDate(occ.date) : "";
     const timeStr = formatTimeRange(occ.start_time, occ.end_time);
     const ticketsStr =
@@ -7405,12 +7428,17 @@ function buildSeriesExpansionLines({
         ? "🚫 אזל"
         : formatTicketsLine(occ.tickets_left) || "";
     const meta = [dateStr, timeStr].filter(Boolean).join(" — ");
-    const trailing = ticketsStr ? ` · ${escHtml(ticketsStr)}` : "";
     const metaEsc = escHtml(meta);
-    const bullet = sharedUrl
-      ? `• ${metaEsc}`
-      : `• <a href="${url}">${metaEsc}</a>`;
-    lines.push(`${bullet}${trailing}`);
+    // Each occurrence's date links to ITS OWN event card in the bot
+    // (deep link), not the external booking site — the card has the
+    // register button + full details.
+    const occCardHref = buildEventCardDeepLink(botUsername, occ.id);
+    const bullet = occCardHref
+      ? `• <a href="${escHtml(occCardHref)}">${metaEsc}</a>`
+      : `• ${metaEsc}`;
+    lines.push(bullet);
+    // Tickets on their OWN line (recurring series read cleaner this way).
+    if (ticketsStr) lines.push(`   ${escHtml(ticketsStr)}`);
     if (typeof enrichOcc === "function") {
       for (const extra of enrichOcc(occ) || []) {
         if (extra) lines.push(extra);
@@ -7455,10 +7483,43 @@ async function deliverSeriesExpansionPage(ctx, seriesId, offset, {
   } catch {
     /* inline read-more omitted */
   }
-  const occsWithUrl = payload.occurrences.map((occ) => ({
-    occ,
-    url: getBookingUrl(occ),
-  }));
+  // When the caller didn't supply its own per-occurrence enrichment
+  // (seq:me does, for the profile-matched list), annotate each occurrence
+  // on THIS page with the travel time from the user's home — so "כל
+  // המופעים" shows the distance per date just like "מופעים בשבילי".
+  let effectiveEnrichOcc = enrichOcc;
+  if (!effectiveEnrichOcc) {
+    const profile = await getProfile(ctx.from.id).catch(() => null);
+    const home = profile?.user_context?.constraints?.home_coordinates;
+    if (home?.lat != null && home?.lng != null) {
+      const pageOccs = payload.occurrences.slice(
+        offset,
+        offset + SERIES_EXPAND_PAGE_SIZE,
+      );
+      const probes = pageOccs.map((o) => ({
+        id: o.id,
+        location: o.location || null,
+        _coords:
+          o.lat != null && o.lng != null ? { lat: o.lat, lng: o.lng } : null,
+      }));
+      await annotateProximity(probes, profile);
+      const labelById = new Map(
+        probes
+          .filter((p) => p._proximity?.label)
+          .map((p) => [p.id, p._proximity.label]),
+      );
+      if (labelById.size) {
+        effectiveEnrichOcc = (occ) => {
+          const label = labelById.get(occ.id);
+          return label ? [`   ${escHtml(label)}`] : [];
+        };
+      }
+    }
+  }
+  // Occurrence date-links now point at each occurrence's bot card (deep
+  // link), not the external booking URL — so we no longer resolve
+  // getBookingUrl here.
+  const occsWithUrl = payload.occurrences.map((occ) => ({ occ }));
   const { lines, remaining } = buildSeriesExpansionLines({
     payload,
     occsWithUrl,
@@ -7467,7 +7528,7 @@ async function deliverSeriesExpansionPage(ctx, seriesId, offset, {
     seriesId,
     headerMode,
     profileMeta,
-    enrichOcc,
+    enrichOcc: effectiveEnrichOcc,
     compact: compact || occsWithUrl.length > 15,
   });
   await deliverChunkedHtmlLines(ctx, lines);
@@ -7608,9 +7669,24 @@ bot.action(/^ev:more:(\d+)$/, async (ctx) => {
       await replyAsCallbackResult(ctx, "לא מצאתי את האירוע — אפשר לחפש שוב.");
       return;
     }
+    // Mirror the original card's general-search treatment: for an event
+    // outside the profile (wouldn't show in «בשבילי») hide "אל תראה לי
+    // יותר" and skip the "מתאים לפרופיל" badge; for a fitting one, keep both.
+    let hideNotRelevant = false;
+    let profileFit = false;
+    if (sessionStore.getLastSearchFilters(ctx.from.id)?.ignore_profile) {
+      const profile = await getProfile(ctx.from.id).catch(() => null);
+      if (profile) {
+        const fits = await countProfileMatches([event], profile).catch(() => 1);
+        hideNotRelevant = fits === 0;
+        profileFit = fits > 0;
+      }
+    }
     await sendEventCard(ctx, event, {
       fullDescription: true,
       replyToMessageId: getCallbackSourceMessageId(ctx),
+      hideNotRelevant,
+      profileFit,
     });
   } catch (err) {
     console.error("[Bot] ev:more error:", err.message);
@@ -7642,17 +7718,39 @@ bot.action(/^seq:me:(\d+)$/, async (ctx) => {
       });
       return;
     }
+    const matchedById = new Map(matched.map((e) => [e.id, e]));
+    await annotateProximity([...matchedById.values()], profile);
+    // The profile filter used a CRUDE distance estimate; now that
+    // annotateProximity gave us the accurate drive/walk time, drop any
+    // occurrence that actually exceeds the user's limit — otherwise a
+    // "13 דק נסיעה" event slips past a ≤10-min preference and then shows
+    // its real distance, contradicting the filter.
+    const { eventPassesLocationModes, getLocationModes } = require("../lib/locationPrefs");
+    const locConstraints = profile?.user_context?.constraints || {};
+    const locModes = getLocationModes(locConstraints);
+    const locHome = locConstraints.home_coordinates;
+    let okMatched = matched;
+    if (locHome?.lat != null && locModes.length && !locModes.includes("any")) {
+      okMatched = matched.filter((e) => {
+        const prox = matchedById.get(e.id)?._proximity;
+        return !prox || eventPassesLocationModes(prox, locConstraints);
+      });
+    }
+    if (!okMatched.length) {
+      await safeAck(ctx, "אין כרגע מופעים בסדרה שמתאימים לפרופיל שלך 🙏", {
+        show_alert: true,
+      });
+      return;
+    }
     await safeAck(ctx, "✨ שלחתי את המופעים המתאימים לך למטה ⬇️");
-    const order = new Map(matched.map((e, i) => [e.id, i]));
+    const order = new Map(okMatched.map((e, i) => [e.id, i]));
     const matchedOccs = payload.occurrences
       .filter((o) => order.has(o.id))
       .sort((a, b) => order.get(a.id) - order.get(b.id));
-    const matchedById = new Map(matched.map((e) => [e.id, e]));
-    await annotateProximity([...matchedById.values()], profile);
     await deliverSeriesExpansionPage(ctx, seriesId, 0, {
       payload: { ...payload, occurrences: matchedOccs },
       headerMode: "profile",
-      profileMeta: { matched: matched.length, total },
+      profileMeta: { matched: okMatched.length, total },
       enrichOcc: (occ) => {
         const flat = matchedById.get(occ.id);
         return flat?._proximity?.label
@@ -8091,7 +8189,7 @@ bot.action(/^rtr:(.+)$/, async (ctx) => {
       await showProfileView(ctx);
       return;
     }
-    if (action === "go") {
+    if (action === "go" || action === "go:all") {
       const state = sessionStore.getSearchDraft(telegramId);
       const filters = draftToFilters(state?.draft);
       if (!filters) {
@@ -8102,7 +8200,11 @@ bot.action(/^rtr:(.+)$/, async (ctx) => {
         ).catch(() => {});
         return;
       }
-      await ctx.answerCbQuery("מחפש…").catch(() => {});
+      // "🔍 חיפוש" = general (ignore the profile); "✨ חיפוש בשבילי" =
+      // profile-aware.
+      const general = action === "go:all";
+      if (general) filters.ignore_profile = true;
+      await ctx.answerCbQuery(general ? "מחפש בכל מה שיש…" : "מחפש בשבילך…").catch(() => {});
       await runSearchWithFilters(telegramId, agentCtx, filters);
       return;
     }
@@ -8128,6 +8230,26 @@ bot.action(/^rtr:(.+)$/, async (ctx) => {
     if (action.startsWith("runref:")) {
       await ctx.answerCbQuery().catch(() => {});
       await runRouterPreset(telegramId, agentCtx, ctx, action.slice(7));
+      return;
+    }
+    // "חיפוש כללי" / "בשבילי" — re-run the last search toggling whether
+    // the profile narrows the results.
+    if (action === "scope:all" || action === "scope:me") {
+      const all = action === "scope:all";
+      await ctx.answerCbQuery(all ? "מחפש בכל מה שיש…" : "מחפש בשבילך…").catch(() => {});
+      const last = sessionStore.getLastSearchFilters(telegramId);
+      if (!last) {
+        const retry = tryAgainVerb(gender);
+        await ctx.reply(
+          `אין חיפוש אחרון — ${retry} חיפוש חדש.`,
+          searchMenuKeyboard(gender),
+        );
+        return;
+      }
+      await runSearchWithFilters(telegramId, agentCtx, {
+        ...last,
+        ignore_profile: all,
+      });
       return;
     }
     if (action === "extend") {
@@ -8297,11 +8419,13 @@ bot.action(/^pgn:next$/, async (ctx) => {
             })),
           });
         }
+        // NB: do NOT reply-to the tapped message here. The button lives
+        // on the "יש עוד N — להראות?" prompt, so threading each card as a
+        // reply made every new card quote that prompt text. Send plain.
         await sendEventCard(ctx, event, {
           seriesOccurrenceCount: cardOccCount,
           seriesMultiVenue: multiVenue,
           seriesProfileMatchCount,
-          replyToMessageId: getCallbackSourceMessageId(ctx),
         });
         for (const o of seriesOccs) {
           if (o?.id != null) renderedIds.push(o.id);
