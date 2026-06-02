@@ -7669,18 +7669,14 @@ bot.action(/^ev:more:(\d+)$/, async (ctx) => {
       await replyAsCallbackResult(ctx, "לא מצאתי את האירוע — אפשר לחפש שוב.");
       return;
     }
-    // Mirror the original card's general-search treatment: for an event
-    // outside the profile (wouldn't show in «בשבילי») hide "אל תראה לי
-    // יותר" and skip the "מתאים לפרופיל" badge; for a fitting one, keep both.
+    // Mirror the original card EXACTLY: reuse the profile-fit verdict we
+    // stored when the card was first rendered (recomputing here risked a
+    // different result on a leaner event object — the bug Liron hit).
     let hideNotRelevant = false;
     let profileFit = false;
     if (sessionStore.getLastSearchFilters(ctx.from.id)?.ignore_profile) {
-      const profile = await getProfile(ctx.from.id).catch(() => null);
-      if (profile) {
-        const fits = await countProfileMatches([event], profile).catch(() => 1);
-        hideNotRelevant = fits === 0;
-        profileFit = fits > 0;
-      }
+      hideNotRelevant = sessionStore.isOutOfProfileEvent(ctx.from.id, eventId);
+      profileFit = !hideNotRelevant;
     }
     await sendEventCard(ctx, event, {
       fullDescription: true,
