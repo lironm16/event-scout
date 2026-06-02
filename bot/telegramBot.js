@@ -1504,6 +1504,18 @@ const {
   pickActionVerb,
 } = require("../lib/genderForm");
 
+// Card flags that reproduce the original search-result card's profile
+// treatment on a RE-render (קרא עוד / deep-link card). In a «חיפוש כללי»,
+// an event marked out-of-profile hides "אל תראה לי יותר" and skips the
+// "מתאים" badge; a fitting one shows both. Reuses the verdict stored at
+// first render so re-renders stay consistent. Returns {} outside general
+// search (normal cards unchanged).
+function generalSearchCardFlags(telegramId, eventId) {
+  if (!sessionStore.getLastSearchFilters(telegramId)?.ignore_profile) return {};
+  const outOfProfile = sessionStore.isOutOfProfileEvent(telegramId, eventId);
+  return { hideNotRelevant: outOfProfile, profileFit: !outOfProfile };
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Commands
 // ──────────────────────────────────────────────────────────────────────────
@@ -1532,7 +1544,10 @@ bot.start(async (ctx) => {
         null;
       if (!event) event = await getEventById(readMoreEventId);
       if (event) {
-        await sendEventCard(ctx, event, { fullDescription: true });
+        await sendEventCard(ctx, event, {
+          fullDescription: true,
+          ...generalSearchCardFlags(ctx.from.id, readMoreEventId),
+        });
         return;
       }
     } catch (err) {
@@ -1549,7 +1564,10 @@ bot.start(async (ctx) => {
       if (!event) event = await getEventById(cardEventId);
       if (event) {
         const seriesOpts = await cardSendOptsForEvent(ctx.from.id, event);
-        await sendEventCard(ctx, event, seriesOpts);
+        await sendEventCard(ctx, event, {
+          ...seriesOpts,
+          ...generalSearchCardFlags(ctx.from.id, cardEventId),
+        });
         return;
       }
     } catch (err) {
@@ -7671,18 +7689,11 @@ bot.action(/^ev:more:(\d+)$/, async (ctx) => {
     }
     // Mirror the original card EXACTLY: reuse the profile-fit verdict we
     // stored when the card was first rendered (recomputing here risked a
-    // different result on a leaner event object — the bug Liron hit).
-    let hideNotRelevant = false;
-    let profileFit = false;
-    if (sessionStore.getLastSearchFilters(ctx.from.id)?.ignore_profile) {
-      hideNotRelevant = sessionStore.isOutOfProfileEvent(ctx.from.id, eventId);
-      profileFit = !hideNotRelevant;
-    }
+    // different result on a leaner event object).
     await sendEventCard(ctx, event, {
       fullDescription: true,
       replyToMessageId: getCallbackSourceMessageId(ctx),
-      hideNotRelevant,
-      profileFit,
+      ...generalSearchCardFlags(ctx.from.id, eventId),
     });
   } catch (err) {
     console.error("[Bot] ev:more error:", err.message);
