@@ -16,6 +16,17 @@
     if (tg) { try { tg.ready(); tg.expand(); } catch (_) {} return tg.initData || parseInitDataFromLocation(); }
     return parseInitDataFromLocation();
   }
+  // Wait briefly for Telegram's SDK to populate initData (not always ready
+  // on the first tick, esp. right after a tunnel redirect).
+  async function ensureInitData(maxWaitMs = 1500) {
+    const deadline = Date.now() + maxWaitMs;
+    do {
+      const v = readInitData();
+      if (v) return v;
+      await new Promise((r) => setTimeout(r, 60));
+    } while (Date.now() < deadline);
+    return readInitData();
+  }
   function eventIdFromUrl() {
     const q = new URLSearchParams(location.search);
     if (q.get("ev")) return q.get("ev");
@@ -62,7 +73,7 @@
 
   async function boot() {
     const root = document.getElementById("ev-root");
-    const initData = readInitData();
+    const initData = await ensureInitData();
     const id = eventIdFromUrl();
     if (!id) { root.innerHTML = '<div class="ev-error">לא צוין אירוע.</div>'; return; }
     if (!initData) { root.innerHTML = '<div class="ev-error">פתחו מתוך טלגרם.</div>'; return; }

@@ -27,6 +27,18 @@
     }
     return parseInitDataFromLocation();
   }
+  // Telegram's SDK may not have populated tg.initData on the very first
+  // tick (especially right after a tunnel redirect). Poll briefly before
+  // giving up, exactly like the catalog (ensureInitData).
+  async function ensureInitData(maxWaitMs = 1500) {
+    const deadline = Date.now() + maxWaitMs;
+    do {
+      const v = readInitData();
+      if (v) return v;
+      await new Promise((r) => setTimeout(r, 60));
+    } while (Date.now() < deadline);
+    return readInitData();
+  }
 
   // ── tiny DOM helpers ──────────────────────────────────────────────
   function el(tag, cls, text) {
@@ -612,7 +624,7 @@
 
   // ── boot ──────────────────────────────────────────────────────────
   async function boot() {
-    INIT_DATA = readInitData();
+    INIT_DATA = await ensureInitData();
     const root = document.getElementById("pf-root");
     if (!INIT_DATA) {
       root.innerHTML = '<div class="pf-error">פתחו את הפרופיל מתוך טלגרם — מהכפתור «📋 פרופיל» בבוט.</div>';
