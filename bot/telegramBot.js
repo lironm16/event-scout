@@ -2108,7 +2108,10 @@ async function showProfileView(ctx) {
   // with a one-tap web_app button instead of the old text dump.
   const profileUrl = getMiniAppProfileUrl();
   if (profileUrl) {
-    await ctx.reply("👤 הפרופיל שלך נמצא עכשיו באפליקציה — לחצו לעריכה:", {
+    // Simple message + a web_app button (same pattern as the catalog). The
+    // button sits on a FRESH message, so Telegram reliably attaches initData
+    // when tapped — unlike a web_app button baked into a stale menu message.
+    await ctx.reply("👤 הפרופיל שלך — לחצו לפתיחה ועריכה:", {
       reply_markup: {
         inline_keyboard: [[{ text: "📋 פתחו את הפרופיל", web_app: { url: profileUrl } }]],
       },
