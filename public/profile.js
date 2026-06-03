@@ -100,11 +100,6 @@
     singleSelect(gF, OPTIONS.genders, (x) => x.id, (x) => x.label, STATE.gender,
       (id) => { STATE.gender = id; });
     card.appendChild(gF);
-
-    const aF = field("הגיל שלי");
-    singleSelect(aF, OPTIONS.ageRanges, (x) => x.id, (x) => x.label, STATE.age_range,
-      (id) => { STATE.age_range = id; });
-    card.appendChild(aF);
     root.appendChild(card);
   }
 
@@ -335,7 +330,6 @@
     return {
       first_name: STATE.first_name,
       gender: STATE.gender,
-      age_range: STATE.age_range,
       kids: STATE.kids,
       topic_ids: STATE.topic_ids,
       audience_chip_ids: STATE.audience_chip_ids,
