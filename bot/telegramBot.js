@@ -9010,6 +9010,34 @@ runCleanup()
       })
       .catch((err) => {
         console.error("[Bot] Failed to start:", err.message);
+        // A 409 means another getUpdates is still active — usually the
+        // previous instance's long-poll that Telegram hasn't released yet
+        // (after a hard kill), or a parallel deploy. Do NOT exit: the
+        // Express/Mini App server (started above) must stay up so the
+        // catalog + profile keep working over the tunnel. Retry polling
+        // with backoff until the lock frees.
+        const is409 = /409|Conflict|terminated by other getUpdates/i.test(err.message || "");
+        if (is409) {
+          let attempt = 0;
+          const retry = () => {
+            attempt += 1;
+            const delay = Math.min(60000, 5000 * attempt);
+            console.warn(`[Bot] 409 conflict — retrying launch in ${delay / 1000}s (attempt ${attempt})`);
+            setTimeout(() => {
+              bot.launch({}, async () => {
+                try {
+                  const me = await bot.telegram.getMe();
+                  console.log(`[Bot] Running as @${me.username} (id ${me.id}) after retry`);
+                } catch { console.log("[Bot] Running (after retry)"); }
+              }).catch((e) => {
+                if (/409|Conflict|terminated by other getUpdates/i.test(e.message || "")) retry();
+                else console.error("[Bot] launch retry failed:", e.message);
+              });
+            }, delay);
+          };
+          retry();
+          return;
+        }
         process.exit(1);
       });
   });
