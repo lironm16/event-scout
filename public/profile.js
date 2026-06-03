@@ -299,7 +299,107 @@
       }));
     });
     card.appendChild(row);
+
+    // Arbitrary "wanted" tags picked from the full list.
+    STATE.interest_tags = STATE.interest_tags || [];
+    const tagsWrap = el("div", "pf-chips");
+    tagsWrap.style.marginTop = "8px";
+    function redrawTags() {
+      tagsWrap.innerHTML = "";
+      STATE.interest_tags.forEach((name) => {
+        const b = el("button", "pf-chip on", `${name} ✕`);
+        b.type = "button";
+        b.addEventListener("click", () => {
+          STATE.interest_tags = STATE.interest_tags.filter((x) => x !== name);
+          redrawTags();
+        });
+        tagsWrap.appendChild(b);
+      });
+    }
+    redrawTags();
+    card.appendChild(tagsWrap);
+
+    const more = el("button", "pf-add", "➕ בחרו מתוך כל התגיות");
+    more.type = "button";
+    more.addEventListener("click", () => openTagPicker(redrawTags));
+    card.appendChild(more);
     root.appendChild(card);
+  }
+
+  // ── Full-tag picker popup (want / don't-want) ─────────────────────
+  let LABELS_CACHE = null;
+  async function openTagPicker(onChange) {
+    const overlay = el("div", "pf-modal-backdrop");
+    const sheet = el("div", "pf-modal");
+    const head = el("div", "pf-modal-head");
+    head.appendChild(el("span", "pf-card-title", "כל התגיות"));
+    const close = el("button", "filter-sheet-close", "✕");
+    close.type = "button";
+    close.addEventListener("click", () => { document.body.removeChild(overlay); onChange?.(); });
+    head.appendChild(close);
+    sheet.appendChild(head);
+
+    // mode toggle
+    let mode = "want";
+    const modeRow = el("div", "pf-chips");
+    const wantBtn = el("button", "pf-chip on", "👍 רוצה");
+    const dontBtn = el("button", "pf-chip", "🚫 לא רוצה");
+    [wantBtn, dontBtn].forEach((b) => (b.type = "button"));
+    wantBtn.addEventListener("click", () => { mode = "want"; wantBtn.classList.add("on"); dontBtn.classList.remove("on"); });
+    dontBtn.addEventListener("click", () => { mode = "dont"; dontBtn.classList.add("on"); wantBtn.classList.remove("on"); });
+    modeRow.appendChild(wantBtn); modeRow.appendChild(dontBtn);
+    sheet.appendChild(modeRow);
+
+    const search = el("input", "pf-input");
+    search.type = "search"; search.placeholder = "סינון תגיות…";
+    sheet.appendChild(search);
+
+    const listWrap = el("div", "pf-modal-list");
+    sheet.appendChild(listWrap);
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) { document.body.removeChild(overlay); onChange?.(); }
+    });
+
+    if (!LABELS_CACHE) {
+      listWrap.textContent = "טוען…";
+      try {
+        const res = await fetch(`${API_PREFIX}/labels?${new URLSearchParams({ initData: INIT_DATA })}`);
+        LABELS_CACHE = (await res.json()).labels || [];
+      } catch (_) { LABELS_CACHE = []; }
+    }
+    function isUnwanted(name) {
+      return (STATE.suppressed_labels || []).includes(name) || STATE.add_suppress.includes(name);
+    }
+    function draw() {
+      const q = search.value.trim();
+      listWrap.innerHTML = "";
+      LABELS_CACHE
+        .filter((n) => !q || n.includes(q))
+        .slice(0, 200)
+        .forEach((name) => {
+          const wanted = STATE.interest_tags.includes(name);
+          const unwanted = isUnwanted(name);
+          const cls = "pf-chip" + (wanted ? " on" : "") + (unwanted ? " removable" : "");
+          const b = el("button", cls, name);
+          b.type = "button";
+          b.addEventListener("click", () => {
+            if (mode === "want") {
+              if (STATE.interest_tags.includes(name)) STATE.interest_tags = STATE.interest_tags.filter((x) => x !== name);
+              else { STATE.interest_tags.push(name); STATE.add_suppress = STATE.add_suppress.filter((x) => x !== name); }
+            } else {
+              if ((STATE.suppressed_labels || []).includes(name)) return; // already suppressed
+              if (STATE.add_suppress.includes(name)) STATE.add_suppress = STATE.add_suppress.filter((x) => x !== name);
+              else { STATE.add_suppress.push(name); STATE.interest_tags = STATE.interest_tags.filter((x) => x !== name); }
+            }
+            draw();
+          });
+          listWrap.appendChild(b);
+        });
+    }
+    search.addEventListener("input", draw);
+    draw();
   }
 
   function renderAudiences(root) {
@@ -390,11 +490,13 @@
       gender: STATE.gender,
       kids: STATE.kids,
       topic_ids: STATE.topic_ids,
+      interest_tags: STATE.interest_tags,
       audience_chip_ids: STATE.audience_chip_ids,
       communities: STATE.communities,
       constraints: STATE.constraints,
       suppress_child_audiences: STATE.suppress_child_audiences,
       suppress_online_events: STATE.suppress_online_events,
+      add_suppressed_labels: STATE.add_suppress,
       remove_suppressed_labels: removedLabels,
       remove_known_series: removedSeries,
       remove_suppressed_locations: removedLocations,
@@ -431,6 +533,8 @@
   function applyPayload(payload) {
     STATE = payload.profile;
     OPTIONS = payload.options;
+    STATE.interest_tags = STATE.interest_tags || [];
+    STATE.add_suppress = []; // session-only "don't want" adds
     removedLabels = []; removedSeries = []; removedLocations = [];
   }
 
