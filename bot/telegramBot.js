@@ -956,7 +956,10 @@ async function sendEventCard(ctx, event, opts = {}) {
   if (event._reason) lines.push(`💡 ${escapeHtml(event._reason)}`);
 
   // Description (sql/053) — excerpt + inline "קרא עוד" link when truncated.
-  const readMoreHref = opts.fullDescription
+  // "קרא עוד" opens a full event page in the Mini App (web_app button)
+  // when configured. Falls back to the in-bot deep-link re-send otherwise.
+  const eventWebUrl = opts.fullDescription ? null : getMiniAppEventUrl(event.id);
+  const readMoreHref = opts.fullDescription || eventWebUrl
     ? null
     : await readMoreHrefFor(ctx.telegram, event.id);
   const descLine = formatDescriptionForCard(event.description, {
@@ -1017,6 +1020,12 @@ async function sendEventCard(ctx, event, opts = {}) {
   const navBtns = buildNavButtons(event, navOpts);
   const topRow = [...navBtns, detailsBtn].filter(Boolean);
   if (topRow.length) rows.push(topRow);
+
+  // "📖 קרא עוד" → full event page in the Mini App (web_app). Only when a
+  // Mini App URL is configured and the card carries a description.
+  if (eventWebUrl && event.description) {
+    rows.push([Markup.button.webApp("📖 קרא עוד", eventWebUrl)]);
+  }
 
   // Online meeting join button — shown only when event has a Zoom/Meet link.
   if (event.online_url) {
@@ -1658,6 +1667,7 @@ bot.start(async (ctx) => {
 const {
   getMiniAppCatalogUrl,
   getMiniAppProfileUrl,
+  getMiniAppEventUrl,
   catalogLaunchInlineKeyboard,
 } = require("../lib/miniAppUrl");
 
