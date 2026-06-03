@@ -79,9 +79,18 @@
   border-radius: 12px;
   padding: 12px;
 }
-.pf-kid-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.pf-kid-head { display: flex; justify-content: space-between; align-items: center; }
+.pf-kid:not(.open) .pf-kid-head { margin-bottom: 0; }
+.pf-kid.open .pf-kid-head { margin-bottom: 8px; }
 .pf-kid-n { font-weight: 600; }
+.pf-kid-toggle {
+  border: none; background: none; cursor: pointer; font-family: inherit;
+  display: flex; align-items: center; gap: 6px; padding: 0;
+  color: var(--text); font-size: 1rem;
+}
+.pf-kid-caret { color: var(--hint); font-size: .8rem; }
 .pf-kid .pf-input { margin-bottom: 4px; }
+.pf-req { color: #d33; font-weight: 700; }
 
 .pf-remove, .pf-add {
   border: none;

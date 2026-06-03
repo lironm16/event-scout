@@ -135,30 +135,41 @@
     const card = section("👶 ילדים");
     const list = el("div", "pf-kids");
     function drawKid(kid, idx) {
-      const k = el("div", "pf-kid");
+      const k = el("div", "pf-kid" + (kid._open ? " open" : ""));
       const head = el("div", "pf-kid-head");
-      head.appendChild(el("span", "pf-kid-n", `ילד ${idx + 1}`));
+      const titleBtn = el("button", "pf-kid-toggle");
+      titleBtn.type = "button";
+      const headAge = ageYears(kid.birth_date);
+      const summary =
+        (kid.name && kid.name.trim()) ||
+        (headAge != null ? `${headAge} שנים` : `ילד ${idx + 1}`);
+      titleBtn.appendChild(el("span", "pf-kid-caret", kid._open ? "▾" : "▸"));
+      titleBtn.appendChild(el("span", "pf-kid-n", summary));
+      titleBtn.addEventListener("click", () => { kid._open = !kid._open; redrawKids(); });
+      head.appendChild(titleBtn);
       const rm = el("button", "pf-remove", "🗑️ הסר");
       rm.type = "button";
       rm.addEventListener("click", () => { STATE.kids.splice(idx, 1); redrawKids(); });
       head.appendChild(rm);
       k.appendChild(head);
 
+      if (!kid._open) { list.appendChild(k); return; }
+
       const nameI = el("input", "pf-input");
       nameI.type = "text"; nameI.placeholder = "שם (לא חובה)"; nameI.value = kid.name || "";
       nameI.addEventListener("input", () => { kid.name = nameI.value; });
       k.appendChild(nameI);
 
-      const bF = field("תאריך לידה (dd/mm/yyyy) — חובה");
+      const bF = field("תאריך לידה");
+      bF.querySelector(".pf-label").appendChild(el("span", "pf-req", " *"));
       const bI = el("input", "pf-input");
-      bI.type = "text"; bI.inputMode = "numeric"; bI.placeholder = "dd/mm/yyyy"; bI.maxLength = 10;
-      bI.value = toDisplayDate(kid.birth_date);
-      bI.addEventListener("input", () => {
-        kid.birth_date = parseDisplayDate(bI.value);
-        bI.classList.toggle("pf-invalid", bI.value.length === 10 && !kid.birth_date);
+      bI.type = "date"; bI.max = new Date().toISOString().slice(0, 10);
+      bI.value = kid.birth_date || "";
+      bI.addEventListener("change", () => {
+        kid.birth_date = /^\d{4}-\d{2}-\d{2}$/.test(bI.value) ? bI.value : null;
+        // Stages depend on age → re-render when the date is committed.
+        redrawKids();
       });
-      // Stages depend on age → re-render when the date is committed.
-      bI.addEventListener("change", redrawKids);
       bF.appendChild(bI); k.appendChild(bF);
 
       const gF = field("מגדר");
@@ -191,7 +202,7 @@
     const add = el("button", "pf-add", "➕ הוסף ילד");
     add.type = "button";
     add.addEventListener("click", () => {
-      STATE.kids.push({ name: "", birth_date: null, gender: null, stages: [] });
+      STATE.kids.push({ name: "", birth_date: null, gender: null, stages: [], _open: true });
       redrawKids();
     });
     card.appendChild(add);
@@ -284,10 +295,12 @@
 
   function renderAvailability(root) {
     const card = section("🕒 זמינות");
-    const note = el("p", "pf-hint", "מתי בדרך כלל פנויים? (משאירים ריק = כל הזמנים)");
-    card.appendChild(note);
     const row = chipRow();
-    const selected = new Set(availabilitySlotIds(STATE.constraints.availability));
+    // Default: everything selected (no availability stored yet = available always).
+    const existing = availabilitySlotIds(STATE.constraints.availability);
+    const selected = new Set(
+      existing.length ? existing : OPTIONS.timeSlots.map((s) => s.id),
+    );
     OPTIONS.timeSlots.forEach((s) => {
       row.appendChild(chip(`${s.label} ${s.start}–${s.end}`, selected.has(s.id), (on) => {
         if (on) selected.add(s.id); else selected.delete(s.id);
@@ -327,17 +340,37 @@
     });
     card.appendChild(row);
 
-    // Arbitrary "wanted" tags picked from the full list.
+    // Unified tag display: "wanted" (green) and "don't show" (red) together.
     STATE.interest_tags = STATE.interest_tags || [];
     const tagsWrap = el("div", "pf-chips");
     tagsWrap.style.marginTop = "8px";
     function redrawTags() {
       tagsWrap.innerHTML = "";
+      // 👍 wanted tags — green, ✕ removes.
       STATE.interest_tags.forEach((name) => {
-        const b = el("button", "pf-chip on", `${name} ✕`);
+        const b = el("button", "pf-chip on", `👍 ${name} ✕`);
         b.type = "button";
         b.addEventListener("click", () => {
           STATE.interest_tags = STATE.interest_tags.filter((x) => x !== name);
+          redrawTags();
+        });
+        tagsWrap.appendChild(b);
+      });
+      // 🚫 not-to-show tags — red, ✕ un-suppresses. Combines already-saved
+      // suppressed_labels with session-only add_suppress.
+      const unwanted = [
+        ...(STATE.suppressed_labels || []).filter((n) => !removedLabels.includes(n)),
+        ...STATE.add_suppress,
+      ];
+      unwanted.forEach((name) => {
+        const b = el("button", "pf-chip removable", `🚫 ${name} ✕`);
+        b.type = "button";
+        b.addEventListener("click", () => {
+          if (STATE.add_suppress.includes(name)) {
+            STATE.add_suppress = STATE.add_suppress.filter((x) => x !== name);
+          } else if (!removedLabels.includes(name)) {
+            removedLabels.push(name);
+          }
           redrawTags();
         });
         tagsWrap.appendChild(b);
@@ -431,7 +464,6 @@
 
   function renderAudiences(root) {
     const card = section("🎯 קהלי יעד");
-    card.appendChild(el("p", "pf-hint", "ריק = הכל (לא מצמצמים לפי קהל)"));
     const row = chipRow();
     const sel = new Set(STATE.audience_chip_ids || []);
     OPTIONS.audiences.forEach((a) => {
@@ -446,7 +478,6 @@
 
   function renderCommunities(root) {
     const card = section("🏳️ קהילות");
-    card.appendChild(el("p", "pf-hint", "כברירת מחדל חברים בכולן — כבו מה שלא רלוונטי"));
     const row = chipRow();
     STATE.communities = STATE.communities || {};
     OPTIONS.communities.forEach((c) => {
@@ -476,7 +507,7 @@
       });
       card.appendChild(wrap);
     }
-    removableList("תגיות שלא להציג", STATE.suppressed_labels, removedLabels);
+    // Suppressed tags are now shown/managed in the "תחומי עניין" section.
     removableList("מקומות שלא להציג", STATE.suppressed_locations, removedLocations);
     removableList("סדרות חוזרות שלא להציג", STATE.known_series, removedSeries);
 
@@ -535,7 +566,7 @@
       (k) => k.name || k.birth_date || (k.stages && k.stages.length),
     );
     if (STATE.kids.some((k) => !k.birth_date)) {
-      toast("לכל ילד צריך תאריך לידה (dd/mm/yyyy)");
+      toast("לכל ילד צריך תאריך לידה");
       return;
     }
     try {

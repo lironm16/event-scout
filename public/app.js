@@ -676,9 +676,11 @@
     // Lazy-init Leaflet map.
     if (!leafletMap) {
       leafletMap = L.map("mapContainer").setView([32.08, 34.81], 13);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap",
-        maxZoom: 18,
+      // Muted grayscale basemap (CARTO Positron) so the event markers stand out.
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+        attribution: "© OpenStreetMap © CARTO",
+        subdomains: "abcd",
+        maxZoom: 19,
       }).addTo(leafletMap);
     } else {
       leafletMap.eachLayer((l) => { if (l instanceof L.Marker) leafletMap.removeLayer(l); });
