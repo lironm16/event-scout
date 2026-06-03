@@ -21,7 +21,9 @@
     "backfill-locations": "node jobs/backfillLocations.js all",
     "city-api-inspect": "node jobs/cityApiInspect.js",
     "city-api-scrape": "node lib/cityApiScraper.js",
-    "city-api-scrape-dry": "node lib/cityApiScraper.js --dry-run"
+    "city-api-scrape-dry": "node lib/cityApiScraper.js --dry-run",
+    "dev": "./dev.sh",
+    "dev:stop": "./dev.sh stop"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

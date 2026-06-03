@@ -1,38 +1,41 @@
 #!/usr/bin/env bash
 # Local dev launcher for event-scout.
 #
-# Starts the ngrok tunnel (fixed static domain) + the bot, cleanly:
-#   - kills any stale bot/ngrok first
-#   - waits for Telegram to release the previous getUpdates poll lock
-#     (avoids the 409 conflict churn on restart)
-#   - confirms the public URL serves the Mini App
+# Starts the ngrok tunnel (fixed static domain) in the background, then runs
+# the bot IN THE FOREGROUND so its logs stream live in your terminal.
+# Ctrl-C stops the bot AND the tunnel.
 #
-# Usage:  ./dev.sh
-# Stop:   ./dev.sh stop   (or Ctrl-C if run in the foreground)
+# Why this avoids the 409 churn: it kills any stale bot/ngrok first and waits
+# for Telegram to release the previous getUpdates poll lock before starting,
+# so you can never end up with two local instances fighting.
 #
-# NOTE: a 409 conflict that PERSISTS means another instance is polling the
-# same bot token (e.g. a Railway deployment). Stop that deployment.
+# Usage:  ./dev.sh          # start (foreground, live logs; Ctrl-C to stop)
+#         ./dev.sh stop     # stop a previously running bot + ngrok
+#
+# NOTE: a 409 that PERSISTS even after a clean start means ANOTHER machine is
+# polling the same bot token (e.g. a Railway deployment). Stop that one.
 
-set -euo pipefail
+set -uo pipefail
 cd "$(dirname "$0")"
 
 NGROK_DOMAIN="amaze-matrimony-hardwood.ngrok-free.dev"
 PORT=3000
 MINIAPP_URL="https://${NGROK_DOMAIN}/miniapp"
 
-stop() {
-  echo "[dev] stopping bot + ngrok…"
+kill_all() {
   pkill -TERM -f "telegramBot" 2>/dev/null || true
   sleep 5
   pkill -9 -f "telegramBot" 2>/dev/null || true
   pkill -f "ngrok http" 2>/dev/null || true
-  echo "[dev] stopped."
 }
 
-if [[ "${1:-}" == "stop" ]]; then stop; exit 0; fi
+if [[ "${1:-}" == "stop" ]]; then
+  echo "[dev] stopping bot + ngrok…"; kill_all; echo "[dev] stopped."; exit 0
+fi
 
 # 1) clean slate
-stop
+echo "[dev] clearing any stale bot/ngrok…"
+kill_all
 
 # 2) ensure MINIAPP_URL is set in .env.local
 if grep -q '^MINIAPP_URL=' .env.local 2>/dev/null; then
@@ -47,23 +50,19 @@ else
 fi
 echo "[dev] MINIAPP_URL = ${MINIAPP_URL}"
 
-# 3) start ngrok on the fixed domain
+# 3) start ngrok in the background (its own log file)
 echo "[dev] starting ngrok on ${NGROK_DOMAIN}…"
 nohup ngrok http --domain="${NGROK_DOMAIN}" "${PORT}" > /tmp/ngrok.log 2>&1 &
 disown
-sleep 5
 
-# 4) wait for Telegram to release the previous poll lock, then start the bot
+# stop ngrok when the bot (foreground) exits / Ctrl-C
+trap 'echo; echo "[dev] shutting down…"; pkill -f "ngrok http" 2>/dev/null || true' EXIT INT TERM
+
+# 4) wait for Telegram to release the previous poll lock
 echo "[dev] waiting 45s for Telegram poll lock to release…"
 sleep 45
-echo "[dev] starting bot…"
-nohup npm start > /tmp/eventscout-bot.log 2>&1 &
-disown
-sleep 16
 
-# 5) verify
-echo "[dev] --- status ---"
-grep -iE "Running as|menu button set|listening" /tmp/eventscout-bot.log | tail -3 || true
-code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "${MINIAPP_URL}/profile.html" || echo 000)
-echo "[dev] public profile.html → HTTP ${code}"
-[[ "${code}" == "200" ]] && echo "[dev] ✅ ready — open the bot and tap a button" || echo "[dev] ⚠️ tunnel/app not responding; check /tmp/ngrok.log and /tmp/eventscout-bot.log"
+# 5) run the bot in the FOREGROUND — logs stream here, Ctrl-C stops it
+echo "[dev] starting bot (logs below; Ctrl-C to stop everything)…"
+echo "──────────────────────────────────────────────────────────────"
+exec npm start
