@@ -1670,14 +1670,16 @@ function catalogReplyKeyboardMarkup() {
   const profileBtn = profileUrl
     ? { text: "📋 פרופיל", web_app: { url: profileUrl } }
     : { text: "📋 פרופיל" };
+  // "🔍 חיפוש אירוע" now opens the Mini App catalog (which IS the full
+  // search). Falls back to the in-bot search hub when MINIAPP_URL unset.
+  const searchBtn = url
+    ? { text: "🔍 חיפוש אירוע", web_app: { url } }
+    : { text: "🔍 חיפוש אירוע" };
   const rows = [
-    [{ text: "🔍 חיפוש אירוע" }, profileBtn],
+    [searchBtn, profileBtn],
     [{ text: "🔔 שמורים" }, { text: "👀 במעקב" }],
     [{ text: "⭐ תחומי עניין" }, { text: "❓ עזרה" }],
   ];
-  if (url) {
-    rows.push([{ text: "📅 קטלוג אירועים", web_app: { url } }]);
-  }
   return {
     reply_markup: {
       keyboard: rows,

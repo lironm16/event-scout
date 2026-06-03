@@ -61,6 +61,24 @@
   let tagDrilldown = null;
   const interestedIds = new Set();
 
+  // Server-side search state (sent to /miniapp/events, which runs the bot's
+  // full search engine). Light client refinement (type/tag/free-text) still
+  // runs on the returned set in applyFilters().
+  const serverSearch = {
+    date_preset: "upcoming",
+    audiences: [],
+    activity_types: [],
+    keywords: [],
+    proximity: false,
+    available_only: false,
+    unseen_only: false,
+    ignore_profile: false, // "כללי"
+  };
+  let lastWindowLabel = null;
+  let lastCanExtend = false;
+  let lastExtensionHint = null;
+  const DATE_PRESET_MAP = { all: "upcoming", today: "today", tomorrow: "tomorrow", weekend: "this_week", week: "this_week", month: "this_month" };
+
   // ── DOM ──────────────────────────────────────────────────────────────
   const spinner     = document.getElementById("spinner");
   const errorDiv    = document.getElementById("error");
@@ -139,18 +157,36 @@
   }
 
   // ── Fetch ─────────────────────────────────────────────────────────────
-  async function loadEvents() {
+  function buildSearchQuery(extra) {
+    const p = new URLSearchParams({ initData: INIT_DATA });
+    if (serverSearch.date_preset) p.set("date_preset", serverSearch.date_preset);
+    if (serverSearch.audiences.length) p.set("audiences", serverSearch.audiences.join(","));
+    if (serverSearch.activity_types.length) p.set("activity_types", serverSearch.activity_types.join(","));
+    if (serverSearch.keywords.length) p.set("keywords", serverSearch.keywords.join(","));
+    if (serverSearch.proximity) p.set("proximity", "walk");
+    if (serverSearch.available_only) p.set("available_only", "1");
+    if (serverSearch.unseen_only) p.set("unseen_only", "1");
+    if (serverSearch.ignore_profile) p.set("ignore_profile", "1");
+    if (extra) for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    return p;
+  }
+
+  async function loadEvents(extra) {
     INIT_DATA = await ensureInitData();
     if (!INIT_DATA) {
       showError(catalogAuthErrorMessage());
       return;
     }
     try {
-      const res  = await fetch(`${API_PREFIX}/events?${new URLSearchParams({ initData: INIT_DATA })}`);
+      spinner.style.display = "block";
+      const res  = await fetch(`${API_PREFIX}/events?${buildSearchQuery(extra)}`);
       const body = await res.json();
       if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
       buildTagChips(body.profile?.interests || []);
       allEvents = body.events || [];
+      lastWindowLabel = body.window?.label_he || null;
+      lastCanExtend = !!body.canExtend;
+      lastExtensionHint = body.extensionHint || null;
       updateTypeChipAvailability();
       applyFilters();
       spinner.style.display = "none";
@@ -259,11 +295,10 @@
 
   // ── Filter ────────────────────────────────────────────────────────────
   function applyFilters() {
-    const [df, dt] = dateRange(activeDate);
+    // Date filtering is now done SERVER-side (serverSearch.date_preset);
+    // here we only do light client refinement on the returned set.
     const q = searchQuery.trim().toLowerCase();
     const visible = allEvents.filter((e) => {
-      if (df && e.date < df) return false;
-      if (dt && e.date > dt) return false;
       // "מחייב הרשמה" = has a dedicated registration page (external_url)
       // OR is an online event (zoom/meet) OR is a paid Smarticket event.
       // City page URLs (bookingUrl for rg-muni without external_url) are
@@ -434,7 +469,20 @@
         total++;
       }
     }
-    resultsMeta.textContent = `${total} אירועים`;
+    const win = lastWindowLabel ? ` ${lastWindowLabel}` : "";
+    resultsMeta.innerHTML = "";
+    const label = document.createElement("span");
+    label.textContent = `${total} אירועים${win}`;
+    resultsMeta.appendChild(label);
+    if (lastCanExtend && lastExtensionHint?.suggested_date_to) {
+      const ext = document.createElement("button");
+      ext.className = "extend-btn";
+      ext.textContent = "📅 הרחבת טווח";
+      ext.addEventListener("click", () => {
+        loadEvents({ dateTo: lastExtensionHint.suggested_date_to });
+      });
+      resultsMeta.appendChild(ext);
+    }
   }
 
   // ── Build card ────────────────────────────────────────────────────────
@@ -701,7 +749,42 @@
     dateBar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
     activeDate = chip.dataset.date;
-    applyFilters();
+    serverSearch.date_preset = DATE_PRESET_MAP[chip.dataset.date] || "upcoming";
+    loadEvents(); // date is a server-side window now
+  });
+
+  // ── New search-hub chips (audience / activity / options / scope) ──────
+  function multiToggle(barId, dataAttr, arr) {
+    const bar = document.getElementById(barId);
+    bar?.addEventListener("click", (e) => {
+      const chip = e.target.closest(`.chip[data-${dataAttr}]`);
+      if (!chip) return;
+      const val = chip.dataset[dataAttr];
+      const i = arr.indexOf(val);
+      if (i >= 0) { arr.splice(i, 1); chip.classList.remove("active"); }
+      else { arr.push(val); chip.classList.add("active"); }
+    });
+  }
+  multiToggle("audienceFilterBar", "aud", serverSearch.audiences);
+  multiToggle("activityFilterBar", "act", serverSearch.activity_types);
+  document.getElementById("optionFilterBar")?.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip[data-opt]");
+    if (!chip) return;
+    const opt = chip.dataset.opt;
+    serverSearch[opt] = !serverSearch[opt];
+    chip.classList.toggle("active", serverSearch[opt]);
+  });
+  document.getElementById("scopeFilterBar")?.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip[data-scope]");
+    if (!chip) return;
+    const bar = chip.parentElement;
+    bar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+    chip.classList.add("active");
+    serverSearch.ignore_profile = chip.dataset.scope === "all";
+  });
+  document.getElementById("keywordInput")?.addEventListener("input", (e) => {
+    const v = e.target.value.trim();
+    serverSearch.keywords = v ? [v] : [];
   });
 
   // ── Type filter chips ─────────────────────────────────────────────────
@@ -736,8 +819,103 @@
 
   filterToggleBtn?.addEventListener("click", openFilterSheet);
   filterSheetClose?.addEventListener("click", closeFilterSheet);
-  filterSheetApply?.addEventListener("click", closeFilterSheet);
+  filterSheetApply?.addEventListener("click", () => { closeFilterSheet(); loadEvents(); });
   filterBackdrop?.addEventListener("click", closeFilterSheet);
+
+  // ── Saved searches ────────────────────────────────────────────────────
+  const savedPanel    = document.getElementById("savedPanel");
+  const savedBackdrop = document.getElementById("savedBackdrop");
+  const savedToggleBtn = document.getElementById("savedToggleBtn");
+  const savedListEl   = document.getElementById("savedList");
+  const savedEmpty    = document.getElementById("savedEmpty");
+  const filterSheetSave = document.getElementById("filterSheetSave");
+
+  function currentFilters() {
+    return {
+      date_preset: serverSearch.date_preset,
+      audiences: serverSearch.audiences,
+      activity_types: serverSearch.activity_types,
+      keywords: serverSearch.keywords,
+      proximity: serverSearch.proximity ? "walk" : null,
+      available_only: serverSearch.available_only,
+      ignore_profile: serverSearch.ignore_profile,
+    };
+  }
+  filterSheetSave?.addEventListener("click", async () => {
+    try {
+      const res = await fetch(`${API_PREFIX}/saved`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData: INIT_DATA, filters: currentFilters() }),
+      });
+      if (!res.ok) throw new Error(res.status);
+      tg()?.HapticFeedback?.notificationOccurred?.("success");
+      filterSheetSave.textContent = "✅ נשמר";
+      setTimeout(() => { filterSheetSave.textContent = "🔔 שמור חיפוש"; }, 2000);
+    } catch (_) { filterSheetSave.textContent = "⚠️ נכשל"; }
+  });
+  function tg() { return window.Telegram?.WebApp || null; }
+
+  async function openSavedSheet() {
+    savedPanel.classList.add("open");
+    savedBackdrop.classList.add("open");
+    document.body.style.overflow = "hidden";
+    savedListEl.innerHTML = "טוען…";
+    try {
+      const res = await fetch(`${API_PREFIX}/saved?${new URLSearchParams({ initData: INIT_DATA })}`);
+      const body = await res.json();
+      const list = body.saved || [];
+      savedListEl.innerHTML = "";
+      savedEmpty.style.display = list.length ? "none" : "block";
+      list.forEach((s) => savedListEl.appendChild(buildSavedRow(s)));
+    } catch (_) { savedListEl.innerHTML = "שגיאה בטעינה"; }
+  }
+  function closeSavedSheet() {
+    savedPanel.classList.remove("open");
+    savedBackdrop.classList.remove("open");
+    document.body.style.overflow = "";
+  }
+  function buildSavedRow(s) {
+    const row = document.createElement("div");
+    row.className = "saved-row";
+    const label = document.createElement("button");
+    label.className = "saved-run";
+    label.textContent = `🔎 ${s.query || "חיפוש"}`;
+    label.addEventListener("click", () => { applySavedSearch(s); closeSavedSheet(); });
+    const del = document.createElement("button");
+    del.className = "saved-del";
+    del.textContent = "🗑️";
+    del.addEventListener("click", async () => {
+      await fetch(`${API_PREFIX}/saved/archive`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData: INIT_DATA, id: s.id }),
+      });
+      row.remove();
+    });
+    row.appendChild(label); row.appendChild(del);
+    return row;
+  }
+  function applySavedSearch(s) {
+    const f = s.filters || {};
+    serverSearch.audiences = f.audience ? [f.audience] : [];
+    serverSearch.activity_types = [];
+    serverSearch.keywords = Array.isArray(s.tokens) ? s.tokens : [];
+    serverSearch.proximity = f.proximity === "walk";
+    serverSearch.available_only = false;
+    serverSearch.ignore_profile = false;
+    serverSearch.date_preset = f.date_from || f.date_to ? "upcoming" : "upcoming";
+    if (Array.isArray(f.watch_tag_names) && f.watch_tag_names.length) {
+      // tag-based saved search → use as keywords-ish via tags param
+      serverSearch.keywords = [...serverSearch.keywords];
+    }
+    loadEvents(
+      f.date_from || f.date_to
+        ? { dateFrom: f.date_from || "", dateTo: f.date_to || "" }
+        : null,
+    );
+  }
+  savedToggleBtn?.addEventListener("click", openSavedSheet);
+  document.getElementById("savedSheetClose")?.addEventListener("click", closeSavedSheet);
+  savedBackdrop?.addEventListener("click", closeSavedSheet);
 
   // ── Search ────────────────────────────────────────────────────────────
   let st = null;

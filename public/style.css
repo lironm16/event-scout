@@ -884,3 +884,58 @@ body {
   justify-content: flex-end;
   padding: 4px 0 2px;
 }
+
+/* ── Search hub additions (keyword input, save, saved list, extend) ──── */
+#keywordInput {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--hint) 25%, transparent);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font: inherit;
+  color: var(--text);
+}
+#keywordInput:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+.filter-sheet-footer { display: flex; gap: 8px; }
+.filter-sheet-save {
+  flex: 0 0 auto;
+  background: var(--bg2);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.saved-list { display: flex; flex-direction: column; gap: 8px; }
+.saved-row { display: flex; gap: 8px; align-items: center; }
+.saved-run {
+  flex: 1;
+  text-align: right;
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--hint) 20%, transparent);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+}
+.saved-del {
+  background: none; border: none; font-size: 1.1rem; cursor: pointer; padding: 6px;
+}
+
+.extend-btn {
+  margin-inline-start: 10px;
+  background: var(--accent);
+  color: var(--accent-t);
+  border: none;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: .82rem;
+  cursor: pointer;
+}
+.results-meta { display: flex; align-items: center; }

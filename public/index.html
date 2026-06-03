@@ -36,6 +36,7 @@
         <circle cx="15" cy="17" r="2.2" fill="currentColor" stroke="none"/>
       </svg>
     </button>
+    <button class="filter-toggle-btn" id="savedToggleBtn" title="חיפושים שמורים">🔔</button>
   </div>
 </header>
 
@@ -115,14 +116,83 @@
       </div>
     </div>
 
+    <!-- Audience -->
+    <div class="filter-section">
+      <div class="filter-label">קהל יעד</div>
+      <div class="filter-bar wrap" id="audienceFilterBar">
+        <button class="chip" data-aud="toddlers">👶 תינוקות</button>
+        <button class="chip" data-aud="kids">🧒 ילדים</button>
+        <button class="chip" data-aud="teens">🎒 נוער</button>
+        <button class="chip" data-aud="family">👨‍👩‍👧 לכל המשפחה</button>
+        <button class="chip" data-aud="parents">👪 הורים</button>
+        <button class="chip" data-aud="adults">🧑 מבוגרים</button>
+        <button class="chip" data-aud="seniors">🌷 ותיקים</button>
+      </div>
+    </div>
+
+    <!-- Activity type -->
+    <div class="filter-section">
+      <div class="filter-label">סוג פעילות</div>
+      <div class="filter-bar wrap" id="activityFilterBar">
+        <button class="chip" data-act="workshop">🔧 סדנה</button>
+        <button class="chip" data-act="tour">🚶 סיור</button>
+        <button class="chip" data-act="show">🎭 הצגה/הופעה</button>
+        <button class="chip" data-act="lecture">🎤 הרצאה</button>
+        <button class="chip" data-act="party">🎉 מסיבה</button>
+        <button class="chip" data-act="playspace">🧸 משחקייה</button>
+        <button class="chip" data-act="gathering">🤝 מפגש</button>
+        <button class="chip" data-act="sport">⚽ ספורט</button>
+      </div>
+    </div>
+
+    <!-- Options -->
+    <div class="filter-section">
+      <div class="filter-label">עוד</div>
+      <div class="filter-bar wrap" id="optionFilterBar">
+        <button class="chip" data-opt="proximity">🚶 קרוב אליי</button>
+        <button class="chip" data-opt="available_only">🎫 עם כרטיסים</button>
+        <button class="chip" data-opt="unseen_only">👀 שלא ראיתי</button>
+      </div>
+    </div>
+
+    <!-- Keyword -->
+    <div class="filter-section">
+      <div class="filter-label">מילת חיפוש</div>
+      <input class="pf-input" id="keywordInput" type="text" placeholder="למשל: עששיות, גיטרה…" />
+    </div>
+
     <!-- Interest tag filters — populated after profile loads -->
     <div class="filter-section" id="tagsSection" style="display:none">
       <div class="filter-label">תחומי עניין שלי</div>
       <div class="filter-bar wrap" id="tagFilterBar"></div>
     </div>
+
+    <!-- Scope: profile-aware vs general -->
+    <div class="filter-section">
+      <div class="filter-label">היקף</div>
+      <div class="filter-bar wrap" id="scopeFilterBar">
+        <button class="chip active" data-scope="me">✨ בשבילי</button>
+        <button class="chip" data-scope="all">🌐 כללי</button>
+      </div>
+    </div>
   </div>
   <div class="filter-sheet-footer">
     <button class="filter-sheet-apply" id="filterSheetApply">הצג תוצאות</button>
+    <button class="filter-sheet-save" id="filterSheetSave">🔔 שמור חיפוש</button>
+  </div>
+</div>
+
+<!-- Saved searches sheet -->
+<div class="filter-backdrop" id="savedBackdrop"></div>
+<div class="filter-sheet" id="savedPanel">
+  <div class="filter-sheet-handle"></div>
+  <div class="filter-sheet-header">
+    <span class="filter-sheet-title">🔔 חיפושים שמורים</span>
+    <button class="filter-sheet-close" id="savedSheetClose" aria-label="סגור">✕</button>
+  </div>
+  <div class="filter-sheet-body">
+    <div id="savedList" class="saved-list"></div>
+    <div id="savedEmpty" class="empty-state" style="display:none"><p>אין חיפושים שמורים עדיין</p></div>
   </div>
 </div>
 
