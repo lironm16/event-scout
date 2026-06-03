@@ -1037,12 +1037,19 @@
   }
   const _sp = startParam();
   const _evMatch = /^ev[_-]?(.+)$/.exec(_sp || "");
+  // Telegram puts the launch auth in the URL hash (#tgWebAppData=…) and/or
+  // query. A full navigation to a clean URL drops it → the target page has
+  // no initData. Carry both across the redirect so profile/event authenticate.
+  const _search = window.location.search;       // "?…" or ""
+  const _hash = window.location.hash;            // "#…" or ""
   if (_sp === "profile") {
     // Opened via t.me/<bot>?startapp=profile (inline-menu profile button).
-    // Same-origin nav keeps the Telegram context, so profile.js gets initData.
-    location.replace("profile.html");
+    location.replace("profile.html" + _search + _hash);
   } else if (_evMatch) {
-    location.replace(`event.html?ev=${encodeURIComponent(_evMatch[1])}`);
+    const extra = _search ? "&" + _search.slice(1) : ""; // merge into ?ev=…
+    location.replace(
+      `event.html?ev=${encodeURIComponent(_evMatch[1])}${extra}${_hash}`,
+    );
   } else {
     // start_param "catalog" (or none) → just the catalog.
     loadEvents();
