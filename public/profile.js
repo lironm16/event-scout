@@ -395,8 +395,8 @@
     // mode toggle
     let mode = "want";
     const modeRow = el("div", "pf-chips");
-    const wantBtn = el("button", "pf-chip on", "👍 רוצה");
-    const dontBtn = el("button", "pf-chip", "🚫 לא רוצה");
+    const wantBtn = el("button", "pf-chip on", "👍 מעניין במיוחד");
+    const dontBtn = el("button", "pf-chip", "🚫 לא מעניין אותי");
     [wantBtn, dontBtn].forEach((b) => (b.type = "button"));
     wantBtn.addEventListener("click", () => { mode = "want"; wantBtn.classList.add("on"); dontBtn.classList.remove("on"); });
     dontBtn.addEventListener("click", () => { mode = "dont"; dontBtn.classList.add("on"); wantBtn.classList.remove("on"); });
