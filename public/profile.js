@@ -201,11 +201,38 @@
   function renderLocation(root) {
     const card = section("📍 מיקום ומרחק");
     const aF = field("כתובת הבית");
+    const aWrap = el("div", "pf-autocomplete");
     const aI = el("input", "pf-input");
-    aI.type = "text"; aI.placeholder = "רחוב, עיר";
+    aI.type = "text"; aI.placeholder = "רחוב, עיר"; aI.autocomplete = "off";
     aI.value = STATE.constraints.home_address || "";
-    aI.addEventListener("input", () => { STATE.constraints.home_address = aI.value; });
-    aF.appendChild(aI); card.appendChild(aF);
+    const sug = el("div", "pf-suggestions");
+    let acTimer = null;
+    aI.addEventListener("input", () => {
+      STATE.constraints.home_address = aI.value;
+      clearTimeout(acTimer);
+      const q = aI.value.trim();
+      if (q.length < 2) { sug.innerHTML = ""; sug.style.display = "none"; return; }
+      acTimer = setTimeout(async () => {
+        try {
+          const res = await fetch(`${API_PREFIX}/places?${new URLSearchParams({ initData: INIT_DATA, q })}`);
+          const list = (await res.json()).suggestions || [];
+          sug.innerHTML = "";
+          if (!list.length) { sug.style.display = "none"; return; }
+          list.forEach((s) => {
+            const item = el("button", "pf-suggest-item", s);
+            item.type = "button";
+            item.addEventListener("click", () => {
+              aI.value = s; STATE.constraints.home_address = s;
+              sug.innerHTML = ""; sug.style.display = "none";
+            });
+            sug.appendChild(item);
+          });
+          sug.style.display = "block";
+        } catch (_) { sug.style.display = "none"; }
+      }, 300);
+    });
+    aWrap.appendChild(aI); aWrap.appendChild(sug);
+    aF.appendChild(aWrap); card.appendChild(aF);
 
     const mF = field("העדפות מרחק לאירועים");
     const mRow = chipRow();
