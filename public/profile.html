@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>הפרופיל שלי</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="profile.css" />
+</head>
+<body>
+  <header class="pf-header">
+    <h1>👤 הפרופיל שלי</h1>
+    <p class="pf-sub">עדכנו את ההעדפות — ההמלצות יתעדכנו בהתאם</p>
+  </header>
+
+  <main id="pf-root" class="pf-root">
+    <div id="pf-loading" class="pf-loading">טוען…</div>
+  </main>
+
+  <div id="pf-toast" class="pf-toast" hidden></div>
+  <button id="pf-save" class="pf-save" hidden>שמירה</button>
+
+  <script src="profile.js"></script>
+</body>
+</html>

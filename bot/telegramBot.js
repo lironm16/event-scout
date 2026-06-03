@@ -1657,14 +1657,21 @@ bot.start(async (ctx) => {
 
 const {
   getMiniAppCatalogUrl,
+  getMiniAppProfileUrl,
   catalogLaunchInlineKeyboard,
 } = require("../lib/miniAppUrl");
 
 /** Persistent reply keyboard — quick actions + optional Mini App catalog. */
 function catalogReplyKeyboardMarkup() {
   const url = getMiniAppCatalogUrl();
+  const profileUrl = getMiniAppProfileUrl();
+  // "📋 פרופיל" opens the Mini App profile editor directly when configured;
+  // falls back to the in-bot text view otherwise.
+  const profileBtn = profileUrl
+    ? { text: "📋 פרופיל", web_app: { url: profileUrl } }
+    : { text: "📋 פרופיל" };
   const rows = [
-    [{ text: "🔍 חיפוש אירוע" }, { text: "📋 פרופיל" }],
+    [{ text: "🔍 חיפוש אירוע" }, profileBtn],
     [{ text: "🔔 שמורים" }, { text: "👀 במעקב" }],
     [{ text: "⭐ תחומי עניין" }, { text: "❓ עזרה" }],
   ];
@@ -2084,6 +2091,17 @@ bot.command("match", async (ctx) => {
 });
 
 async function showProfileView(ctx) {
+  // Profile now lives in the Mini App. If configured, point the user there
+  // with a one-tap web_app button instead of the old text dump.
+  const profileUrl = getMiniAppProfileUrl();
+  if (profileUrl) {
+    await ctx.reply("👤 הפרופיל שלך נמצא עכשיו באפליקציה — לחצו לעריכה:", {
+      reply_markup: {
+        inline_keyboard: [[{ text: "📋 פתחו את הפרופיל", web_app: { url: profileUrl } }]],
+      },
+    });
+    return;
+  }
   const profile = await getProfile(ctx.from.id).catch(() => null);
   let watched = [];
   try {
