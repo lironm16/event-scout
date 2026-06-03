@@ -1022,5 +1022,24 @@
     }
   });
 
-  loadEvents();
+  // Deep-link: opened via t.me/<bot>?startapp=ev_<id> ("קרא עוד" on a
+  // consolidated card) → jump straight to the single-event Mini App page,
+  // carrying the Telegram context (same-origin nav keeps initData).
+  function startParam() {
+    const tg = window.Telegram?.WebApp;
+    const fromSdk = tg?.initDataUnsafe?.start_param;
+    if (fromSdk) return fromSdk;
+    for (const raw of [location.hash.slice(1), location.search.slice(1)]) {
+      const v = new URLSearchParams(raw).get("tgWebAppStartParam");
+      if (v) return v;
+    }
+    return "";
+  }
+  const _sp = startParam();
+  const _evMatch = /^ev[_-]?(.+)$/.exec(_sp || "");
+  if (_evMatch) {
+    location.replace(`event.html?ev=${encodeURIComponent(_evMatch[1])}`);
+  } else {
+    loadEvents();
+  }
 })();

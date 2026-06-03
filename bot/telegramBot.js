@@ -114,6 +114,7 @@ const {
   navOptsFromProfile,
   formatDescriptionForCard,
   buildReadMoreDeepLink,
+  buildMiniAppReadMoreLink,
   buildEventCardDeepLink,
   parseReadMoreStartPayload,
   parseEventCardStartPayload,
@@ -4256,7 +4257,9 @@ function buildConsolidatedEventBlock(event, botUsername = null, profile = null) 
   // Order matters: description comes BEFORE the tag line so 🏷️
   // remains the final line of the block — the visual "footer"
   // that summarises the topic at a glance.
-  const readMoreHref = buildReadMoreDeepLink(botUsername, event.id);
+  const readMoreHref = getMiniAppCatalogUrl()
+    ? buildMiniAppReadMoreLink(botUsername, event.id)
+    : buildReadMoreDeepLink(botUsername, event.id);
   const descLine = formatDescriptionForCard(event.description, {
     readMoreHref,
     escapeHtml: escHtml,
@@ -4593,7 +4596,9 @@ function buildNewsletterCardText(event, botUsername = null) {
   if (event.location) lines.push(`📍 ${escapeHtml(event.location)}`);
   const ticketsLine = formatTicketsLine(event.tickets_left);
   if (ticketsLine) lines.push(escapeHtml(ticketsLine));
-  const readMoreHref = buildReadMoreDeepLink(botUsername, event.id);
+  const readMoreHref = getMiniAppCatalogUrl()
+    ? buildMiniAppReadMoreLink(botUsername, event.id)
+    : buildReadMoreDeepLink(botUsername, event.id);
   const descLine = formatDescriptionForCard(event.description, {
     readMoreHref,
     escapeHtml,
@@ -7500,7 +7505,9 @@ function buildSeriesExpansionLines({
       lines.push(`   📍 ${escHtml(occ.location)}`);
     }
     if (!compact) {
-      const readMoreHref = buildReadMoreDeepLink(botUsername, occ.id);
+      const readMoreHref = getMiniAppCatalogUrl()
+        ? buildMiniAppReadMoreLink(botUsername, occ.id)
+        : buildReadMoreDeepLink(botUsername, occ.id);
       const descLine = formatDescriptionForCard(occ.description, {
         readMoreHref,
         escapeHtml: escHtml,
@@ -8004,7 +8011,9 @@ async function buildUmbrellaExpansionPayload(slug, rows, {
         ? "🚫 אזלו הכרטיסים"
         : formatTicketsLine(occ.tickets_left);
     if (ticketsLine) lines.push(escHtml(ticketsLine));
-    const readMoreHref = buildReadMoreDeepLink(botUsername, occ.id);
+    const readMoreHref = getMiniAppCatalogUrl()
+      ? buildMiniAppReadMoreLink(botUsername, occ.id)
+      : buildReadMoreDeepLink(botUsername, occ.id);
     const descLine = formatDescriptionForCard(occ.description, {
       readMoreHref,
       escapeHtml: escHtml,
