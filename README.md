@@ -36,6 +36,49 @@ create table events (
 npm run check
 ```
 
+## Test bot vs Production bot
+
+Two independent Telegram bots run from this one codebase — a **test** bot and a
+**production** bot. The split is entirely env-var driven; there are no
+code branches per environment.
+
+Per-environment env vars:
+
+| Var | Production | Test |
+|---|---|---|
+| `TELEGRAM_TOKEN` | prod bot token (@BotFather) | test bot token |
+| `MINIAPP_URL` | `https://<prod-host>/miniapp` | `https://<test-host>/miniapp` |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | prod project | **separate** test project (recommended — otherwise test actions mutate prod profiles/watches) |
+
+Recommended Railway setup — **two services**:
+
+- **Production service** deploys from `main`, with the prod token + prod
+  `MINIAPP_URL`.
+- **Test service** deploys from `development`, with the test token + test
+  `MINIAPP_URL`.
+
+Workflow: push to `development` → verified on the test bot → merge `development`
+into `main` → goes live on production.
+
+Hard rules / gotchas:
+
+- **One process per token.** Two processes polling the same
+  `TELEGRAM_TOKEN` cause a `409: terminated by other getUpdates` crash.
+  Never run Railway + local on the same token.
+- Each bot's `MINIAPP_URL` host must be registered in **@BotFather →
+  Bot Settings → Mini App / Domain** for THAT bot, or the Mini App won't
+  open / won't receive `initData`.
+- **Shared web deployment (optional):** to avoid a second web deploy, point
+  the test bot's `MINIAPP_URL` at the production host and add the test bot
+  token to **`TELEGRAM_MINIAPP_EXTRA_TOKENS`** (comma-separated) on the
+  production service — `lib/miniAppAuth.js` validates `initData` against
+  every listed token. (Trade-off: the test bot then uses prod code + prod
+  DB for the Mini App.)
+- **Local dev:** `bot/telegramBot.js` loads `.env.local` before `.env`, so
+  put the test token + a tunnel `MINIAPP_URL` in `.env.local`. The Mini App
+  needs HTTPS + a @BotFather-registered domain (e.g. cloudflared/ngrok) —
+  `localhost` won't inject `initData`.
+
 ## Newsletter + Google Calendar
 
 The bot delivers personalised event alerts on an **immediate-with-5-min-buffer**
