@@ -136,3 +136,6 @@
   z-index: 60;
   box-shadow: var(--shadow);
 }
+
+.pf-input.pf-invalid { border-color: #e23; outline-color: #e23; }
+.pf-dist { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }

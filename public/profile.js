@@ -84,6 +84,34 @@
     parent.appendChild(row);
   }
 
+  // ── helpers: kid gender labels + date (dd/mm/yyyy) + age ──────────
+  const KID_GENDERS = [
+    { id: "male", label: "בן" },
+    { id: "female", label: "בת" },
+  ];
+  function toDisplayDate(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+  }
+  function parseDisplayDate(s) {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(s || "").trim());
+    if (!m) return null;
+    const [, dd, mm, yyyy] = m;
+    const mo = +mm, d = +dd;
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  function ageYears(iso) {
+    if (!iso) return null;
+    const b = new Date(iso);
+    if (isNaN(b.getTime())) return null;
+    const now = new Date();
+    let a = now.getFullYear() - b.getFullYear();
+    const md = now.getMonth() - b.getMonth();
+    if (md < 0 || (md === 0 && now.getDate() < b.getDate())) a--;
+    return a;
+  }
+
   // ── sections ──────────────────────────────────────────────────────
   function renderDetails(root) {
     const card = section("👤 פרטים");
@@ -109,7 +137,7 @@
     function drawKid(kid, idx) {
       const k = el("div", "pf-kid");
       const head = el("div", "pf-kid-head");
-      head.appendChild(el("span", "pf-kid-n", `ילד/ה ${idx + 1}`));
+      head.appendChild(el("span", "pf-kid-n", `ילד ${idx + 1}`));
       const rm = el("button", "pf-remove", "🗑️ הסר");
       rm.type = "button";
       rm.addEventListener("click", () => { STATE.kids.splice(idx, 1); redrawKids(); });
@@ -117,38 +145,50 @@
       k.appendChild(head);
 
       const nameI = el("input", "pf-input");
-      nameI.type = "text"; nameI.placeholder = "שם"; nameI.value = kid.name || "";
+      nameI.type = "text"; nameI.placeholder = "שם (לא חובה)"; nameI.value = kid.name || "";
       nameI.addEventListener("input", () => { kid.name = nameI.value; });
       k.appendChild(nameI);
 
-      const bF = field("תאריך לידה");
+      const bF = field("תאריך לידה (dd/mm/yyyy) — חובה");
       const bI = el("input", "pf-input");
-      bI.type = "date"; bI.value = kid.birth_date || "";
-      bI.addEventListener("change", () => { kid.birth_date = bI.value || null; });
+      bI.type = "text"; bI.inputMode = "numeric"; bI.placeholder = "dd/mm/yyyy"; bI.maxLength = 10;
+      bI.value = toDisplayDate(kid.birth_date);
+      bI.addEventListener("input", () => {
+        kid.birth_date = parseDisplayDate(bI.value);
+        bI.classList.toggle("pf-invalid", bI.value.length === 10 && !kid.birth_date);
+      });
+      // Stages depend on age → re-render when the date is committed.
+      bI.addEventListener("change", redrawKids);
       bF.appendChild(bI); k.appendChild(bF);
 
       const gF = field("מגדר");
-      singleSelect(gF, OPTIONS.genders, (x) => x.id, (x) => x.label, kid.gender,
+      singleSelect(gF, KID_GENDERS, (x) => x.id, (x) => x.label, kid.gender,
         (id) => { kid.gender = id; });
       k.appendChild(gF);
 
-      const sF = field("שלב התפתחותי");
-      const sRow = chipRow();
+      // Developmental milestones — only for kids up to age 5.
       kid.stages = Array.isArray(kid.stages) ? kid.stages : [];
-      OPTIONS.devStages.forEach((s) => {
-        sRow.appendChild(chip(s.label, kid.stages.includes(s.id), (on) => {
-          if (on) { if (!kid.stages.includes(s.id)) kid.stages.push(s.id); }
-          else kid.stages = kid.stages.filter((x) => x !== s.id);
-        }));
-      });
-      sF.appendChild(sRow); k.appendChild(sF);
+      const age = ageYears(kid.birth_date);
+      if (age != null && age < 5) {
+        const sF = field("אבני דרך התפתחותיים");
+        const sRow = chipRow();
+        OPTIONS.devStages.forEach((s) => {
+          sRow.appendChild(chip(s.label, kid.stages.includes(s.id), (on) => {
+            if (on) { if (!kid.stages.includes(s.id)) kid.stages.push(s.id); }
+            else kid.stages = kid.stages.filter((x) => x !== s.id);
+          }));
+        });
+        sF.appendChild(sRow); k.appendChild(sF);
+      } else {
+        kid.stages = []; // not shown for age 5+ / unknown
+      }
       list.appendChild(k);
     }
     function redrawKids() { list.innerHTML = ""; STATE.kids.forEach(drawKid); }
     redrawKids();
     card.appendChild(list);
 
-    const add = el("button", "pf-add", "➕ הוסף ילד/ה");
+    const add = el("button", "pf-add", "➕ הוסף ילד");
     add.type = "button";
     add.addEventListener("click", () => {
       STATE.kids.push({ name: "", birth_date: null, gender: null, stages: [] });
@@ -167,9 +207,35 @@
     aI.addEventListener("input", () => { STATE.constraints.home_address = aI.value; });
     aF.appendChild(aI); card.appendChild(aF);
 
-    const mF = field("איך מגיעים");
+    const mF = field("העדפות מרחק לאירועים");
     const mRow = chipRow();
+    const distWrap = el("div", "pf-dist");
     STATE.constraints.location_modes = STATE.constraints.location_modes || [];
+
+    function minutesField(label, key, def) {
+      const f = field(label);
+      const i = el("input", "pf-input");
+      i.type = "number"; i.min = "1"; i.max = "120";
+      if (STATE.constraints[key] == null) STATE.constraints[key] = def;
+      i.value = STATE.constraints[key] ?? "";
+      i.addEventListener("input", () => {
+        const n = parseInt(i.value, 10);
+        STATE.constraints[key] = Number.isFinite(n) ? n : null;
+      });
+      f.appendChild(i);
+      return f;
+    }
+    function redrawDist() {
+      distWrap.innerHTML = "";
+      const modes = STATE.constraints.location_modes;
+      if (modes.includes("walk")) {
+        distWrap.appendChild(minutesField("מרחק הליכה מקסימלי (דק׳)", "max_walking_minutes", 15));
+      }
+      if (modes.includes("drive")) {
+        distWrap.appendChild(minutesField("מרחק נסיעה מקסימלי (דק׳)", "max_drive_minutes", 10));
+      }
+    }
+
     OPTIONS.locationModes.forEach((m) => {
       mRow.appendChild(chip(m.label, STATE.constraints.location_modes.includes(m.id), (on) => {
         let modes = STATE.constraints.location_modes;
@@ -180,20 +246,12 @@
           else modes = modes.filter((x) => x !== m.id);
         }
         STATE.constraints.location_modes = modes;
-        // reflect mutual exclusion of "any" visually on next render is overkill; keep simple
+        redrawDist();
       }));
     });
     mF.appendChild(mRow); card.appendChild(mF);
-
-    const wF = field("דקות הליכה מקסימום");
-    const wI = el("input", "pf-input");
-    wI.type = "number"; wI.min = "1"; wI.max = "60"; wI.placeholder = "למשל 15";
-    wI.value = STATE.constraints.max_walking_minutes ?? "";
-    wI.addEventListener("input", () => {
-      const n = parseInt(wI.value, 10);
-      STATE.constraints.max_walking_minutes = Number.isFinite(n) ? n : null;
-    });
-    wF.appendChild(wI); card.appendChild(wF);
+    card.appendChild(distWrap);
+    redrawDist();
     root.appendChild(card);
   }
 
@@ -204,7 +262,7 @@
     const row = chipRow();
     const selected = new Set(availabilitySlotIds(STATE.constraints.availability));
     OPTIONS.timeSlots.forEach((s) => {
-      row.appendChild(chip(s.label, selected.has(s.id), (on) => {
+      row.appendChild(chip(`${s.label} ${s.start}–${s.end}`, selected.has(s.id), (on) => {
         if (on) selected.add(s.id); else selected.delete(s.id);
         STATE.constraints.availability = buildAvailability([...selected]);
       }));
@@ -343,6 +401,14 @@
     };
   }
   async function save() {
+    // Birth date is required for any kid row that has data; drop empty rows.
+    STATE.kids = (STATE.kids || []).filter(
+      (k) => k.name || k.birth_date || (k.stages && k.stages.length),
+    );
+    if (STATE.kids.some((k) => !k.birth_date)) {
+      toast("לכל ילד צריך תאריך לידה (dd/mm/yyyy)");
+      return;
+    }
     try {
       tg?.HapticFeedback?.impactOccurred?.("light");
       const res = await fetch(`${API_PREFIX}/profile`, {
