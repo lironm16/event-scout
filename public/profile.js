@@ -302,7 +302,9 @@
       existing.length ? existing : OPTIONS.timeSlots.map((s) => s.id),
     );
     OPTIONS.timeSlots.forEach((s) => {
-      row.appendChild(chip(`${s.label} ${s.start}–${s.end}`, selected.has(s.id), (on) => {
+      // ⁦…⁩ = LTR isolate so the time range renders 08:00–13:00
+      // (not flipped by the RTL layout).
+      row.appendChild(chip(`${s.label} ⁦${s.start}–${s.end}⁩`, selected.has(s.id), (on) => {
         if (on) selected.add(s.id); else selected.delete(s.id);
         STATE.constraints.availability = buildAvailability([...selected]);
       }));
