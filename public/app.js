@@ -1037,9 +1037,14 @@
   }
   const _sp = startParam();
   const _evMatch = /^ev[_-]?(.+)$/.exec(_sp || "");
-  if (_evMatch) {
+  if (_sp === "profile") {
+    // Opened via t.me/<bot>?startapp=profile (inline-menu profile button).
+    // Same-origin nav keeps the Telegram context, so profile.js gets initData.
+    location.replace("profile.html");
+  } else if (_evMatch) {
     location.replace(`event.html?ev=${encodeURIComponent(_evMatch[1])}`);
   } else {
+    // start_param "catalog" (or none) → just the catalog.
     loadEvents();
   }
 })();
