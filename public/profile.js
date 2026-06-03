@@ -245,6 +245,17 @@
     aWrap.appendChild(aI); aWrap.appendChild(sug);
     aF.appendChild(aWrap); card.appendChild(aF);
 
+    // Online events — checked = show them (default). Stored inverted as
+    // suppress_online_events.
+    const onWrap = el("label", "pf-toggle");
+    const onCb = el("input");
+    onCb.type = "checkbox";
+    onCb.checked = !STATE.suppress_online_events;
+    onCb.addEventListener("change", () => { STATE.suppress_online_events = !onCb.checked; });
+    onWrap.appendChild(onCb);
+    onWrap.appendChild(el("span", null, "אירועים אונליין"));
+    card.appendChild(onWrap);
+
     const mF = field("העדפות מרחק לאירועים");
     const mRow = chipRow();
     const distWrap = el("div", "pf-dist");
@@ -516,8 +527,6 @@
     }
     toggle("אל תראו לי אירועי ילדים/תינוקות/נוער", STATE.suppress_child_audiences,
       (v) => { STATE.suppress_child_audiences = v; });
-    toggle("אל תראו לי אירועים אונליין", STATE.suppress_online_events,
-      (v) => { STATE.suppress_online_events = v; });
     root.appendChild(card);
   }
 
