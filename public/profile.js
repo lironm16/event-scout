@@ -331,16 +331,7 @@
   }
 
   function renderTopics(root) {
-    const card = section("⭐ תחומי עניין");
-    const row = chipRow();
-    const sel = new Set(STATE.topic_ids || []);
-    OPTIONS.topics.forEach((t) => {
-      row.appendChild(chip(`${t.emoji || ""} ${t.label}`.trim(), sel.has(t.id), (on) => {
-        if (on) sel.add(t.id); else sel.delete(t.id);
-        STATE.topic_ids = [...sel];
-      }));
-    });
-    card.appendChild(row);
+    const card = section("🏷️ תגיות עניין");
 
     // Unified tag display: "wanted" (green) and "don't show" (red) together.
     STATE.interest_tags = STATE.interest_tags || [];
