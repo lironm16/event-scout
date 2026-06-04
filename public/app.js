@@ -817,13 +817,24 @@
   let umbrellaReturnScroll = 0; // scrollY position to restore on back
   let tagReturnScroll = 0;
 
-  // Filter to umbrella siblings (client-side) with back button.
-  window.filterUmbrella = function (slug, title) {
+  // Filter to umbrella siblings. Fetches the FULL set of children from the
+  // server (incl. ones not in the current results) and merges them in, so
+  // "opening the parent" shows everything, not just what was already loaded.
+  window.filterUmbrella = async function (slug, title) {
     umbrellaReturnScroll = window.scrollY;
     umbrellaDrilldown = { slug, title };
     document.querySelectorAll(".event-card.open").forEach((c) => c.classList.remove("open"));
-    applyFilters();
-    // Don't scroll to top — user stays where they were.
+    applyFilters(); // show whatever we already have immediately
+    try {
+      const res = await fetch(`${API_PREFIX}/umbrella?${new URLSearchParams({ initData: INIT_DATA, slug })}`);
+      const fetched = (await res.json()).events || [];
+      const known = new Set(allEvents.map((e) => e.id));
+      const added = fetched.filter((e) => !known.has(e.id));
+      if (added.length) {
+        allEvents = allEvents.concat(added);
+        if (umbrellaDrilldown && umbrellaDrilldown.slug === slug) applyFilters();
+      }
+    } catch (_) { /* keep client-side subset */ }
   };
 
   // ── Map view ──────────────────────────────────────────────────────────
