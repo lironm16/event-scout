@@ -255,6 +255,22 @@
   </div>
 </div>
 
+<!-- Bottom tab bar — switch between Events and Profile (one app) -->
+<nav class="tabbar" id="tabbar">
+  <a class="tab active" data-tab="events" href="index.html"><span class="tab-ic">🔍</span><span class="tab-tx">אירועים</span></a>
+  <a class="tab" data-tab="profile" href="profile.html"><span class="tab-ic">👤</span><span class="tab-tx">פרופיל</span></a>
+</nav>
+<script>
+  // Carry the Telegram launch params (?…#tgWebAppData=…) across the tab
+  // navigation so the target page stays authenticated.
+  (function () {
+    var q = location.search + location.hash;
+    document.querySelectorAll("#tabbar .tab").forEach(function (a) {
+      a.href = a.getAttribute("href") + q;
+    });
+  })();
+</script>
+
 <script src="app.js"></script>
 </body>
 </html>
