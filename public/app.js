@@ -684,7 +684,9 @@
     //    items differ). Grouped by the same seriesKey the count uses.
     if (!opts.hideOccurrences && (ev.totalOccurrences || 1) > 1) {
       const word = ev.umbrella_slug ? "בתוכנית" : "מהסדרה";
-      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">📅 עוד ${ev.totalOccurrences} ${word} ▾</button>`);
+      // "עוד N" = the OTHERS (the list excludes the current occurrence).
+      const more = (ev.totalOccurrences || 1) - 1;
+      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">📅 עוד ${more} ${word} ▾</button>`);
       parts.push(`<div class="occ-list"></div>`);
     }
 
