@@ -679,11 +679,12 @@
       </div>`);
     }
 
-    // 4) Series → compact "עוד X מהסדרה" list; each row opens a popup.
-    //    Only for NON-umbrella events — umbrella members use the purple link
-    //    (their "8" count is the program size, not a same-name recurrence).
-    if (!opts.hideOccurrences && !ev.umbrella_slug && (ev.totalOccurrences || 1) > 1) {
-      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">📅 עוד ${ev.totalOccurrences} מהסדרה ▾</button>`);
+    // 4) Related set → compact list; each row opens a popup. Works for both a
+    //    same-name series AND an umbrella program (rows show titles when the
+    //    items differ). Grouped by the same seriesKey the count uses.
+    if (!opts.hideOccurrences && (ev.totalOccurrences || 1) > 1) {
+      const word = ev.umbrella_slug ? "בתוכנית" : "מהסדרה";
+      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">📅 עוד ${ev.totalOccurrences} ${word} ▾</button>`);
       parts.push(`<div class="occ-list"></div>`);
     }
 
@@ -956,12 +957,19 @@
     try {
       const res = await fetch(`${API_PREFIX}/occurrences?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
       const list = (await res.json()).occurrences || [];
-      if (!list.length) { box.innerHTML = `<div class="occ-empty">אין עוד תאריכים.</div>`; }
+      // Show titles only when the items are DIFFERENT events (umbrella program);
+      // for a same-name series the title is redundant → keep rows minimal.
+      const varied = new Set(list.map((o) => o.name)).size > 1;
+      if (!list.length) { box.innerHTML = `<div class="occ-empty">אין עוד מופעים.</div>`; }
       else {
         box.innerHTML = list.map((o) => {
           const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
-          return `<button class="series-row" onclick="window.openEventModal(${o.id})">
-            <span class="series-when">📅 ${esc(when)}</span>
+          const title = varied ? `<span class="series-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>` : "";
+          return `<button class="series-row${varied ? " two-line" : ""}" onclick="window.openEventModal(${o.id})">
+            <span class="series-main">
+              ${title}
+              <span class="series-when">📅 ${esc(when)}</span>
+            </span>
             ${miniTicketBadge(o.ticketsLeft)}
             <span class="series-go">›</span>
           </button>`;

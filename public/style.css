@@ -1482,3 +1482,11 @@ body {
 .cta-row { display: flex; gap: 8px; margin-top: 12px; }
 .cta-row .cta-main { flex: 1 1 auto; margin-top: 0; }
 .cta-row .cta-nav  { flex: 0 0 auto; margin-top: 0; }
+
+/* ════════════════════════════════════════════════════════════════════
+   ✨ redesign part 9 — related rows: title shown for umbrella programs
+   ════════════════════════════════════════════════════════════════════ */
+.series-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.series-title { font-size: .92rem; font-weight: 700; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.series-row.two-line .series-when { font-size: .82rem; color: var(--hint); font-weight: 600; }
