@@ -515,7 +515,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px 5px 6px;
+  padding: 5px 10px;
   border: 1px solid color-mix(in srgb, var(--hint) 24%, transparent);
   border-radius: 999px;
   background: var(--card, #1c1c1e);
