@@ -1513,3 +1513,7 @@ body {
 
 /* small ✨ marker for matching rows in the series/program list */
 .forme-dot.sm { width: 22px; height: 22px; font-size: .8rem; }
+
+/* series row venue line (shown only when occurrences span different places) */
+.series-loc { font-size: .82rem; color: var(--hint); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -977,17 +977,22 @@
       // Show titles only when the items are DIFFERENT events (umbrella program);
       // for a same-name series the title is redundant → keep rows minimal.
       const varied = new Set(list.map((o) => o.name)).size > 1;
+      // Show the venue per row only when occurrences span DIFFERENT places.
+      const variedLoc = new Set(list.map((o) => o.location || "")).size > 1;
       if (!list.length) { box.innerHTML = `<div class="occ-empty">אין עוד מופעים.</div>`; }
       else {
         box.innerHTML = list.map((o) => {
           const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
           const title = varied ? `<span class="series-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>` : "";
+          const loc = (variedLoc && o.location) ? `<span class="series-loc">📍 ${esc(o.location)}</span>` : "";
           const mark = o.forMe ? `<span class="forme-dot sm" title="בשבילך">✨</span>` : "";
-          return `<button class="series-row${varied ? " two-line" : ""}" onclick="window.openEventModal(${o.id})">
+          const twoLine = varied || variedLoc;
+          return `<button class="series-row${twoLine ? " two-line" : ""}" onclick="window.openEventModal(${o.id})">
             ${mark}
             <span class="series-main">
               ${title}
               <span class="series-when">🗓️ ${esc(when)}</span>
+              ${loc}
             </span>
             ${miniTicketBadge(o.ticketsLeft)}
             <span class="series-go">›</span>
