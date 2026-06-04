@@ -678,8 +678,9 @@
     if (navUrl) parts.push(`<div class="card-actions"><a class="btn btn-secondary" href="${esc(navUrl)}" target="_blank" rel="noopener">🧭 ניווט</a></div>`);
 
     // 4) Series → compact "עוד X מהסדרה" list; each row opens a popup.
-    //    (Umbrella keeps its purple link on the card face.)
-    if (!opts.hideOccurrences && (ev.totalOccurrences || 1) > 1) {
+    //    Only for NON-umbrella events — umbrella members use the purple link
+    //    (their "8" count is the program size, not a same-name recurrence).
+    if (!opts.hideOccurrences && !ev.umbrella_slug && (ev.totalOccurrences || 1) > 1) {
       parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">📅 עוד ${ev.totalOccurrences} מהסדרה ▾</button>`);
       parts.push(`<div class="occ-list"></div>`);
     }
