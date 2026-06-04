@@ -618,14 +618,13 @@
     // ── Hero: image (or gradient fallback) with title overlaid ──
     const heroInner = ev.image
       ? `<img class="card-image" src="${esc(ev.image)}" alt="${esc(ev.name)}" loading="lazy"
-            onerror="this.closest('.card-hero').classList.add('no-img')" />
-         <button class="hero-zoom" aria-label="הגדל תמונה" onclick="event.stopPropagation();window.openLightbox('${esc(ev.image)}','${esc(ev.name)}')">⤢</button>`
+            onerror="this.closest('.card-hero').classList.add('no-img')" />`
       : `<span class="hero-emoji">${esc(ev.icon || "📌")}</span>`;
 
     const isInterested = interestedIds.has(ev.id);
 
     card.innerHTML = `
-      <div class="card-hero card-click${ev.image ? "" : " no-img"}${soldOut ? " soldout" : ""}">
+      <div class="card-hero${ev.image ? "" : " no-img"}${soldOut ? " soldout" : ""}">
         ${heroInner}
         <div class="hero-grad"></div>
         <div class="hero-top">
@@ -633,13 +632,12 @@
           ${whenPill}
         </div>
         <div class="hero-foot">
-          ${forMeMark ? `<span class="forme-hero-tag">✨ בשבילך</span>` : ""}
           <h3 class="card-title">${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(ev.name)}</h3>
         </div>
       </div>
       <div class="card-body card-click">
-        ${forMeMark ? `<div class="forme-banner">✨ בשבילך</div>` : ""}
         <div class="card-pillrow">
+          ${forMeMark ? `<span class="forme-dot" title="בשבילך">✨</span>` : ""}
           ${audiencePill}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
         </div>
@@ -651,10 +649,15 @@
       </div>
     `;
 
-    // Tap the hero or the body to expand/collapse the card.
-    card.querySelectorAll(".card-click").forEach((el) =>
-      el.addEventListener("click", () => toggleCard(card, ev)),
-    );
+    // Body tap → expand/collapse. Hero: an image opens the lightbox (zoom);
+    // an image-less gradient hero expands the card.
+    card.querySelector(".card-body")?.addEventListener("click", () => toggleCard(card, ev));
+    const heroEl = card.querySelector(".card-hero");
+    if (ev.image) {
+      heroEl?.addEventListener("click", () => openLightbox(ev.image, ev.name));
+    } else {
+      heroEl?.addEventListener("click", () => toggleCard(card, ev));
+    }
     return card;
   }
 
