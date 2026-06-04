@@ -778,42 +778,27 @@
     } catch (_) { /* ignore */ } finally { btn.disabled = false; }
   };
 
-  // Open a single event (e.g. a chosen occurrence) as a full card in a
-  // popup with a back button.
-  window.openEventModal = async function (eventId) {
-    let overlay = document.getElementById("eventModal");
-    if (!overlay) {
-      overlay = document.createElement("div");
-      overlay.id = "eventModal";
-      overlay.className = "event-modal-backdrop";
-      overlay.innerHTML = `
-        <div class="event-modal">
-          <div class="event-modal-head">
-            <button class="event-modal-back" type="button">← חזרה</button>
-          </div>
-          <div class="event-modal-body"></div>
-        </div>`;
-      document.body.appendChild(overlay);
-      const close = () => { overlay.classList.remove("open"); document.body.style.overflow = ""; };
-      overlay.querySelector(".event-modal-back").addEventListener("click", close);
-      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
-    }
-    const body = overlay.querySelector(".event-modal-body");
-    body.innerHTML = `<div class="card-description" style="padding:16px">טוען…</div>`;
-    overlay.classList.add("open");
-    document.body.style.overflow = "hidden";
+  // Expand a single occurrence inline (dropdown) as a full event card.
+  window.toggleOccurrence = async function (rowEl, eventId) {
+    const box = document.getElementById(`occd-${eventId}`);
+    if (!box) return;
+    rowEl.classList.toggle("expanded");
+    if (box.dataset.loaded === "1") { box.hidden = !box.hidden; return; }
+    box.hidden = false;
+    box.innerHTML = `<div class="card-description" style="padding:10px">טוען…</div>`;
     try {
       const res = await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
       const ev = (await res.json()).event;
-      if (!ev) { body.innerHTML = `<div class="card-description" style="padding:16px">האירוע לא נמצא.</div>`; return; }
-      body.innerHTML = "";
+      box.innerHTML = "";
+      if (!ev) { box.innerHTML = `<div class="card-description" style="padding:10px">האירוע לא נמצא.</div>`; return; }
       const card = buildCard(ev);
-      card.classList.add("open");          // show the detail section expanded
-      const occBox = card.querySelector(".occ-list"); // avoid nested occurrences loop
-      if (occBox) occBox.remove();
-      body.appendChild(card);
+      card.classList.add("open");                    // detail expanded
+      const nested = card.querySelector(".occ-list"); // no nested occurrences loop
+      if (nested) nested.remove();
+      box.appendChild(card);
+      box.dataset.loaded = "1";
     } catch (_) {
-      body.innerHTML = `<div class="card-description" style="padding:16px">שגיאה בטעינה.</div>`;
+      box.innerHTML = `<div class="card-description" style="padding:10px">שגיאה בטעינה.</div>`;
     }
   };
 
@@ -831,8 +816,10 @@
         box.innerHTML = list.map((o) => {
           const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
           const loc = o.location ? ` — ${esc(o.location)}` : "";
-          const link = o.bookingUrl ? ` <a href="${esc(o.bookingUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🔗</a>` : "";
-          return `<div class="occ-row occ-row-clickable" onclick="window.openEventModal(${o.id})">📅 ${esc(when)}${loc}${link} <span class="occ-chevron">›</span></div>`;
+          return `<div class="occ-item">
+            <div class="occ-row occ-row-clickable" onclick="window.toggleOccurrence(this,${o.id})">📅 ${esc(when)}${loc} <span class="occ-chevron">›</span></div>
+            <div class="occ-detail" id="occd-${o.id}" hidden></div>
+          </div>`;
         }).join("");
       }
       box.dataset.loaded = "1";
