@@ -628,6 +628,7 @@
       <div class="card-hero card-click${ev.image ? "" : " no-img"}${soldOut ? " soldout" : ""}">
         ${heroInner}
         <div class="hero-grad"></div>
+        ${forMeMark ? `<div class="forme-ribbon">✨ בשבילך</div>` : ""}
         <div class="hero-top">
           <div class="hero-badges">${statusBadge}</div>
           ${whenPill}
@@ -638,7 +639,6 @@
       </div>
       <div class="card-body card-click">
         <div class="card-pillrow">
-          ${forMeMark ? `<span class="forme-pill">✨ בשבילך</span>` : ""}
           ${audiencePill}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
         </div>

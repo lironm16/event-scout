@@ -1509,10 +1509,13 @@ body {
   box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent),
               0 8px 24px color-mix(in srgb, var(--accent) 16%, transparent);
 }
-/* (2) a small "✨ בשבילך" pill that flows with the other body pills (right) */
-.forme-pill {
-  display: inline-flex; align-items: center;
-  padding: 4px 11px; border-radius: 999px;
+/* (B) corner ribbon — diagonal banner across the top-right of the hero */
+.forme-ribbon {
+  position: absolute; top: 14px; right: -38px;
+  transform: rotate(45deg);
   background: linear-gradient(135deg, var(--accent), var(--accent2));
-  color: #fff; font-size: .8rem; font-weight: 800;
+  color: #fff; font-size: .72rem; font-weight: 800; letter-spacing: .2px;
+  padding: 5px 42px; text-align: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.35);
+  pointer-events: none; z-index: 3;
 }
