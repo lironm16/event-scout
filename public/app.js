@@ -924,9 +924,12 @@
     for (const g of groups.values()) {
       const n = g.list.length;
       const top = g.list[0];
+      // Multiple events at one spot → a distinct "multiple" glyph (not one
+      // event's icon) + a count badge.
+      const pinGlyph = n > 1 ? "🗂️" : (top.icon || "📌");
       const icon = L.divIcon({
         className: "",
-        html: `<div class="map-pin">${esc(top.icon || "📌")}${n > 1 ? `<span class="map-pin-badge">${n}</span>` : ""}</div>`,
+        html: `<div class="map-pin${n > 1 ? " map-pin-multi" : ""}">${esc(pinGlyph)}${n > 1 ? `<span class="map-pin-badge">${n}</span>` : ""}</div>`,
         iconSize: [40, 40],
         iconAnchor: [20, 40],
         popupAnchor: [0, -42],
