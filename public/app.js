@@ -540,7 +540,7 @@
   }
 
   // ── Build card ────────────────────────────────────────────────────────
-  function buildCard(ev) {
+  function buildCard(ev, opts = {}) {
     const card = document.createElement("div");
     card.className = "event-card";
     card.dataset.id = ev.id;
@@ -613,7 +613,7 @@
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}
       </div>
       <div class="card-detail">
-        ${buildDetail(ev, isInterested)}
+        ${buildDetail(ev, isInterested, opts)}
       </div>
     `;
 
@@ -629,7 +629,7 @@
     return card;
   }
 
-  function buildDetail(ev, isInterested) {
+  function buildDetail(ev, isInterested, opts = {}) {
     const parts = [];
 
     // Full description shown in expanded view.
@@ -657,8 +657,9 @@
     // Umbrella button removed — the card-umbrella chip in the collapsed card
     // already serves this purpose (with the ← arrow to signal navigation).
 
-    // 🔁 Other occurrences of a recurring series.
-    if ((ev.totalOccurrences || 1) > 1) {
+    // 🔁 Other occurrences of a recurring series — hidden when this card was
+    // itself opened FROM the occurrences list (prevents a loop).
+    if (!opts.hideOccurrences && (ev.totalOccurrences || 1) > 1) {
       actions.push(`<button class="btn btn-secondary" onclick="window.showOccurrences(this,${ev.id})">🔁 מופעים נוספים (${ev.totalOccurrences})</button>`);
     }
     // 🔔 Watch (low-stock / back-in-stock alerts).
@@ -666,8 +667,8 @@
     actions.push(`<button class="btn btn-secondary btn-watch${watching ? " active" : ""}" data-event="${ev.id}" onclick="window.toggleWatch(this,${ev.id})">${watching ? "🔔 במעקב ✓" : "🔔 מעקב"}</button>`);
 
     if (actions.length) parts.push(`<div class="card-actions">${actions.join("")}</div>`);
-    // Container where the occurrences list renders.
-    parts.push(`<div class="occ-list" id="occ-${ev.id}"></div>`);
+    // Container where the occurrences list renders (omit when suppressed).
+    if (!opts.hideOccurrences) parts.push(`<div class="occ-list"></div>`);
 
     // Interest / feedback row
     const intClass = isInterested ? "btn btn-interest active" : "btn btn-interest";
@@ -813,8 +814,9 @@
   };
 
   // Expand a single occurrence inline (dropdown) as a full event card.
+  // The card is built WITHOUT its own "מופעים נוספים" button (no loop).
   window.toggleOccurrence = async function (rowEl, eventId) {
-    const box = document.getElementById(`occd-${eventId}`);
+    const box = rowEl.parentElement.querySelector(".occ-detail");
     if (!box) return;
     rowEl.classList.toggle("expanded");
     if (box.dataset.loaded === "1") { box.hidden = !box.hidden; return; }
@@ -825,10 +827,8 @@
       const ev = (await res.json()).event;
       box.innerHTML = "";
       if (!ev) { box.innerHTML = `<div class="card-description" style="padding:10px">האירוע לא נמצא.</div>`; return; }
-      const card = buildCard(ev);
+      const card = buildCard(ev, { hideOccurrences: true });
       card.classList.add("open");                    // detail expanded
-      const nested = card.querySelector(".occ-list"); // no nested occurrences loop
-      if (nested) nested.remove();
       box.appendChild(card);
       box.dataset.loaded = "1";
     } catch (_) {
@@ -836,9 +836,11 @@
     }
   };
 
-  // 🔁 Load & render other occurrences inline.
+  // 🔁 Load & render other occurrences inline. Resolve the container RELATIVE
+  // to the button (the same card may be rendered in list + popup with the
+  // same id — getElementById would grab the wrong one).
   window.showOccurrences = async function (btn, eventId) {
-    const box = document.getElementById(`occ-${eventId}`);
+    const box = btn.closest(".event-card")?.querySelector(".occ-list");
     if (!box) return;
     if (box.dataset.loaded === "1") { box.hidden = !box.hidden; return; }
     btn.disabled = true;
