@@ -578,6 +578,9 @@
     const card = document.createElement("div");
     card.className = "event-card";
     card.dataset.id = ev.id;
+    // "✨ בשבילך" — only in כללי mode for profile-matching events.
+    const forMeMark = catalogScope === "all" && ev.forMe;
+    if (forMeMark) card.classList.add("for-me");
     eventsById.set(ev.id, ev);
     const [c1, c2] = catColors(ev);
     card.style.setProperty("--c1", c1);
@@ -626,10 +629,7 @@
         ${heroInner}
         <div class="hero-grad"></div>
         <div class="hero-top">
-          <div class="hero-badges">
-            ${(catalogScope === "all" && ev.forMe) ? `<span class="status-badge forme">✨ בשבילך</span>` : ""}
-            ${statusBadge}
-          </div>
+          <div class="hero-badges">${statusBadge}</div>
           ${whenPill}
         </div>
         <div class="hero-foot">
@@ -638,6 +638,7 @@
       </div>
       <div class="card-body card-click">
         <div class="card-pillrow">
+          ${forMeMark ? `<span class="forme-pill">✨ בשבילך</span>` : ""}
           ${audiencePill}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
         </div>
