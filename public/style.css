@@ -720,6 +720,7 @@ body {
   background: color-mix(in srgb, var(--hint) 8%, transparent);
 }
 .occ-empty { font-size: .9rem; color: var(--hint); padding: 4px 2px; }
+.occ-shared-loc { font-size: .9rem; color: var(--hint); padding: 2px 2px 6px; font-weight: 600; }
 .occ-item { display: flex; flex-direction: column; }
 .occ-row-clickable { cursor: pointer; display: flex; align-items: center; gap: 6px; }
 .occ-row-clickable:active { background: color-mix(in srgb, var(--hint) 16%, transparent); }

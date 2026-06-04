@@ -847,9 +847,14 @@
       const list = (await res.json()).occurrences || [];
       if (!list.length) { box.innerHTML = `<div class="occ-empty">אין מופעים נוספים.</div>`; }
       else {
-        box.innerHTML = list.map((o) => {
+        // If every occurrence is at the same venue, show it once as a header
+        // and omit it from each row (rows then show just date/time).
+        const locs = list.map((o) => o.location).filter(Boolean);
+        const sharedLoc = locs.length === list.length && new Set(locs).size === 1 ? locs[0] : null;
+        const header = sharedLoc ? `<div class="occ-shared-loc">📍 ${esc(sharedLoc)}</div>` : "";
+        box.innerHTML = header + list.map((o) => {
           const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
-          const loc = o.location ? ` — ${esc(o.location)}` : "";
+          const loc = !sharedLoc && o.location ? ` — ${esc(o.location)}` : "";
           return `<div class="occ-item">
             <div class="occ-row occ-row-clickable" onclick="window.toggleOccurrence(this,${o.id})">📅 ${esc(when)}${loc} <span class="occ-chevron">›</span></div>
             <div class="occ-detail" id="occd-${o.id}" hidden></div>
