@@ -381,27 +381,20 @@
       const isAll = c.dataset.scope === "all";
       c.classList.toggle("active", isAll === serverSearch.ignore_profile);
     });
+    // Floating "בשבילי / כולל" switch: ON = בשבילי (profile-matched only).
+    const t = document.getElementById("forMeToggle");
+    if (t) {
+      const forMe = !serverSearch.ignore_profile;
+      t.classList.toggle("on", forMe);
+      t.setAttribute("aria-pressed", String(forMe));
+      const lbl = t.querySelector(".formee-label");
+      if (lbl) lbl.textContent = forMe ? "✨ בשבילי" : "🌐 כולל";
+    }
   }
 
   function updateActiveFiltersBar() {
     if (!activeFiltersBar) return;
     const pills = [];
-
-    // Profile scope — default "✨ בשבילי" (only events matching the profile).
-    // Removing it switches to "🌐 כללי" (all events) and reloads from server.
-    if (!serverSearch.ignore_profile) {
-      pills.push({ label: "✨ בשבילי", clear: () => {
-        serverSearch.ignore_profile = true;
-        syncScopeChips();
-        loadEvents();
-      }});
-    } else {
-      pills.push({ label: "🌐 כללי", clear: () => {
-        serverSearch.ignore_profile = false;
-        syncScopeChips();
-        loadEvents();
-      }});
-    }
 
     if (activeDate !== "all") {
       pills.push({ label: DATE_LABELS[activeDate] || activeDate, clear: () => {
@@ -949,6 +942,15 @@
     bar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
     serverSearch.ignore_profile = chip.dataset.scope === "all";
+    syncScopeChips();
+    loadEvents();
+  });
+  // Floating בשבילי/כולל switch — toggles profile scope and reloads.
+  document.getElementById("forMeToggle")?.addEventListener("click", () => {
+    serverSearch.ignore_profile = !serverSearch.ignore_profile; // off = כולל
+    syncScopeChips();
+    loadEvents();
+    tg?.HapticFeedback?.impactOccurred("light");
   });
   document.getElementById("keywordInput")?.addEventListener("input", (e) => {
     const v = e.target.value.trim();
