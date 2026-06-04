@@ -1501,21 +1501,16 @@ body {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   ✨ "בשבילך" — non-intrusive treatment (no layout push)
+   ✨ "בשבילך" — options C (title sparkle) + D (side accent stripe)
    ════════════════════════════════════════════════════════════════════ */
-/* (1) subtle accent ring + glow on the whole matching card */
-.event-card.for-me {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent),
-              0 8px 24px color-mix(in srgb, var(--accent) 16%, transparent);
-}
-/* (B) corner ribbon — diagonal banner across the top-right of the hero */
-.forme-ribbon {
-  position: absolute; top: 14px; right: -38px;
-  transform: rotate(45deg);
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  color: #fff; font-size: .72rem; font-weight: 800; letter-spacing: .2px;
-  padding: 5px 42px; text-align: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,.35);
-  pointer-events: none; z-index: 3;
+/* C — sparkle prefix on the title */
+.title-spark { filter: drop-shadow(0 0 6px rgba(255,255,255,.6)); }
+
+/* D — accent stripe down the card's start (right) edge */
+.event-card.for-me { position: relative; }
+.event-card.for-me::before {
+  content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 5px;
+  background: linear-gradient(var(--accent), var(--accent2));
+  border-radius: var(--card-r) 0 0 var(--card-r);
+  z-index: 4;
 }

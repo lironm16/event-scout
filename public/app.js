@@ -628,13 +628,12 @@
       <div class="card-hero card-click${ev.image ? "" : " no-img"}${soldOut ? " soldout" : ""}">
         ${heroInner}
         <div class="hero-grad"></div>
-        ${forMeMark ? `<div class="forme-ribbon">✨ בשבילך</div>` : ""}
         <div class="hero-top">
           <div class="hero-badges">${statusBadge}</div>
           ${whenPill}
         </div>
         <div class="hero-foot">
-          <h3 class="card-title">${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(ev.name)}</h3>
+          <h3 class="card-title">${forMeMark ? `<span class="title-spark">✨</span> ` : ""}${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(ev.name)}</h3>
         </div>
       </div>
       <div class="card-body card-click">
