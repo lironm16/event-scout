@@ -464,34 +464,33 @@
   };
 
   // ── Render list (grouped by date) ────────────────────────────────────
+  // Progressive (infinite-scroll) rendering. We keep the FULL sorted list and
+  // reveal it in chunks as the user scrolls — preserving the requested sort.
+  const PAGE_SIZE = 12;
+  let _renderPlan = [];   // flat list of {type:"header"|"card", …}
+  let _renderIdx = 0;
+  let _scrollObserver = null;
+
   function renderGrid(events) {
     cardGrid.innerHTML = "";
     noResults.style.display = events.length ? "none" : "block";
+    if (_scrollObserver) { _scrollObserver.disconnect(); _scrollObserver = null; }
     if (!events.length) { resultsMeta.textContent = ""; return; }
 
-    // Group by date string (YYYY-MM-DD).
-    const groups = [];
+    // Flatten into a render plan: a date header before each new date, then
+    // its cards — so chunked rendering still shows headers in order.
+    _renderPlan = [];
     let lastDate = null;
     for (const ev of events) {
       if (ev.date !== lastDate) {
-        groups.push({ date: ev.date, dateHe: ev.dateHe || ev.date, events: [] });
+        _renderPlan.push({ type: "header", dateHe: ev.dateHe || ev.date });
         lastDate = ev.date;
       }
-      groups[groups.length - 1].events.push(ev);
+      _renderPlan.push({ type: "card", ev });
     }
+    _renderIdx = 0;
 
-    let total = 0;
-    for (const g of groups) {
-      // Date section header.
-      const header = document.createElement("div");
-      header.className = "date-header";
-      header.textContent = g.dateHe;
-      cardGrid.appendChild(header);
-      for (const ev of g.events) {
-        cardGrid.appendChild(buildCard(ev));
-        total++;
-      }
-    }
+    const total = events.length;
     const win = lastWindowLabel ? ` ${lastWindowLabel}` : "";
     resultsMeta.innerHTML = "";
     const label = document.createElement("span");
@@ -505,6 +504,43 @@
         loadEvents({ dateTo: lastExtensionHint.suggested_date_to });
       });
       resultsMeta.appendChild(ext);
+    }
+
+    renderNextChunk();
+  }
+
+  function renderNextChunk() {
+    let cardsAdded = 0;
+    while (_renderIdx < _renderPlan.length && cardsAdded < PAGE_SIZE) {
+      const item = _renderPlan[_renderIdx++];
+      if (item.type === "header") {
+        const header = document.createElement("div");
+        header.className = "date-header";
+        header.textContent = item.dateHe;
+        cardGrid.appendChild(header);
+      } else {
+        cardGrid.appendChild(buildCard(item.ev));
+        cardsAdded++;
+      }
+    }
+    // Place a sentinel after the last rendered item; when it scrolls into
+    // view we reveal the next chunk ("polling on scroll").
+    const old = document.getElementById("scrollSentinel");
+    if (old) old.remove();
+    if (_renderIdx < _renderPlan.length) {
+      const sentinel = document.createElement("div");
+      sentinel.id = "scrollSentinel";
+      sentinel.style.height = "1px";
+      cardGrid.appendChild(sentinel);
+      if (!_scrollObserver) {
+        _scrollObserver = new IntersectionObserver((entries) => {
+          if (entries.some((e) => e.isIntersecting)) renderNextChunk();
+        }, { rootMargin: "600px" });
+      }
+      _scrollObserver.observe(sentinel);
+    } else if (_scrollObserver) {
+      _scrollObserver.disconnect();
+      _scrollObserver = null;
     }
   }
 
