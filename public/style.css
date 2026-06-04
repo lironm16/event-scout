@@ -1517,3 +1517,27 @@ body {
 /* series row venue line (shown only when occurrences span different places) */
 .series-loc { font-size: .82rem; color: var(--hint); font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+
+/* ════════════════════════════════════════════════════════════════════
+   ✨ redesign part 10 — clean two-line series/program rows
+   ════════════════════════════════════════════════════════════════════ */
+.occ-list { display: flex; flex-direction: column; gap: 8px; }
+.series-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: start;
+  background: color-mix(in srgb, var(--hint) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hint) 12%, transparent);
+  border-radius: 12px; padding: 11px 13px; font: inherit; cursor: pointer;
+}
+.series-row:active { background: color-mix(in srgb, var(--hint) 15%, transparent); }
+.sr-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.sr-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sr-when, .sr-title { font-size: .95rem; font-weight: 700; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-meta { font-size: .8rem; color: var(--hint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-tk.ok   { color: var(--hint); }
+.sr-tk.low  { color: var(--warn); font-weight: 700; }
+.sr-tk.sold { color: var(--bad); font-weight: 700; }
+.sr-go { color: var(--hint); font-size: 1.25rem; flex: 0 0 auto; }
+.forme-dot.xs { width: 18px; height: 18px; font-size: .68rem; }

@@ -956,12 +956,12 @@
     }
   };
 
-  // Small inline ticket badge for the compact series rows.
-  function miniTicketBadge(t) {
+  // Light inline ticket text for the compact series rows (not a big pill).
+  function seriesTicketText(t) {
     if (t == null) return "";
-    if (t <= 0) return `<span class="status-badge soldout sm">אזל</span>`;
-    if (t <= 9) return `<span class="status-badge low sm">${t} אחרונים</span>`;
-    return `<span class="status-badge ok sm">${t} כרטיסים</span>`;
+    if (t <= 0) return `<span class="sr-tk sold">אזל</span>`;
+    if (t <= 9) return `<span class="sr-tk low">🔥 ${t} אחרונים</span>`;
+    return `<span class="sr-tk ok">🎟️ ${t} כרטיסים</span>`;
   }
 
   // 📅 "עוד X מהסדרה" → a compact date list. Each row opens that date as a
@@ -983,19 +983,24 @@
       else {
         box.innerHTML = list.map((o) => {
           const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
-          const title = varied ? `<span class="series-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>` : "";
-          const loc = (variedLoc && o.location) ? `<span class="series-loc">📍 ${esc(o.location)}</span>` : "";
-          const mark = o.forMe ? `<span class="forme-dot sm" title="בשבילך">✨</span>` : "";
-          const twoLine = varied || variedLoc;
-          return `<button class="series-row${twoLine ? " two-line" : ""}" onclick="window.openEventModal(${o.id})">
-            ${mark}
-            <span class="series-main">
-              ${title}
-              <span class="series-when">🗓️ ${esc(when)}</span>
-              ${loc}
+          const mark = o.forMe ? `<span class="forme-dot xs" title="בשבילך">✨</span>` : "";
+          const tk = seriesTicketText(o.ticketsLeft);
+          const meta = [];
+          let top;
+          if (varied) { // umbrella program — the event name is primary
+            top = `${mark}<span class="sr-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>`;
+            meta.push(`🗓️ ${esc(when)}`);
+          } else {       // same-name series — the date is primary
+            top = `${mark}<span class="sr-when">🗓️ ${esc(when)}</span>`;
+          }
+          if (tk) meta.push(tk);
+          if (variedLoc && o.location) meta.push(`📍 ${esc(o.location)}`);
+          return `<button class="series-row" onclick="window.openEventModal(${o.id})">
+            <span class="sr-body">
+              <span class="sr-top">${top}</span>
+              ${meta.length ? `<span class="sr-meta">${meta.join(" · ")}</span>` : ""}
             </span>
-            ${miniTicketBadge(o.ticketsLeft)}
-            <span class="series-go">›</span>
+            <span class="sr-go">›</span>
           </button>`;
         }).join("");
       }
