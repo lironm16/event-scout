@@ -778,6 +778,45 @@
     } catch (_) { /* ignore */ } finally { btn.disabled = false; }
   };
 
+  // Open a single event (e.g. a chosen occurrence) as a full card in a
+  // popup with a back button.
+  window.openEventModal = async function (eventId) {
+    let overlay = document.getElementById("eventModal");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "eventModal";
+      overlay.className = "event-modal-backdrop";
+      overlay.innerHTML = `
+        <div class="event-modal">
+          <div class="event-modal-head">
+            <button class="event-modal-back" type="button">← חזרה</button>
+          </div>
+          <div class="event-modal-body"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const close = () => { overlay.classList.remove("open"); document.body.style.overflow = ""; };
+      overlay.querySelector(".event-modal-back").addEventListener("click", close);
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    }
+    const body = overlay.querySelector(".event-modal-body");
+    body.innerHTML = `<div class="card-description" style="padding:16px">טוען…</div>`;
+    overlay.classList.add("open");
+    document.body.style.overflow = "hidden";
+    try {
+      const res = await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
+      const ev = (await res.json()).event;
+      if (!ev) { body.innerHTML = `<div class="card-description" style="padding:16px">האירוע לא נמצא.</div>`; return; }
+      body.innerHTML = "";
+      const card = buildCard(ev);
+      card.classList.add("open");          // show the detail section expanded
+      const occBox = card.querySelector(".occ-list"); // avoid nested occurrences loop
+      if (occBox) occBox.remove();
+      body.appendChild(card);
+    } catch (_) {
+      body.innerHTML = `<div class="card-description" style="padding:16px">שגיאה בטעינה.</div>`;
+    }
+  };
+
   // 🔁 Load & render other occurrences inline.
   window.showOccurrences = async function (btn, eventId) {
     const box = document.getElementById(`occ-${eventId}`);
@@ -792,8 +831,8 @@
         box.innerHTML = list.map((o) => {
           const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
           const loc = o.location ? ` — ${esc(o.location)}` : "";
-          const link = o.bookingUrl ? ` <a href="${esc(o.bookingUrl)}" target="_blank" rel="noopener">🔗</a>` : "";
-          return `<div class="occ-row">📅 ${esc(when)}${loc}${link}</div>`;
+          const link = o.bookingUrl ? ` <a href="${esc(o.bookingUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🔗</a>` : "";
+          return `<div class="occ-row occ-row-clickable" onclick="window.openEventModal(${o.id})">📅 ${esc(when)}${loc}${link} <span class="occ-chevron">›</span></div>`;
         }).join("");
       }
       box.dataset.loaded = "1";

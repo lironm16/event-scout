@@ -720,6 +720,38 @@ body {
   background: color-mix(in srgb, var(--hint) 8%, transparent);
 }
 .occ-empty { font-size: .9rem; color: var(--hint); padding: 4px 2px; }
+.occ-row-clickable { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.occ-row-clickable:active { background: color-mix(in srgb, var(--hint) 16%, transparent); }
+.occ-chevron { margin-inline-start: auto; color: var(--hint); font-size: 1.1rem; }
+
+/* Single-event popup (opened from an occurrence row). */
+.event-modal-backdrop {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.55);
+  display: none;
+  align-items: flex-start; justify-content: center;
+  overflow-y: auto;
+  padding: 16px;
+}
+.event-modal-backdrop.open { display: flex; }
+.event-modal {
+  width: 100%; max-width: 560px;
+  background: var(--bg, #000);
+  border-radius: 14px;
+  margin: auto 0;
+}
+.event-modal-head {
+  position: sticky; top: 0; z-index: 1;
+  padding: 8px;
+  background: var(--bg, #000);
+  border-bottom: 1px solid color-mix(in srgb, var(--hint) 12%, transparent);
+}
+.event-modal-back {
+  border: none; background: none; color: var(--link, #2ea6ff);
+  font: inherit; font-weight: 600; font-size: .95rem; cursor: pointer; padding: 6px 8px;
+}
+.event-modal-body { padding: 10px; }
+.event-modal-body .event-card { margin: 0; }
 
 /* ── Map ──────────────────────────────────────────────────────────── */
 #mapView {
