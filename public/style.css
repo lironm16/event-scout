@@ -779,6 +779,21 @@ body {
   transition: transform .15s;
 }
 .map-pin:hover { transform: scale(1.15); }
+.map-pin { position: relative; }
+.map-pin-badge {
+  position: absolute; top: -4px; left: -4px;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent, #2ea6ff); color: #fff;
+  font-size: .72rem; font-weight: 700; line-height: 18px; text-align: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.4);
+}
+
+/* Multi-event popup — scrollable list when several events share a spot. */
+.map-popup-head { font-weight: 700; font-size: .85rem; margin-bottom: 6px; color: #333; }
+.map-popup.multi { max-height: 230px; overflow-y: auto; }
+.map-popup.multi .map-popup-ev { padding: 6px 0; border-top: 1px solid rgba(0,0,0,.08); }
+.map-popup.multi .map-popup-ev:first-of-type { border-top: none; }
 
 /* ── Empty / error / spinner ──────────────────────────────────────── */
 .empty-state {

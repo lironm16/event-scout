@@ -876,22 +876,39 @@
       return;
     }
 
-    const bounds = [];
+    // Group events that share a location (rounded coords) so overlapping
+    // markers don't hide each other — one marker per spot, its popup lists
+    // ALL events there (scrollable).
+    const groups = new Map();
     for (const ev of withCoords) {
+      const key = `${(+ev._lat).toFixed(5)},${(+ev._lng).toFixed(5)}`;
+      if (!groups.has(key)) groups.set(key, { lat: ev._lat, lng: ev._lng, list: [] });
+      groups.get(key).list.push(ev);
+    }
+
+    const bounds = [];
+    for (const g of groups.values()) {
+      const n = g.list.length;
+      const top = g.list[0];
       const icon = L.divIcon({
         className: "",
-        html: `<div class="map-pin">${esc(ev.icon || "📌")}</div>`,
+        html: `<div class="map-pin">${esc(top.icon || "📌")}${n > 1 ? `<span class="map-pin-badge">${n}</span>` : ""}</div>`,
         iconSize: [40, 40],
         iconAnchor: [20, 40],
         popupAnchor: [0, -42],
       });
-      const marker = L.marker([ev._lat, ev._lng], { icon }).addTo(leafletMap);
-      marker.bindPopup(`
-        <div class="map-popup-title">${esc(ev.name)}</div>
-        <div class="map-popup-meta">📅 ${esc(ev.dateHe || ev.date)}${ev.timeHe ? " · " + esc(ev.timeHe) : ""}${ev.location ? "<br>📍 " + esc(ev.location) : ""}</div>
-        ${ev.bookingUrl ? `<a class="map-popup-link" href="${esc(ev.bookingUrl)}" target="_blank">🔗 פרטים</a>` : ""}
-      `);
-      bounds.push([ev._lat, ev._lng]);
+      const marker = L.marker([g.lat, g.lng], { icon }).addTo(leafletMap);
+      const rows = g.list.map((ev) => `
+        <div class="map-popup-ev">
+          <div class="map-popup-title">${esc(ev.icon || "📌")} ${esc(ev.name)}</div>
+          <div class="map-popup-meta">📅 ${esc(ev.dateHe || ev.date)}${ev.timeHe ? " · " + esc(ev.timeHe) : ""}</div>
+          ${ev.bookingUrl ? `<a class="map-popup-link" href="${esc(ev.bookingUrl)}" target="_blank">🔗 פרטים</a>` : ""}
+        </div>`).join("");
+      const head = n > 1
+        ? `<div class="map-popup-head">${n} אירועים${top.location ? " · 📍 " + esc(top.location) : ""}</div>`
+        : (top.location ? `<div class="map-popup-head">📍 ${esc(top.location)}</div>` : "");
+      marker.bindPopup(`<div class="map-popup${n > 1 ? " multi" : ""}">${head}${rows}</div>`);
+      bounds.push([g.lat, g.lng]);
     }
     if (bounds.length) leafletMap.fitBounds(bounds, { padding: [30, 30] });
     resultsMeta.textContent = `${withCoords.length} אירועים על המפה`;
