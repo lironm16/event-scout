@@ -665,7 +665,7 @@
 
     // ── ONE clear primary action ──
     if (ev.bookingUrl) {
-      parts.push(`<a class="btn btn-primary btn-block" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🎟️ פרטים והרשמה</a>`);
+      parts.push(`<a class="btn btn-primary btn-block" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🔗 לאתר</a>`);
     } else if (ev.onlineUrl) {
       parts.push(`<a class="btn btn-primary btn-block" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרפו למפגש</a>`);
     }
