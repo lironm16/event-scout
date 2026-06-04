@@ -633,10 +633,12 @@
           ${whenPill}
         </div>
         <div class="hero-foot">
-          <h3 class="card-title">${forMeMark ? `<span class="title-spark">✨</span> ` : ""}${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(ev.name)}</h3>
+          ${forMeMark ? `<span class="forme-hero-tag">✨ בשבילך</span>` : ""}
+          <h3 class="card-title">${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(ev.name)}</h3>
         </div>
       </div>
       <div class="card-body card-click">
+        ${forMeMark ? `<div class="forme-banner">✨ בשבילך</div>` : ""}
         <div class="card-pillrow">
           ${audiencePill}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}

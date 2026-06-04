@@ -1501,16 +1501,21 @@ body {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   ✨ "בשבילך" — options C (title sparkle) + D (side accent stripe)
+   ✨ "בשבילך" — options E (body badge) + F (hero badge over the title)
    ════════════════════════════════════════════════════════════════════ */
-/* C — sparkle prefix on the title */
-.title-spark { filter: drop-shadow(0 0 6px rgba(255,255,255,.6)); }
-
-/* D — accent stripe down the card's start (right) edge */
-.event-card.for-me { position: relative; }
-.event-card.for-me::before {
-  content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 5px;
-  background: linear-gradient(var(--accent), var(--accent2));
-  border-radius: var(--card-r) 0 0 var(--card-r);
-  z-index: 4;
+/* shared badge look — solid gradient, high contrast, readable anywhere */
+.forme-banner, .forme-hero-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff; font-size: .78rem; font-weight: 800; letter-spacing: .2px;
+  padding: 4px 12px; border-radius: 999px;
 }
+/* E — its own line at the top of the body (on the solid card bg) */
+.forme-banner { margin: 2px 0 10px; }
+/* F — inside the hero, just above the title (over the gradient) */
+.forme-hero-tag {
+  margin-bottom: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.4);
+  align-self: flex-start;
+}
+.hero-foot { display: flex; flex-direction: column; align-items: flex-start; }
