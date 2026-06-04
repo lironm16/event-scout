@@ -1510,3 +1510,6 @@ body {
   font-size: .92rem; line-height: 1; flex: 0 0 auto;
   box-shadow: 0 2px 7px color-mix(in srgb, var(--accent) 40%, transparent);
 }
+
+/* small ✨ marker for matching rows in the series/program list */
+.forme-dot.sm { width: 22px; height: 22px; font-size: .8rem; }

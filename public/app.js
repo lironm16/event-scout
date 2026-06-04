@@ -696,7 +696,7 @@
       const word = ev.umbrella_slug ? "בתוכנית" : "מהסדרה";
       // "עוד N" = the OTHERS (the list excludes the current occurrence).
       const more = (ev.totalOccurrences || 1) - 1;
-      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">📅 עוד ${more} ${word} ▾</button>`);
+      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">🗓️ עוד ${more} ${word} ▾</button>`);
       parts.push(`<div class="occ-list"></div>`);
     }
 
@@ -982,10 +982,12 @@
         box.innerHTML = list.map((o) => {
           const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
           const title = varied ? `<span class="series-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>` : "";
+          const mark = o.forMe ? `<span class="forme-dot sm" title="בשבילך">✨</span>` : "";
           return `<button class="series-row${varied ? " two-line" : ""}" onclick="window.openEventModal(${o.id})">
+            ${mark}
             <span class="series-main">
               ${title}
-              <span class="series-when">📅 ${esc(when)}</span>
+              <span class="series-when">🗓️ ${esc(when)}</span>
             </span>
             ${miniTicketBadge(o.ticketsLeft)}
             <span class="series-go">›</span>
