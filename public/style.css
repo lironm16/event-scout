@@ -1353,3 +1353,61 @@ body {
   padding: 9px 6px; border-radius: 8px;
 }
 .more-item:active { background: color-mix(in srgb, var(--hint) 12%, transparent); }
+
+/* ════════════════════════════════════════════════════════════════════
+   ✨ redesign part 4 — fewer buttons; organized "hide" bottom-sheet
+   ════════════════════════════════════════════════════════════════════ */
+/* Quiet "אל תראה לי" entry */
+.hide-link {
+  display: block; width: 100%; margin-top: 12px;
+  background: none; border: none; cursor: pointer;
+  color: var(--hint); font: inherit; font-size: .86rem; font-weight: 600;
+  padding: 8px; text-align: center; opacity: .8;
+}
+.hide-link:active { opacity: 1; }
+
+/* Suppression bottom-sheet */
+.ss-backdrop {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(0,0,0,.5);
+  display: none; align-items: flex-end; justify-content: center;
+}
+.ss-backdrop.open { display: flex; }
+.ss-sheet {
+  width: 100%; max-width: 560px;
+  background: var(--bg2);
+  border-radius: 22px 22px 0 0;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
+  box-shadow: 0 -10px 40px rgba(0,0,0,.3);
+  animation: ss-rise .28s cubic-bezier(.2,.8,.2,1);
+  max-height: 82vh; overflow-y: auto;
+}
+@keyframes ss-rise { from { transform: translateY(100%); } to { transform: none; } }
+.ss-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 2px 4px; }
+.ss-title { font-size: 1.15rem; font-weight: 800; }
+.ss-close { border: none; background: none; font-size: 1.1rem; color: var(--hint); cursor: pointer; padding: 6px; }
+.ss-intro { color: var(--hint); font-size: .9rem; margin: 2px 2px 14px; }
+.ss-loading { padding: 24px; text-align: center; color: var(--hint); }
+.ss-group { margin-bottom: 16px; }
+.ss-glabel { font-size: .8rem; font-weight: 700; color: var(--hint); margin: 0 2px 8px; }
+.ss-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ss-chip {
+  border: 1.5px solid color-mix(in srgb, var(--hint) 22%, transparent);
+  background: transparent; color: var(--text);
+  font: inherit; font-size: .9rem; font-weight: 600;
+  padding: 9px 14px; border-radius: 999px; cursor: pointer;
+  transition: all .12s ease;
+}
+.ss-chip-wide { width: 100%; text-align: center; }
+.ss-chip.sel {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  border-color: var(--bad); color: var(--bad);
+}
+.ss-chip.sel::after { content: " ✓"; }
+.ss-foot { margin-top: 8px; }
+.ss-apply { margin-top: 4px; }
+.ss-report {
+  display: block; width: 100%; margin-top: 12px;
+  background: none; border: none; cursor: pointer;
+  color: var(--hint); font: inherit; font-size: .84rem; padding: 6px; text-align: center;
+}

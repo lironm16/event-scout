@@ -228,20 +228,10 @@
   }
 
   // ── Build tag chips ───────────────────────────────────────────────────
-  function buildTagChips(interests) {
-    if (!interests.length) return;
-    tagBar.innerHTML = "";
-    tagBar.appendChild(makeChip("הכל", "__all__", true));
-    for (const tag of interests) tagBar.appendChild(makeChip(tag, tag, false));
-    tagsSection.style.display = "block";
-    tagBar.addEventListener("click", (e) => {
-      const chip = e.target.closest(".chip");
-      if (!chip || !chip.dataset.tag) return;
-      tagBar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
-      chip.classList.add("active");
-      activeTag = chip.dataset.tag === "__all__" ? null : chip.dataset.tag;
-      applyFilters();
-    });
+  function buildTagChips(_interests) {
+    // Interest-tag chips removed — the concept was unclear to users.
+    // (May return later in a clearer form.)
+    if (tagsSection) tagsSection.style.display = "none";
   }
   function makeChip(label, val, active) {
     const b = document.createElement("button");
@@ -673,34 +663,21 @@
       parts.push(`<a class="btn btn-primary btn-block" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרפו למפגש</a>`);
     }
 
-    // ── Compact quick-action toolbar (icon buttons) ──
+    // ── Secondary actions: real, labeled, tap-sized buttons ──
     const navUrl = ev.location && !isCityWide(ev.location)
       ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}`
       : (ev._lat && ev._lng ? `https://maps.google.com/?q=${ev._lat},${ev._lng}` : null);
-    const watching = watchedIds.has(ev.id);
     const showOcc = !opts.hideOccurrences && (ev.totalOccurrences || 1) > 1;
 
-    const acts = [];
-    if (navUrl) acts.push(`<a class="act-ico" href="${esc(navUrl)}" target="_blank" rel="noopener" aria-label="ניווט"><span>🧭</span><b>ניווט</b></a>`);
-    acts.push(`<button class="act-ico${isInterested ? " active" : ""}" data-event="${ev.id}" onclick="window.toggleInterest(this,${ev.id})" aria-label="מעניין אותי"><span>⭐</span><b>מעניין</b></button>`);
-    acts.push(`<button class="act-ico${watching ? " active" : ""}" data-event="${ev.id}" onclick="window.toggleWatch(this,${ev.id})" aria-label="מעקב"><span>🔔</span><b>מעקב</b></button>`);
-    if (showOcc) acts.push(`<button class="act-ico" onclick="window.showOccurrences(this,${ev.id})" aria-label="מופעים נוספים"><span>🔁</span><b>${ev.totalOccurrences} מופעים</b></button>`);
-    acts.push(`<button class="act-ico" onclick="window.toggleMoreMenu(this,${ev.id})" aria-label="עוד"><span>⋯</span><b>עוד</b></button>`);
-    parts.push(`<div class="act-bar">${acts.join("")}</div>`);
+    const sec = [];
+    if (navUrl) sec.push(`<a class="btn btn-secondary" href="${esc(navUrl)}" target="_blank" rel="noopener">🧭 ניווט</a>`);
+    if (showOcc) sec.push(`<button class="btn btn-secondary" onclick="window.showOccurrences(this,${ev.id})">📅 עוד ${ev.totalOccurrences} תאריכים</button>`);
+    if (sec.length) parts.push(`<div class="card-actions">${sec.join("")}</div>`);
 
     if (!opts.hideOccurrences) parts.push(`<div class="occ-list"></div>`);
 
-    // ── Overflow menu — rarely used / negative actions tucked away ──
-    const canExcludePlace = ev.location && !isCityWide(ev.location);
-    parts.push(`
-      <div class="more-menu" id="fb-${ev.id}" hidden>
-        <button class="more-item" onclick="window.sendFeedback(${ev.id},'not_interested')">🚫 לא מעניין אותי</button>
-        <button class="more-item" onclick="window.sendFeedback(${ev.id},'wrong_audience')">👥 קהל לא מתאים</button>
-        <button class="more-item" onclick="window.sendFeedback(${ev.id},'wrong_time')">🕒 שעה לא מתאימה</button>
-        ${canExcludePlace ? `<button class="more-item" onclick="window.excludePlace(${ev.id})">📍 לא מעוניין במקום הזה</button>` : ""}
-        <button class="more-item" onclick="window.openReportSheet(${ev.id})">🚩 דווח על בעיה</button>
-      </div>
-    `);
+    // ── Quiet "hide" entry → opens the organized suppression sheet ──
+    parts.push(`<button class="hide-link" onclick="window.openSuppressSheet(${ev.id})">🙈 אל תראה לי אירועים כאלה</button>`);
 
     return parts.join("") || "<div class='card-description'>אין פרטים נוספים.</div>";
   }
@@ -827,6 +804,96 @@
     } catch (_) {
       body.innerHTML = `<div class="card-description" style="padding:16px">שגיאה בטעינה.</div>`;
     }
+  };
+
+  // ── "אל תראה לי" organized suppression sheet ──────────────────────
+  // Shows the event's own attributes (tags / venue / audience) as toggle
+  // chips; selected ones are written into the user's profile filters.
+  const CHILD_AUD = new Set(["תינוקות", "ילדים", "נוער"]);
+  window.openSuppressSheet = async function (eventId) {
+    let ov = document.getElementById("suppressSheet");
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.id = "suppressSheet";
+      ov.className = "ss-backdrop";
+      ov.innerHTML = `
+        <div class="ss-sheet">
+          <div class="ss-head">
+            <span class="ss-title">לא להציג יותר</span>
+            <button class="ss-close" aria-label="סגירה">✕</button>
+          </div>
+          <div class="ss-intro">מה גרם לזה לא להתאים? נסנן את זה גם בעתיד 🎯</div>
+          <div class="ss-body"></div>
+          <div class="ss-foot">
+            <button class="ss-apply btn btn-primary btn-block">החל סינון</button>
+            <button class="ss-report">משהו שגוי באירוע? דווחו לנו</button>
+          </div>
+        </div>`;
+      document.body.appendChild(ov);
+      const close = () => { ov.classList.remove("open"); document.body.style.overflow = ""; };
+      ov.querySelector(".ss-close").addEventListener("click", close);
+      ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+      ov.querySelector(".ss-body").addEventListener("click", (e) => {
+        const chip = e.target.closest(".ss-chip");
+        if (chip) chip.classList.toggle("sel");
+      });
+    }
+    const close = () => { ov.classList.remove("open"); document.body.style.overflow = ""; };
+    const body = ov.querySelector(".ss-body");
+    body.innerHTML = `<div class="ss-loading">טוען…</div>`;
+    ov.classList.add("open");
+    document.body.style.overflow = "hidden";
+
+    let ev;
+    try { ev = (await (await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`)).json()).event; }
+    catch (_) { ev = null; }
+    if (!ev) { body.innerHTML = `<div class="ss-loading">שגיאה בטעינה.</div>`; return; }
+
+    const groups = [];
+    const tags = (ev.tags || []).slice(0, 8);
+    if (tags.length) {
+      groups.push(`<div class="ss-group"><div class="ss-glabel">לפי נושא</div><div class="ss-chips">${
+        tags.map((t) => `<button class="ss-chip" data-kind="tag" data-val="${esc(t)}">🏷️ ${esc(t)}</button>`).join("")
+      }</div></div>`);
+    }
+    if (ev.location && !isCityWide(ev.location)) {
+      groups.push(`<div class="ss-group"><div class="ss-glabel">לפי מקום</div><div class="ss-chips">
+        <button class="ss-chip" data-kind="place">📍 ${esc(ev.location)}</button></div></div>`);
+    }
+    if (ev.audience && CHILD_AUD.has(ev.audience)) {
+      groups.push(`<div class="ss-group"><div class="ss-glabel">לפי קהל</div><div class="ss-chips">
+        <button class="ss-chip" data-kind="childaud">👶 אירועי ${esc(ev.audience)}</button></div></div>`);
+    }
+    groups.push(`<div class="ss-group"><div class="ss-chips">
+      <button class="ss-chip ss-chip-wide" data-kind="this">🙈 רק את האירוע הזה</button></div></div>`);
+    body.innerHTML = groups.join("");
+
+    ov.querySelector(".ss-report").onclick = () => { close(); window.openReportSheet(eventId); };
+    ov.querySelector(".ss-apply").onclick = async () => {
+      const sel = [...body.querySelectorAll(".ss-chip.sel")];
+      const applyBtn = ov.querySelector(".ss-apply");
+      applyBtn.disabled = true; applyBtn.textContent = "מחיל…";
+      const tagsToHide = sel.filter((c) => c.dataset.kind === "tag").map((c) => c.dataset.val);
+      const patch = {};
+      if (tagsToHide.length) patch.add_suppressed_labels = tagsToHide;
+      if (sel.some((c) => c.dataset.kind === "childaud")) patch.suppress_child_audiences = true;
+      const jobs = [];
+      if (Object.keys(patch).length) {
+        jobs.push(fetch(`${API_PREFIX}/profile`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, patch }) }));
+      }
+      if (sel.some((c) => c.dataset.kind === "place")) {
+        jobs.push(fetch(`${API_PREFIX}/exclude-place`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventId }) }));
+      }
+      // Always log a hide for this event (covers "just this one" + any choice).
+      jobs.push(fetch(`${API_PREFIX}/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventId, reason: "not_interested" }) }));
+      try { await Promise.allSettled(jobs); } catch (_) {}
+      tg?.HapticFeedback?.notificationOccurred?.("success");
+      close();
+      fadeOutCard(eventId);
+      applyBtn.disabled = false; applyBtn.textContent = "החל סינון";
+      // Refresh so the new filters take effect across the list.
+      setTimeout(() => loadEvents(), 400);
+    };
   };
 
   // Expand a single occurrence inline (dropdown) as a full event card.
