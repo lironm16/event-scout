@@ -373,9 +373,32 @@
     applyFilters();
   }
 
+  function syncScopeChips() {
+    document.querySelectorAll("#scopeFilterBar .chip").forEach((c) => {
+      const isAll = c.dataset.scope === "all";
+      c.classList.toggle("active", isAll === serverSearch.ignore_profile);
+    });
+  }
+
   function updateActiveFiltersBar() {
     if (!activeFiltersBar) return;
     const pills = [];
+
+    // Profile scope — default "✨ בשבילי" (only events matching the profile).
+    // Removing it switches to "🌐 כללי" (all events) and reloads from server.
+    if (!serverSearch.ignore_profile) {
+      pills.push({ label: "✨ בשבילי", clear: () => {
+        serverSearch.ignore_profile = true;
+        syncScopeChips();
+        loadEvents();
+      }});
+    } else {
+      pills.push({ label: "🌐 כללי", clear: () => {
+        serverSearch.ignore_profile = false;
+        syncScopeChips();
+        loadEvents();
+      }});
+    }
 
     if (activeDate !== "all") {
       pills.push({ label: DATE_LABELS[activeDate] || activeDate, clear: () => {
@@ -505,10 +528,11 @@
     const tagsHtml = (ev.tags || []).slice(0, 5)
       .map((t) => `<button class="tag-pill tag-pill-btn" onclick="window.drillTag('${esc(t)}')">${esc(t)}</button>`).join("");
 
-    // Audience/age shown in meta line (not as a separate div).
-    if (ev.audienceLine) metaParts.push(esc(ev.audienceLine));
-
-    const audienceHtml = "";
+    // Audience/age ALWAYS on its own line in the card (not inline with the
+    // location meta).
+    const audienceHtml = ev.audienceLine
+      ? `<div class="card-audience">${esc(ev.audienceLine)}</div>`
+      : "";
 
     // Ticket / availability line — mirrors the bot's formatTicketsLine.
     let ticketHtml = "";

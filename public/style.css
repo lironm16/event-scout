@@ -506,6 +506,13 @@ body {
   margin-bottom: 8px;
 }
 
+/* Audience/age — always its own line. */
+.card-audience {
+  font-size: .95rem;
+  color: var(--hint);
+  margin-bottom: 6px;
+}
+
 
 /* ── Ticket availability line ─────────────────────────────────────── */
 .ticket-line {
