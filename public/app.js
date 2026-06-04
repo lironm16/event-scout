@@ -107,6 +107,7 @@
     imgLightbox.classList.add("open");
     document.body.style.overflow = "hidden";
   }
+  window.openLightbox = openLightbox; // reachable from inline card onclick
   function closeLightbox() {
     imgLightbox.classList.remove("open");
     document.body.style.overflow = "";
@@ -545,71 +546,61 @@
     card.className = "event-card";
     card.dataset.id = ev.id;
 
-    const metaParts = [];
-    // Location line: use 📷 for online events, 📍 for physical, 🗺️ city-wide.
-    if (ev.onlineUrl && !ev.location) {
-      metaParts.push("📷 אונליין");
-    } else if (ev.location && !isCityWide(ev.location)) {
-      const locPrefix = ev.onlineUrl ? "📷" : "📍";
-      metaParts.push(`${locPrefix} ${esc(ev.location)}`);
-    } else if (isCityWide(ev.location)) {
-      metaParts.push(`🗺️ ברחבי העיר`);
-    }
+    // ── Location line ──
+    let locText = "";
+    if (ev.onlineUrl && !ev.location) locText = "📷 אונליין";
+    else if (ev.location && !isCityWide(ev.location)) locText = `${ev.onlineUrl ? "📷" : "📍"} ${esc(ev.location)}`;
+    else if (isCityWide(ev.location)) locText = "🗺️ ברחבי העיר";
 
-    const tagsHtml = (ev.tags || []).slice(0, 5)
-      .map((t) => `<button class="tag-pill tag-pill-btn" onclick="window.drillTag('${esc(t)}')">${esc(t)}</button>`).join("");
-
-    // Audience/age ALWAYS on its own line in the card (not inline with the
-    // location meta).
-    const audienceHtml = ev.audienceLine
-      ? `<div class="card-audience">${esc(ev.audienceLine)}</div>`
-      : "";
-
-    // Ticket / availability line — mirrors the bot's formatTicketsLine.
-    let ticketHtml = "";
+    // ── Visual ticket status (overlay badge, not a body line) ──
+    let statusBadge = "";
+    let soldOut = false;
     const t = ev.ticketsLeft;
     if (t != null) {
-      if (t <= 0)       ticketHtml = `<div class="ticket-line sold-out">🚫 אזלו הכרטיסים</div>`;
-      else if (t <= 9) ticketHtml = `<div class="ticket-line low-stock">🎫 ${t} כרטיסים אחרונים</div>`;
-      else              ticketHtml = `<div class="ticket-line">🎫 ${t} כרטיסים</div>`;
+      if (t <= 0) { soldOut = true; statusBadge = `<span class="status-badge soldout">אזל</span>`; }
+      else if (t <= 9) statusBadge = `<span class="status-badge low"><span class="pulse-dot"></span>${t} אחרונים</span>`;
     }
 
-    // Description is shown only in the expanded detail section — not in the collapsed card.
+    const tagsHtml = (ev.tags || []).slice(0, 4)
+      .map((tg) => `<button class="tag-pill" onclick="event.stopPropagation();window.drillTag('${esc(tg)}')">${esc(tg)}</button>`).join("");
+
+    const audiencePill = ev.audienceLine
+      ? `<span class="aud-pill">${esc(ev.audienceLine.replace(/^🎯\s*/, ""))}</span>` : "";
 
     const umbrellaHtml = ev.umbrella_title
-      ? `<div class="card-umbrella" onclick="event.stopPropagation();window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 ${esc(ev.umbrella_title)} ←</div>`
+      ? `<button class="card-umbrella" onclick="event.stopPropagation();window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 ${esc(ev.umbrella_title)}</button>`
       : "";
 
-    const dateBadge = ev.timeHe
-      ? `<div class="card-date-badge">${esc(ev.timeHe)}</div>`
-      : (ev.dateHe ? `<div class="card-date-badge">${esc(ev.dateHe)}</div>` : "");
+    const whenPill = ev.timeHe || ev.dateHe
+      ? `<span class="when-pill">🕒 ${esc(ev.timeHe || ev.dateHe)}</span>` : "";
 
-    // Images open the lightbox; placeholder (no image) still expands the card.
-    const imgHtml = ev.image
-      ? `<div class="card-img-wrap card-img-clickable">
-           <img class="card-image"
-             src="${esc(ev.image)}"
-             alt="${esc(ev.name)}"
-             loading="lazy"
-             onerror="this.closest('.card-img-wrap').style.display='none'"
-           />
-           ${dateBadge}
-         </div>`
-      : (dateBadge ? `<div class="card-img-wrap card-img-placeholder card-click">${dateBadge}</div>` : "");
+    // ── Hero: image (or gradient fallback) with title overlaid ──
+    const heroInner = ev.image
+      ? `<img class="card-image" src="${esc(ev.image)}" alt="${esc(ev.name)}" loading="lazy"
+            onerror="this.closest('.card-hero').classList.add('no-img')" />
+         <button class="hero-zoom" aria-label="הגדל תמונה" onclick="event.stopPropagation();window.openLightbox('${esc(ev.image)}','${esc(ev.name)}')">⤢</button>`
+      : `<span class="hero-emoji">${esc(ev.icon || "📌")}</span>`;
 
     const isInterested = interestedIds.has(ev.id);
 
     card.innerHTML = `
-      ${imgHtml}
-      <div class="card-body card-click">
-        <div class="card-title-row">
-          <span class="card-icon">${esc(ev.icon || "📌")}</span>
-          <span class="card-title">${esc(ev.name)}</span>
+      <div class="card-hero card-click${ev.image ? "" : " no-img"}${soldOut ? " soldout" : ""}">
+        ${heroInner}
+        <div class="hero-grad"></div>
+        <div class="hero-top">
+          <div class="hero-badges">${statusBadge}</div>
+          ${whenPill}
         </div>
-        ${audienceHtml}
+        <div class="hero-foot">
+          <h3 class="card-title">${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(ev.name)}</h3>
+        </div>
+      </div>
+      <div class="card-body card-click">
+        <div class="card-pillrow">
+          ${audiencePill}
+          ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
+        </div>
         ${umbrellaHtml}
-        <div class="card-meta">${metaParts.map((p) => `<span>${p}</span>`).join("")}</div>
-        ${ticketHtml}
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}
       </div>
       <div class="card-detail">
@@ -617,15 +608,9 @@
       </div>
     `;
 
-    // Card body (and image-less placeholder) expands the card.
     card.querySelectorAll(".card-click").forEach((el) =>
       el.addEventListener("click", () => toggleCard(card, ev)),
     );
-    // Image opens the lightbox instead.
-    const imgWrap = card.querySelector(".card-img-clickable");
-    if (imgWrap) {
-      imgWrap.addEventListener("click", () => openLightbox(ev.image, ev.name));
-    }
     return card;
   }
 

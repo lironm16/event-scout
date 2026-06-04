@@ -1065,3 +1065,195 @@ body {
   cursor: pointer;
 }
 .results-meta { display: flex; align-items: center; }
+
+/* ════════════════════════════════════════════════════════════════════
+   ✨ 2026 redesign — image-forward cards, visual status, glassy chrome
+   (appended last so it overrides the legacy card rules above)
+   ════════════════════════════════════════════════════════════════════ */
+:root {
+  --card-r: 20px;
+  --accent2: #8a5bff;                 /* gradient partner for --accent */
+  --shadow:    0 6px 22px rgba(20,20,50,.12);
+  --shadow-lg: 0 14px 40px rgba(20,20,50,.20);
+  --ok:   #1faa59;
+  --warn: #ff7a18;
+  --bad:  #e23b4e;
+}
+
+#cardGrid { gap: 16px; padding-bottom: 90px; }
+
+.event-card {
+  background: var(--bg2);
+  border: 1px solid color-mix(in srgb, var(--hint) 12%, transparent);
+  border-radius: var(--card-r);
+  box-shadow: var(--shadow);
+}
+.event-card.open { box-shadow: var(--shadow-lg); }
+
+/* ── Hero ────────────────────────────────────────────────────────── */
+.card-hero {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  min-height: 150px;
+  overflow: hidden;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+  display: block;
+}
+.card-hero .card-image {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover; display: block;
+  transition: transform .5s cubic-bezier(.2,.7,.2,1);
+}
+.event-card.open .card-hero .card-image { transform: scale(1.06); }
+.card-hero.no-img .card-image { display: none; }
+
+.card-hero.no-img { aspect-ratio: 16 / 7; min-height: 116px; }
+.hero-emoji {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 3.6rem; opacity: .9;
+  filter: drop-shadow(0 4px 10px rgba(0,0,0,.25));
+}
+
+.hero-grad {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to top, rgba(0,0,0,.72) 0%, rgba(0,0,0,.25) 38%, transparent 68%);
+}
+
+.hero-top {
+  position: absolute; top: 10px; left: 10px; right: 10px;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
+  pointer-events: none;
+}
+.hero-badges { display: flex; gap: 6px; }
+
+.when-pill {
+  background: rgba(0,0,0,.5);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  color: #fff; font-size: .8rem; font-weight: 700;
+  padding: 5px 11px; border-radius: 999px; white-space: nowrap;
+}
+
+.hero-foot { position: absolute; left: 14px; right: 14px; bottom: 12px; }
+.card-hero .card-title {
+  color: #fff; font-size: 1.18rem; font-weight: 800; line-height: 1.3;
+  letter-spacing: -.2px; margin: 0;
+  text-shadow: 0 2px 10px rgba(0,0,0,.55);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.title-emoji { margin-inline-end: 2px; }
+
+/* Status badges (sold-out / low-stock) */
+.status-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 999px;
+  font-size: .8rem; font-weight: 800; letter-spacing: .3px;
+  color: #fff; pointer-events: none;
+  box-shadow: 0 3px 10px rgba(0,0,0,.3);
+}
+.status-badge.soldout {
+  background: rgba(20,20,30,.78);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  text-transform: uppercase;
+}
+.status-badge.soldout::before { content: "🎟️"; filter: grayscale(1); }
+.status-badge.low { background: linear-gradient(135deg, var(--warn), var(--bad)); }
+.pulse-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #fff;
+  box-shadow: 0 0 0 0 rgba(255,255,255,.8); animation: pulse 1.4s infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255,255,255,.7); }
+  70%  { box-shadow: 0 0 0 7px rgba(255,255,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+}
+/* Sold-out: desaturate the hero so it reads "gone" at a glance */
+.card-hero.soldout .card-image { filter: grayscale(.85) brightness(.62); }
+.card-hero.soldout.no-img { filter: grayscale(.7) brightness(.85); }
+
+.hero-zoom {
+  position: absolute; bottom: 10px; left: 10px;
+  width: 30px; height: 30px; border: none; border-radius: 50%;
+  background: rgba(0,0,0,.45); color: #fff; font-size: 1rem; cursor: pointer;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  opacity: .85;
+}
+.hero-zoom:active { transform: scale(.9); }
+
+/* ── Body ────────────────────────────────────────────────────────── */
+.card-body { padding: 12px 14px 14px; cursor: pointer; }
+.card-pillrow { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.aud-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 11px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent); font-size: .82rem; font-weight: 700;
+}
+.aud-pill::before { content: "👥"; font-size: .8em; }
+.loc-pill {
+  font-size: .86rem; color: var(--hint); font-weight: 600;
+  display: inline-flex; align-items: center; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.card-umbrella {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 9px;
+  padding: 5px 12px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent2) 14%, transparent);
+  color: var(--accent2); font: inherit; font-size: .82rem; font-weight: 700;
+  border: none; cursor: pointer;
+}
+.card-umbrella:active { transform: scale(.96); }
+.card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.card-tags .tag-pill {
+  border: 1px solid color-mix(in srgb, var(--hint) 18%, transparent);
+  background: transparent; color: var(--hint);
+  font-size: .78rem; font-weight: 600; padding: 3px 10px; cursor: pointer;
+}
+.card-tags .tag-pill:active { transform: scale(.93); border-color: var(--accent); color: var(--accent); }
+
+/* ── Redesign: chrome polish (header / dividers / FAB) ─────────────── */
+.app-header {
+  background: color-mix(in srgb, var(--bg2) 82%, transparent);
+  backdrop-filter: saturate(1.4) blur(14px); -webkit-backdrop-filter: saturate(1.4) blur(14px);
+  border-bottom: 1px solid color-mix(in srgb, var(--hint) 12%, transparent);
+}
+.header-top .search-input {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hint) 9%, var(--bg2));
+  border: 1.5px solid transparent;
+}
+.header-top .search-input:focus {
+  border-color: var(--accent);
+  background: var(--bg2);
+}
+
+/* Date dividers as floating glassy pills */
+.date-header {
+  display: inline-block;
+  background: color-mix(in srgb, var(--bg2) 80%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  padding: 6px 14px; margin: 8px 0 2px;
+  border-radius: 999px; font-size: .85rem;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Gradient FAB to match the card hero */
+.view-fab {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 45%, transparent);
+  width: 52px; height: 52px;
+}
+
+/* Floating בשבילי toggle — glassy to match */
+.formee-toggle {
+  background: color-mix(in srgb, var(--bg2) 85%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.formee-toggle.on { border-color: var(--accent); }
