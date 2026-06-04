@@ -1675,26 +1675,12 @@ const {
 
 /** Persistent reply keyboard — quick actions + optional Mini App catalog. */
 function catalogReplyKeyboardMarkup() {
-  const url = getMiniAppCatalogUrl();
-  const profileUrl = getMiniAppProfileUrl();
-  // "📋 פרופיל" opens the Mini App profile editor directly when configured;
-  // falls back to the in-bot text view otherwise.
-  const profileBtn = profileUrl
-    ? { text: "📋 פרופיל", web_app: { url: profileUrl } }
-    : { text: "📋 פרופיל" };
-  // "🔍 חיפוש אירוע" now opens the Mini App catalog (which IS the full
-  // search). Falls back to the in-bot search hub when MINIAPP_URL unset.
-  const searchBtn = url
-    ? { text: "🔍 חיפוש אירוע", web_app: { url } }
-    : { text: "🔍 חיפוש אירוע" };
-  const rows = [
-    [searchBtn, profileBtn],
-    [{ text: "🔔 שמורים" }, { text: "👀 במעקב" }],
-    [{ text: "⭐ תחומי עניין" }, { text: "❓ עזרה" }],
-  ];
+  // Single persistent button. Tapping it sends the text "📋 תפריט ראשי",
+  // which routes to the full inline button menu (sent fresh, so its
+  // web_app buttons reliably carry initData).
   return {
     reply_markup: {
-      keyboard: rows,
+      keyboard: [[{ text: "📋 תפריט ראשי" }]],
       resize_keyboard: true,
       is_persistent: true,
     },
@@ -2188,6 +2174,10 @@ async function dispatchMenuAction(ctx, action) {
   const draft = session.typingMenuDraft || null;
 
   switch (action) {
+    case "main":
+      // Bottom-keyboard "📋 תפריט ראשי" → full inline button menu (fresh).
+      await showFullMenu(ctx, { draftText: draft });
+      return;
     case "search": {
       await showSearchHub(ctx, { draftText: draft });
       if (draft) {
