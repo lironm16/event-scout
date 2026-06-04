@@ -794,6 +794,31 @@ body {
 .map-popup.multi { max-height: 230px; overflow-y: auto; }
 .map-popup.multi .map-popup-ev { padding: 6px 0; border-top: 1px solid rgba(0,0,0,.08); }
 .map-popup.multi .map-popup-ev:first-of-type { border-top: none; }
+.map-popup-ev-clickable { cursor: pointer; }
+
+/* Single-event popup (opened from the map). */
+.event-modal-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,.55);
+  display: none; align-items: flex-start; justify-content: center;
+  overflow-y: auto; padding: 16px;
+}
+.event-modal-backdrop.open { display: flex; }
+.event-modal {
+  width: 100%; max-width: 560px; margin: auto 0;
+  background: var(--bg, #000); border-radius: 14px;
+}
+.event-modal-head {
+  position: sticky; top: 0; z-index: 1; padding: 8px;
+  background: var(--bg, #000);
+  border-bottom: 1px solid color-mix(in srgb, var(--hint) 12%, transparent);
+}
+.event-modal-back {
+  border: none; background: none; color: var(--link, #2ea6ff);
+  font: inherit; font-weight: 600; font-size: .95rem; cursor: pointer; padding: 6px 8px;
+}
+.event-modal-body { padding: 10px; }
+.event-modal-body .event-card { margin: 0; }
 
 /* ── Empty / error / spinner ──────────────────────────────────────── */
 .empty-state {

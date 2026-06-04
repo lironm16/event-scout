@@ -778,6 +778,40 @@
     } catch (_) { /* ignore */ } finally { btn.disabled = false; }
   };
 
+  // Open a single event as a full card in a popup (used by the map).
+  window.openEventModal = async function (eventId) {
+    let overlay = document.getElementById("eventModal");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "eventModal";
+      overlay.className = "event-modal-backdrop";
+      overlay.innerHTML = `
+        <div class="event-modal">
+          <div class="event-modal-head"><button class="event-modal-back" type="button">← חזרה</button></div>
+          <div class="event-modal-body"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const close = () => { overlay.classList.remove("open"); document.body.style.overflow = ""; };
+      overlay.querySelector(".event-modal-back").addEventListener("click", close);
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    }
+    const body = overlay.querySelector(".event-modal-body");
+    body.innerHTML = `<div class="card-description" style="padding:16px">טוען…</div>`;
+    overlay.classList.add("open");
+    document.body.style.overflow = "hidden";
+    try {
+      const res = await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
+      const ev = (await res.json()).event;
+      if (!ev) { body.innerHTML = `<div class="card-description" style="padding:16px">האירוע לא נמצא.</div>`; return; }
+      body.innerHTML = "";
+      const card = buildCard(ev);
+      card.classList.add("open");
+      body.appendChild(card);
+    } catch (_) {
+      body.innerHTML = `<div class="card-description" style="padding:16px">שגיאה בטעינה.</div>`;
+    }
+  };
+
   // Expand a single occurrence inline (dropdown) as a full event card.
   window.toggleOccurrence = async function (rowEl, eventId) {
     const box = document.getElementById(`occd-${eventId}`);
@@ -899,10 +933,9 @@
       });
       const marker = L.marker([g.lat, g.lng], { icon }).addTo(leafletMap);
       const rows = g.list.map((ev) => `
-        <div class="map-popup-ev">
+        <div class="map-popup-ev map-popup-ev-clickable" onclick="window.openEventModal(${ev.id})">
           <div class="map-popup-title">${esc(ev.icon || "📌")} ${esc(ev.name)}</div>
           <div class="map-popup-meta">📅 ${esc(ev.dateHe || ev.date)}${ev.timeHe ? " · " + esc(ev.timeHe) : ""}</div>
-          ${ev.bookingUrl ? `<a class="map-popup-link" href="${esc(ev.bookingUrl)}" target="_blank">🔗 פרטים</a>` : ""}
         </div>`).join("");
       const head = n > 1
         ? `<div class="map-popup-head">${n} אירועים${top.location ? " · 📍 " + esc(top.location) : ""}</div>`
