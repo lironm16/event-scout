@@ -75,6 +75,7 @@ const {
 } = require("../lib/typingActionsMenu");
 const {
   showMainMenu,
+  showFullMenu,
   showSearchHub,
   buildProfileViewKeyboardExtra,
 } = require("../lib/botNavigation");
@@ -2311,7 +2312,8 @@ bot.command("profile", async (ctx) => {
 bot.action(`${MENU}:main`, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const session = sessionStore.getSession(ctx.from.id);
-  await showMainMenu(ctx, { draftText: session?.typingMenuDraft });
+  // Send the FULL button menu as a fresh message (web_app buttons get initData).
+  await showFullMenu(ctx, { draftText: session?.typingMenuDraft });
 });
 
 bot.action(`${MENU}:close`, async (ctx) => {
