@@ -1475,3 +1475,10 @@ body {
   padding: 2px 9px; font-size: .72rem; box-shadow: none;
 }
 .status-badge.low.sm { gap: 0; }
+
+/* ════════════════════════════════════════════════════════════════════
+   ✨ redesign part 8 — לאתר + ניווט share one row
+   ════════════════════════════════════════════════════════════════════ */
+.cta-row { display: flex; gap: 8px; margin-top: 12px; }
+.cta-row .cta-main { flex: 1 1 auto; margin-top: 0; }
+.cta-row .cta-nav  { flex: 0 0 auto; margin-top: 0; }

@@ -581,10 +581,10 @@
     card.style.setProperty("--c1", c1);
     card.style.setProperty("--c2", c2);
 
-    // ── Location line ──
+    // ── Location line — 📷 for online, 📍 physical, 🗺️ city-wide ──
     let locText = "";
-    if (ev.onlineUrl && !ev.location) locText = "📷 אונליין";
-    else if (ev.location && !isCityWide(ev.location)) locText = `${ev.onlineUrl ? "📷" : "📍"} ${esc(ev.location)}`;
+    if (isOnline(ev)) locText = "📷 אונליין";
+    else if (ev.location && !isCityWide(ev.location)) locText = `📍 ${esc(ev.location)}`;
     else if (isCityWide(ev.location)) locText = "🗺️ ברחבי העיר";
 
     // ── Visual ticket status (overlay badge, not a body line) ──
@@ -654,12 +654,20 @@
   function buildDetail(ev, isInterested, opts = {}) {
     const parts = [];
 
-    // 1) Primary CTA — ALWAYS above the details.
+    // 1) Primary CTA + ניווט on one row (ניווט to the left of לאתר).
+    const navUrl = isOnline(ev)
+      ? null
+      : (ev.location && !isCityWide(ev.location)
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}`
+        : (ev._lat && ev._lng ? `https://maps.google.com/?q=${ev._lat},${ev._lng}` : null));
+    const ctaRow = [];
     if (ev.bookingUrl) {
-      parts.push(`<a class="btn btn-primary btn-block" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🔗 לאתר</a>`);
+      ctaRow.push(`<a class="btn btn-primary cta-main" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🔗 לאתר</a>`);
     } else if (ev.onlineUrl) {
-      parts.push(`<a class="btn btn-primary btn-block" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרפו למפגש</a>`);
+      ctaRow.push(`<a class="btn btn-primary cta-main" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרפו למפגש</a>`);
     }
+    if (navUrl) ctaRow.push(`<a class="btn btn-secondary cta-nav" href="${esc(navUrl)}" target="_blank" rel="noopener">🧭 ניווט</a>`);
+    if (ctaRow.length) parts.push(`<div class="cta-row">${ctaRow.join("")}</div>`);
 
     // 2) Description — clamped to 3 lines, with a קרא עוד ↔ סגור toggle.
     if (ev.description) {
@@ -670,12 +678,6 @@
         ${isLong ? `<button class="desc-readmore" onclick="event.stopPropagation();window.toggleDesc(this)">קרא עוד</button>` : ""}
       </div>`);
     }
-
-    // 3) Secondary: navigation.
-    const navUrl = ev.location && !isCityWide(ev.location)
-      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}`
-      : (ev._lat && ev._lng ? `https://maps.google.com/?q=${ev._lat},${ev._lng}` : null);
-    if (navUrl) parts.push(`<div class="card-actions"><a class="btn btn-secondary" href="${esc(navUrl)}" target="_blank" rel="noopener">🧭 ניווט</a></div>`);
 
     // 4) Series → compact "עוד X מהסדרה" list; each row opens a popup.
     //    Only for NON-umbrella events — umbrella members use the purple link
@@ -1284,6 +1286,11 @@
   // ── Utils ─────────────────────────────────────────────────────────────
   const CITY_WIDE = ["ברחבי העיר", "רחבי העיר", "כלל העיר", "מספר מיקומים", "מיקומים שונים"];
   function isCityWide(loc) { return CITY_WIDE.some((k) => (loc || "").includes(k)); }
+  // Online / virtual event → show a camera, never a map pin or navigation.
+  function isOnline(ev) {
+    if (ev && ev.onlineUrl) return true;
+    return /\bzoom\b|\bonline\b|webinar|זום|אונליין|מקוון|וובינר/i.test(`${ev?.name || ""} ${ev?.location || ""}`);
+  }
 
   // Wrap Israeli phone numbers in a tel: link — only on mobile/touch devices
   // where tapping to call is meaningful. On desktop web the link adds no value.
