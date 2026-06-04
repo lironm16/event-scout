@@ -62,6 +62,7 @@
   const interestedIds = new Set();
   const watchedIds = new Set();
   const eventsById = new Map(); // id → serialized event (for related lookups)
+  let catalogScope = "me";      // "me" (בשבילי) | "all" (כללי)
 
   // Server-side search state (sent to /miniapp/events, which runs the bot's
   // full search engine). Light client refinement (type/tag/free-text) still
@@ -187,6 +188,7 @@
       const body = await res.json();
       if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
       buildTagChips(body.profile?.interests || []);
+      catalogScope = body.scope || (serverSearch.ignore_profile ? "all" : "me");
       watchedIds.clear();
       (body.watchedIds || []).forEach((id) => watchedIds.add(id));
       allEvents = body.events || [];
@@ -624,7 +626,10 @@
         ${heroInner}
         <div class="hero-grad"></div>
         <div class="hero-top">
-          <div class="hero-badges">${statusBadge}</div>
+          <div class="hero-badges">
+            ${(catalogScope === "all" && ev.forMe) ? `<span class="status-badge forme">✨ בשבילך</span>` : ""}
+            ${statusBadge}
+          </div>
           ${whenPill}
         </div>
         <div class="hero-foot">
@@ -690,8 +695,12 @@
       parts.push(`<div class="occ-list"></div>`);
     }
 
-    // 5) Quiet "hide" entry → opens the organized suppression sheet.
-    parts.push(`<button class="hide-link" onclick="window.openSuppressSheet(${ev.id})">🙈 אל תראה לי אירועים כאלה</button>`);
+    // 5) Quiet "hide" entry → opens the suppression sheet. Shown only for
+    //    events that DON'T match the profile (matches "would show in בשבילי",
+    //    so we don't offer to filter them out).
+    if (!ev.forMe) {
+      parts.push(`<button class="hide-link" onclick="window.openSuppressSheet(${ev.id})">🙈 אל תראה לי אירועים כאלה</button>`);
+    }
 
     return parts.join("") || "<div class='card-description'>אין פרטים נוספים.</div>";
   }

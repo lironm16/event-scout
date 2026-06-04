@@ -1494,3 +1494,8 @@ body {
 /* Fix: a forced display on .occ-list overrode the [hidden] attribute, so a
    second tap on "עוד מהסדרה" didn't collapse it. */
 .occ-list[hidden] { display: none !important; }
+
+/* ✨ "בשבילך" match badge — shown in כללי mode on profile-matching events */
+.status-badge.forme {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+}
