@@ -666,55 +666,39 @@
       parts.push(`<div class="card-description">${descHtml}</div>`);
     }
 
-    const actions = [];
-
-    // Primary action: booking / details
+    // ── ONE clear primary action ──
     if (ev.bookingUrl) {
-      actions.push(`<a class="btn btn-primary" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🔗 פרטים והרשמה</a>`);
+      parts.push(`<a class="btn btn-primary btn-block" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🎟️ פרטים והרשמה</a>`);
+    } else if (ev.onlineUrl) {
+      parts.push(`<a class="btn btn-primary btn-block" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרפו למפגש</a>`);
     }
-    // Online join
-    if (ev.onlineUrl) {
-      actions.push(`<a class="btn btn-secondary" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרף למפגש</a>`);
-    }
-    // Navigation — prefer text address (shows venue name) over raw coords.
-    if (ev.location && !isCityWide(ev.location)) {
-      actions.push(`<a class="btn btn-secondary" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener">🧭 ניווט</a>`);
-    } else if (ev._lat && ev._lng) {
-      actions.push(`<a class="btn btn-secondary" href="https://maps.google.com/?q=${ev._lat},${ev._lng}" target="_blank" rel="noopener">🧭 ניווט</a>`);
-    }
-    // Umbrella button removed — the card-umbrella chip in the collapsed card
-    // already serves this purpose (with the ← arrow to signal navigation).
 
-    // 🔁 Other occurrences of a recurring series — hidden when this card was
-    // itself opened FROM the occurrences list (prevents a loop).
-    if (!opts.hideOccurrences && (ev.totalOccurrences || 1) > 1) {
-      actions.push(`<button class="btn btn-secondary" onclick="window.showOccurrences(this,${ev.id})">🔁 מופעים נוספים (${ev.totalOccurrences})</button>`);
-    }
-    // 🔔 Watch (low-stock / back-in-stock alerts).
+    // ── Compact quick-action toolbar (icon buttons) ──
+    const navUrl = ev.location && !isCityWide(ev.location)
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}`
+      : (ev._lat && ev._lng ? `https://maps.google.com/?q=${ev._lat},${ev._lng}` : null);
     const watching = watchedIds.has(ev.id);
-    actions.push(`<button class="btn btn-secondary btn-watch${watching ? " active" : ""}" data-event="${ev.id}" onclick="window.toggleWatch(this,${ev.id})">${watching ? "🔔 במעקב ✓" : "🔔 מעקב"}</button>`);
+    const showOcc = !opts.hideOccurrences && (ev.totalOccurrences || 1) > 1;
 
-    if (actions.length) parts.push(`<div class="card-actions">${actions.join("")}</div>`);
-    // Container where the occurrences list renders (omit when suppressed).
+    const acts = [];
+    if (navUrl) acts.push(`<a class="act-ico" href="${esc(navUrl)}" target="_blank" rel="noopener" aria-label="ניווט"><span>🧭</span><b>ניווט</b></a>`);
+    acts.push(`<button class="act-ico${isInterested ? " active" : ""}" data-event="${ev.id}" onclick="window.toggleInterest(this,${ev.id})" aria-label="מעניין אותי"><span>⭐</span><b>מעניין</b></button>`);
+    acts.push(`<button class="act-ico${watching ? " active" : ""}" data-event="${ev.id}" onclick="window.toggleWatch(this,${ev.id})" aria-label="מעקב"><span>🔔</span><b>מעקב</b></button>`);
+    if (showOcc) acts.push(`<button class="act-ico" onclick="window.showOccurrences(this,${ev.id})" aria-label="מופעים נוספים"><span>🔁</span><b>${ev.totalOccurrences} מופעים</b></button>`);
+    acts.push(`<button class="act-ico" onclick="window.toggleMoreMenu(this,${ev.id})" aria-label="עוד"><span>⋯</span><b>עוד</b></button>`);
+    parts.push(`<div class="act-bar">${acts.join("")}</div>`);
+
     if (!opts.hideOccurrences) parts.push(`<div class="occ-list"></div>`);
 
-    // Interest / feedback row
-    const intClass = isInterested ? "btn btn-interest active" : "btn btn-interest";
-    const intLabel = isInterested ? "⭐ מעניין אותי ✓" : "⭐ מעניין אותי";
+    // ── Overflow menu — rarely used / negative actions tucked away ──
     const canExcludePlace = ev.location && !isCityWide(ev.location);
     parts.push(`
-      <div class="card-feedback">
-        <button class="${intClass}" data-event="${ev.id}" onclick="window.toggleInterest(this,${ev.id})">${intLabel}</button>
-        <button class="btn btn-muted" data-event="${ev.id}" onclick="window.toggleFeedbackMenu(this,${ev.id})">🚫 לא מתאים</button>
-      </div>
-      <div class="feedback-menu" id="fb-${ev.id}" hidden>
-        <button class="btn btn-muted" onclick="window.sendFeedback(${ev.id},'not_interested')">✕ פשוט לא מעניין</button>
-        <button class="btn btn-muted" onclick="window.sendFeedback(${ev.id},'wrong_audience')">👥 קהל לא מתאים</button>
-        <button class="btn btn-muted" onclick="window.sendFeedback(${ev.id},'wrong_time')">🕒 שעה לא מתאימה</button>
-        ${canExcludePlace ? `<button class="btn btn-muted" onclick="window.excludePlace(${ev.id})">📍 לא מעוניין במקום הזה</button>` : ""}
-      </div>
-      <div class="card-report-row">
-        <button class="btn-report" onclick="window.openReportSheet(${ev.id})">🚩 דווח על בעיה</button>
+      <div class="more-menu" id="fb-${ev.id}" hidden>
+        <button class="more-item" onclick="window.sendFeedback(${ev.id},'not_interested')">🚫 לא מעניין אותי</button>
+        <button class="more-item" onclick="window.sendFeedback(${ev.id},'wrong_audience')">👥 קהל לא מתאים</button>
+        <button class="more-item" onclick="window.sendFeedback(${ev.id},'wrong_time')">🕒 שעה לא מתאימה</button>
+        ${canExcludePlace ? `<button class="more-item" onclick="window.excludePlace(${ev.id})">📍 לא מעוניין במקום הזה</button>` : ""}
+        <button class="more-item" onclick="window.openReportSheet(${ev.id})">🚩 דווח על בעיה</button>
       </div>
     `);
 
@@ -735,16 +719,20 @@
     const isNow = interestedIds.has(eventId);
     if (isNow) {
       interestedIds.delete(eventId);
-      btn.textContent = "⭐ מעניין אותי";
       btn.classList.remove("active");
       sendSignal(eventId, "not_interested").catch(() => {});
     } else {
       interestedIds.add(eventId);
-      btn.textContent = "⭐ מעניין אותי ✓";
       btn.classList.add("active");
       sendSignal(eventId, "interest").catch(() => {});
       tg?.HapticFeedback?.impactOccurred("light");
     }
+  };
+
+  // ⋯ overflow menu toggle.
+  window.toggleMoreMenu = function (btn, eventId) {
+    const menu = btn.closest(".card-detail")?.querySelector(`#fb-${eventId}`);
+    if (menu) menu.hidden = !menu.hidden;
   };
 
   function fadeOutCard(eventId) {
@@ -801,8 +789,8 @@
       });
       const body = await res.json().catch(() => ({}));
       const watching = body.watching ?? now;
-      if (watching) { watchedIds.add(eventId); btn.classList.add("active"); btn.textContent = "🔔 במעקב ✓"; }
-      else { watchedIds.delete(eventId); btn.classList.remove("active"); btn.textContent = "🔔 מעקב"; }
+      if (watching) { watchedIds.add(eventId); btn.classList.add("active"); }
+      else { watchedIds.delete(eventId); btn.classList.remove("active"); }
       tg?.HapticFeedback?.impactOccurred("light");
     } catch (_) { /* ignore */ } finally { btn.disabled = false; }
   };
