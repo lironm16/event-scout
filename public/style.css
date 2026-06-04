@@ -1411,3 +1411,24 @@ body {
   background: none; border: none; cursor: pointer;
   color: var(--hint); font: inherit; font-size: .84rem; padding: 6px; text-align: center;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   ✨ redesign part 5 — green ticket badge + description preview w/ קרא עוד
+   ════════════════════════════════════════════════════════════════════ */
+.status-badge.ok { background: linear-gradient(135deg, #1faa59, #25c06b); }
+
+/* Description preview — clamped when collapsed, full when open */
+.card-desc {
+  font-size: .9rem; line-height: 1.5; color: var(--text); opacity: .82;
+  margin-top: 10px; white-space: normal;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.event-card.open .card-desc { -webkit-line-clamp: unset; overflow: visible; opacity: .95; }
+
+.readmore-btn {
+  background: none; border: none; cursor: pointer; font: inherit;
+  font-size: .88rem; font-weight: 700; color: var(--accent);
+  padding: 10px 0 0; display: inline-block;
+}
+.readmore-btn::after { content: "קרא עוד ▾"; }
+.event-card.open .readmore-btn::after { content: "סגור ▴"; }

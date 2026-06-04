@@ -592,6 +592,7 @@
     if (t != null) {
       if (t <= 0) { soldOut = true; statusBadge = `<span class="status-badge soldout">אזל</span>`; }
       else if (t <= 9) statusBadge = `<span class="status-badge low"><span class="pulse-dot"></span>${t} אחרונים</span>`;
+      else statusBadge = `<span class="status-badge ok">🎟️ ${t} כרטיסים</span>`;
     }
 
     const tagsHtml = (ev.tags || []).slice(0, 4)
@@ -628,33 +629,33 @@
           <h3 class="card-title">${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(ev.name)}</h3>
         </div>
       </div>
-      <div class="card-body card-click">
+      <div class="card-body">
         <div class="card-pillrow">
           ${audiencePill}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
         </div>
         ${umbrellaHtml}
+        ${ev.description ? `<p class="card-desc">${linkifyPhones(esc(ev.description).replace(/\n/g, "<br>"))}</p>` : ""}
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}
+        <button class="readmore-btn" type="button" aria-label="קרא עוד"></button>
       </div>
       <div class="card-detail">
         ${buildDetail(ev, isInterested, opts)}
       </div>
     `;
 
-    card.querySelectorAll(".card-click").forEach((el) =>
-      el.addEventListener("click", () => toggleCard(card, ev)),
-    );
+    // Hero tap and the קרא עוד/סגור button both expand/collapse.
+    card.querySelector(".card-hero")?.addEventListener("click", () => toggleCard(card, ev));
+    card.querySelector(".readmore-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleCard(card, ev);
+    });
     return card;
   }
 
   function buildDetail(ev, isInterested, opts = {}) {
     const parts = [];
-
-    // Full description shown in expanded view.
-    if (ev.description) {
-      const descHtml = linkifyPhones(esc(ev.description).replace(/\n/g, "<br>"));
-      parts.push(`<div class="card-description">${descHtml}</div>`);
-    }
+    // (Description now lives in the card body — clamped, with קרא עוד/סגור.)
 
     // ── ONE clear primary action ──
     if (ev.bookingUrl) {
