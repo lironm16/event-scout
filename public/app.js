@@ -180,7 +180,8 @@
       return;
     }
     try {
-      spinner.style.display = "block";
+      spinner.style.display = "none";
+      showSkeletons();
       const res  = await fetch(`${API_PREFIX}/events?${buildSearchQuery(extra)}`);
       const body = await res.json();
       if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
@@ -467,6 +468,18 @@
   let _renderIdx = 0;
   let _scrollObserver = null;
 
+  function showSkeletons(n = 4) {
+    catalog.style.display = "block";
+    noResults.style.display = "none";
+    errorDiv.style.display = "none";
+    resultsMeta.textContent = "";
+    cardGrid.innerHTML = Array.from({ length: n }).map(() => `
+      <div class="skel-card">
+        <div class="skel-hero"></div>
+        <div class="skel-body"><div class="skel-line w70"></div><div class="skel-line w40"></div></div>
+      </div>`).join("");
+  }
+
   function renderGrid(events) {
     cardGrid.innerHTML = "";
     noResults.style.display = events.length ? "none" : "block";
@@ -515,7 +528,10 @@
         header.textContent = item.dateHe;
         cardGrid.appendChild(header);
       } else {
-        cardGrid.appendChild(buildCard(item.ev));
+        const node = buildCard(item.ev);
+        node.classList.add("card-reveal");
+        cardGrid.appendChild(node);
+        if (revealObserver) revealObserver.observe(node); else node.classList.add("card-in");
         cardsAdded++;
       }
     }
@@ -541,10 +557,37 @@
   }
 
   // ── Build card ────────────────────────────────────────────────────────
+  // Per-category color pair → each card gets its own accent (esp. the
+  // image-less hero gradient). Falls back to a stable hash-based hue.
+  const CAT_COLORS = {
+    "הצגה": ["#ff6a88", "#ff99ac"], "הופעה": ["#7367f0", "#9e95f5"],
+    "סדנה": ["#00b8a9", "#3fd0c9"], "הרצאה": ["#3a7bd5", "#00d2ff"],
+    "הפעלה": ["#ff9a3c", "#ffc56e"], "משחקייה": ["#ff5fa2", "#ff9ecb"],
+    "מסיבה": ["#b14aed", "#e07bff"], "ארוחה": ["#e8616d", "#ffb199"],
+    "מפגש": ["#2bb673", "#7bd88f"], "סיור": ["#1d976c", "#93f9b9"],
+    "ספורט": ["#f7971e", "#ffd200"], "אחר": ["#5b7fff", "#8a5bff"],
+  };
+  function catColors(ev) {
+    if (ev.category && CAT_COLORS[ev.category]) return CAT_COLORS[ev.category];
+    const s = ev.icon || ev.category || ev.name || "?";
+    let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) % 360;
+    return [`hsl(${h} 68% 56%)`, `hsl(${(h + 38) % 360} 70% 62%)`];
+  }
+
+  // Reveal cards as they scroll into view.
+  const revealObserver = "IntersectionObserver" in window
+    ? new IntersectionObserver((entries, obs) => {
+        entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("card-in"); obs.unobserve(e.target); } });
+      }, { rootMargin: "0px 0px -8% 0px" })
+    : null;
+
   function buildCard(ev, opts = {}) {
     const card = document.createElement("div");
     card.className = "event-card";
     card.dataset.id = ev.id;
+    const [c1, c2] = catColors(ev);
+    card.style.setProperty("--c1", c1);
+    card.style.setProperty("--c2", c2);
 
     // ── Location line ──
     let locText = "";

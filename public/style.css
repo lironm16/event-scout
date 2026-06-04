@@ -1257,3 +1257,66 @@ body {
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .formee-toggle.on { border-color: var(--accent); }
+
+/* ════════════════════════════════════════════════════════════════════
+   ✨ redesign part 2 — category color, reveal-on-scroll, skeletons, buttons
+   ════════════════════════════════════════════════════════════════════ */
+/* Per-category hero gradient (uses --c1/--c2 set on each card in JS) */
+.card-hero        { background: linear-gradient(135deg, var(--c1, var(--accent)), var(--c2, var(--accent2))); }
+.card-hero.no-img { background: linear-gradient(135deg, var(--c1, var(--accent)), var(--c2, var(--accent2))); }
+/* Subtle category-tinted ring when expanded */
+.event-card.open { border-color: color-mix(in srgb, var(--c1, var(--accent)) 55%, transparent); }
+
+/* Reveal-on-scroll */
+.card-reveal { opacity: 0; transform: translateY(14px) scale(.99); }
+.card-reveal.card-in {
+  opacity: 1; transform: none;
+  transition: opacity .45s ease, transform .45s cubic-bezier(.2,.7,.2,1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-reveal, .card-reveal.card-in { opacity: 1; transform: none; transition: none; }
+}
+
+/* Skeleton loaders */
+.skel-card {
+  border-radius: var(--card-r); overflow: hidden;
+  background: var(--bg2); border: 1px solid color-mix(in srgb, var(--hint) 12%, transparent);
+  box-shadow: var(--shadow-sm);
+}
+.skel-hero { aspect-ratio: 16/10; min-height: 150px; }
+.skel-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.skel-line { height: 13px; border-radius: 7px; }
+.skel-line.w70 { width: 70%; } .skel-line.w40 { width: 40%; }
+.skel-hero, .skel-line {
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--hint) 12%, var(--bg2)) 30%,
+    color-mix(in srgb, var(--hint) 22%, var(--bg2)) 50%,
+    color-mix(in srgb, var(--hint) 12%, var(--bg2)) 70%);
+  background-size: 200% 100%; animation: shimmer 1.3s infinite;
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ── Action buttons — modern pills ───────────────────────────────── */
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.card-detail .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 16px; border-radius: 999px;
+  font: inherit; font-size: .9rem; font-weight: 700;
+  border: none; cursor: pointer; text-decoration: none;
+  transition: transform .1s ease, filter .15s ease;
+}
+.card-detail .btn:active { transform: scale(.95); }
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff; box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.btn-secondary {
+  background: color-mix(in srgb, var(--hint) 12%, transparent);
+  color: var(--text);
+}
+.btn-watch.active { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+.btn-interest { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.btn-interest.active { background: var(--ok); color: #fff; }
+.btn-muted { background: color-mix(in srgb, var(--hint) 12%, transparent); color: var(--hint); }
+.feedback-menu .btn { justify-content: flex-start; font-weight: 600; }
+.btn-report { color: var(--hint); opacity: .8; }
