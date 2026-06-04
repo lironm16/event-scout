@@ -387,8 +387,7 @@
       const forMe = !serverSearch.ignore_profile;
       t.classList.toggle("on", forMe);
       t.setAttribute("aria-pressed", String(forMe));
-      const lbl = t.querySelector(".formee-label");
-      if (lbl) lbl.textContent = forMe ? "✨ בשבילי" : "🌐 כולל";
+      // Label stays "✨ בשבילי" always — the knob shows on/off (off = disabled).
     }
   }
 
