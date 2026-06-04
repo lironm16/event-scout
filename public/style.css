@@ -657,6 +657,31 @@ body {
   border-top: 1px solid color-mix(in srgb, var(--hint) 10%, transparent);
 }
 
+/* Detailed feedback reason menu (revealed under "🚫 לא מתאים"). */
+.feedback-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.feedback-menu .btn { text-align: start; }
+
+/* Watch button active state. */
+.btn-watch.active {
+  background: color-mix(in srgb, var(--accent, #2ea6ff) 18%, transparent);
+  border-color: var(--accent, #2ea6ff);
+}
+
+/* Inline occurrences list. */
+.occ-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.occ-row {
+  font-size: .92rem;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--hint) 8%, transparent);
+}
+.occ-empty { font-size: .9rem; color: var(--hint); padding: 4px 2px; }
+
 /* ── Map ──────────────────────────────────────────────────────────── */
 #mapView {
   position: fixed;

@@ -60,6 +60,7 @@
   let leafletMap   = null;
   let tagDrilldown = null;
   const interestedIds = new Set();
+  const watchedIds = new Set();
 
   // Server-side search state (sent to /miniapp/events, which runs the bot's
   // full search engine). Light client refinement (type/tag/free-text) still
@@ -183,6 +184,8 @@
       const body = await res.json();
       if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
       buildTagChips(body.profile?.interests || []);
+      watchedIds.clear();
+      (body.watchedIds || []).forEach((id) => watchedIds.add(id));
       allEvents = body.events || [];
       lastWindowLabel = body.window?.label_he || null;
       lastCanExtend = !!body.canExtend;
@@ -662,15 +665,32 @@
     // Umbrella button removed — the card-umbrella chip in the collapsed card
     // already serves this purpose (with the ← arrow to signal navigation).
 
+    // 🔁 Other occurrences of a recurring series.
+    if ((ev.totalOccurrences || 1) > 1) {
+      actions.push(`<button class="btn btn-secondary" onclick="window.showOccurrences(this,${ev.id})">🔁 מופעים נוספים (${ev.totalOccurrences})</button>`);
+    }
+    // 🔔 Watch (low-stock / back-in-stock alerts).
+    const watching = watchedIds.has(ev.id);
+    actions.push(`<button class="btn btn-secondary btn-watch${watching ? " active" : ""}" data-event="${ev.id}" onclick="window.toggleWatch(this,${ev.id})">${watching ? "🔔 במעקב ✓" : "🔔 מעקב"}</button>`);
+
     if (actions.length) parts.push(`<div class="card-actions">${actions.join("")}</div>`);
+    // Container where the occurrences list renders.
+    parts.push(`<div class="occ-list" id="occ-${ev.id}"></div>`);
 
     // Interest / feedback row
     const intClass = isInterested ? "btn btn-interest active" : "btn btn-interest";
     const intLabel = isInterested ? "⭐ מעניין אותי ✓" : "⭐ מעניין אותי";
+    const canExcludePlace = ev.location && !isCityWide(ev.location);
     parts.push(`
       <div class="card-feedback">
         <button class="${intClass}" data-event="${ev.id}" onclick="window.toggleInterest(this,${ev.id})">${intLabel}</button>
-        <button class="btn btn-muted" data-event="${ev.id}" onclick="window.markNotInterested(this,${ev.id})">✕ לא מתאים</button>
+        <button class="btn btn-muted" data-event="${ev.id}" onclick="window.toggleFeedbackMenu(this,${ev.id})">🚫 לא מתאים</button>
+      </div>
+      <div class="feedback-menu" id="fb-${ev.id}" hidden>
+        <button class="btn btn-muted" onclick="window.sendFeedback(${ev.id},'not_interested')">✕ פשוט לא מעניין</button>
+        <button class="btn btn-muted" onclick="window.sendFeedback(${ev.id},'wrong_audience')">👥 קהל לא מתאים</button>
+        <button class="btn btn-muted" onclick="window.sendFeedback(${ev.id},'wrong_time')">🕒 שעה לא מתאימה</button>
+        ${canExcludePlace ? `<button class="btn btn-muted" onclick="window.excludePlace(${ev.id})">📍 לא מעוניין במקום הזה</button>` : ""}
       </div>
       <div class="card-report-row">
         <button class="btn-report" onclick="window.openReportSheet(${ev.id})">🚩 דווח על בעיה</button>
@@ -706,15 +726,90 @@
     }
   };
 
-  window.markNotInterested = async function (btn, eventId) {
-    btn.textContent = "✓ נרשם";
-    btn.disabled = true;
-    sendSignal(eventId, "not_interested").catch(() => {});
-    // Fade out the card after a moment.
+  function fadeOutCard(eventId) {
     setTimeout(() => {
       const card = document.querySelector(`.event-card[data-id="${eventId}"]`);
       if (card) { card.style.opacity = "0.4"; card.style.pointerEvents = "none"; }
     }, 500);
+  }
+
+  // 🚫 toggle the detailed feedback reason menu.
+  window.toggleFeedbackMenu = function (btn, eventId) {
+    const menu = document.getElementById(`fb-${eventId}`);
+    if (menu) menu.hidden = !menu.hidden;
+  };
+
+  // Submit a reason-tagged "not for me".
+  window.sendFeedback = async function (eventId, reason) {
+    const menu = document.getElementById(`fb-${eventId}`);
+    if (menu) menu.hidden = true;
+    try {
+      await fetch(`${API_PREFIX}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData: INIT_DATA, eventId, reason }),
+      });
+    } catch (_) { /* ignore */ }
+    tg?.HapticFeedback?.impactOccurred("light");
+    fadeOutCard(eventId);
+  };
+
+  // 📍 Exclude the venue from future results.
+  window.excludePlace = async function (eventId) {
+    const menu = document.getElementById(`fb-${eventId}`);
+    if (menu) menu.hidden = true;
+    try {
+      await fetch(`${API_PREFIX}/exclude-place`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData: INIT_DATA, eventId }),
+      });
+    } catch (_) { /* ignore */ }
+    fadeOutCard(eventId);
+  };
+
+  // 🔔 Watch / unwatch.
+  window.toggleWatch = async function (btn, eventId) {
+    const now = !watchedIds.has(eventId);
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${API_PREFIX}/watch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData: INIT_DATA, eventId, watch: now }),
+      });
+      const body = await res.json().catch(() => ({}));
+      const watching = body.watching ?? now;
+      if (watching) { watchedIds.add(eventId); btn.classList.add("active"); btn.textContent = "🔔 במעקב ✓"; }
+      else { watchedIds.delete(eventId); btn.classList.remove("active"); btn.textContent = "🔔 מעקב"; }
+      tg?.HapticFeedback?.impactOccurred("light");
+    } catch (_) { /* ignore */ } finally { btn.disabled = false; }
+  };
+
+  // 🔁 Load & render other occurrences inline.
+  window.showOccurrences = async function (btn, eventId) {
+    const box = document.getElementById(`occ-${eventId}`);
+    if (!box) return;
+    if (box.dataset.loaded === "1") { box.hidden = !box.hidden; return; }
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${API_PREFIX}/occurrences?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
+      const list = (await res.json()).occurrences || [];
+      if (!list.length) { box.innerHTML = `<div class="occ-empty">אין מופעים נוספים.</div>`; }
+      else {
+        box.innerHTML = list.map((o) => {
+          const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
+          const loc = o.location ? ` — ${esc(o.location)}` : "";
+          const link = o.bookingUrl ? ` <a href="${esc(o.bookingUrl)}" target="_blank" rel="noopener">🔗</a>` : "";
+          return `<div class="occ-row">📅 ${esc(when)}${loc}${link}</div>`;
+        }).join("");
+      }
+      box.dataset.loaded = "1";
+      box.hidden = false;
+    } catch (_) {
+      box.innerHTML = `<div class="occ-empty">שגיאה בטעינת המופעים.</div>`;
+      box.hidden = false;
+    } finally { btn.disabled = false; }
   };
 
   // umbrella / tag drill-down state.
