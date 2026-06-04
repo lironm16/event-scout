@@ -1238,6 +1238,7 @@
   }
   function showError(msg) {
     spinner.style.display = "none";
+    if (cardGrid && cardGrid.querySelector(".skel-card")) cardGrid.innerHTML = "";
     errorDiv.style.display = "block";
     errorDiv.innerHTML = `<div class="error-banner">${esc(msg)}</div>`;
   }
