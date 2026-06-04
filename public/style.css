@@ -1490,3 +1490,7 @@ body {
 .series-title { font-size: .92rem; font-weight: 700; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .series-row.two-line .series-when { font-size: .82rem; color: var(--hint); font-weight: 600; }
+
+/* Fix: a forced display on .occ-list overrode the [hidden] attribute, so a
+   second tap on "עוד מהסדרה" didn't collapse it. */
+.occ-list[hidden] { display: none !important; }
