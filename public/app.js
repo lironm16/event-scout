@@ -629,33 +629,39 @@
           <h3 class="card-title">${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(ev.name)}</h3>
         </div>
       </div>
-      <div class="card-body">
+      <div class="card-body card-click">
         <div class="card-pillrow">
           ${audiencePill}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
         </div>
         ${umbrellaHtml}
-        ${ev.description ? `<p class="card-desc">${linkifyPhones(esc(ev.description).replace(/\n/g, "<br>"))}</p>` : ""}
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}
-        <button class="readmore-btn" type="button" aria-label="קרא עוד"></button>
       </div>
       <div class="card-detail">
         ${buildDetail(ev, isInterested, opts)}
       </div>
     `;
 
-    // Hero tap and the קרא עוד/סגור button both expand/collapse.
-    card.querySelector(".card-hero")?.addEventListener("click", () => toggleCard(card, ev));
-    card.querySelector(".readmore-btn")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleCard(card, ev);
-    });
+    // Tap the hero or the body to expand/collapse the card.
+    card.querySelectorAll(".card-click").forEach((el) =>
+      el.addEventListener("click", () => toggleCard(card, ev)),
+    );
     return card;
   }
 
   function buildDetail(ev, isInterested, opts = {}) {
     const parts = [];
-    // (Description now lives in the card body — clamped, with קרא עוד/סגור.)
+
+    // Description — appears only when the card is expanded. Clamped to 3
+    // lines; an inline "קרא עוד" reveals the full text in place (long only).
+    if (ev.description) {
+      const descHtml = linkifyPhones(esc(ev.description).replace(/\n/g, "<br>"));
+      const isLong = ev.description.length > 140;
+      parts.push(`<div class="desc-wrap">
+        <div class="card-description${isLong ? " clamped" : ""}">${descHtml}</div>
+        ${isLong ? `<button class="desc-readmore" onclick="event.stopPropagation();window.expandDesc(this)">קרא עוד</button>` : ""}
+      </div>`);
+    }
 
     // ── ONE clear primary action ──
     if (ev.bookingUrl) {
@@ -705,6 +711,13 @@
       sendSignal(eventId, "interest").catch(() => {});
       tg?.HapticFeedback?.impactOccurred("light");
     }
+  };
+
+  // "קרא עוד" inside an expanded card → reveal the full description in place.
+  window.expandDesc = function (btn) {
+    const wrap = btn.closest(".desc-wrap");
+    wrap?.querySelector(".card-description")?.classList.remove("clamped");
+    btn.remove();
   };
 
   // ⋯ overflow menu toggle.

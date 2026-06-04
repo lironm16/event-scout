@@ -1432,3 +1432,16 @@ body {
 }
 .readmore-btn::after { content: "קרא עוד ▾"; }
 .event-card.open .readmore-btn::after { content: "סגור ▴"; }
+
+/* ════════════════════════════════════════════════════════════════════
+   ✨ redesign part 6 — description shows only when expanded; 3-line clamp
+   ════════════════════════════════════════════════════════════════════ */
+.desc-wrap { margin-bottom: 12px; }
+.card-description.clamped {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.desc-readmore {
+  background: none; border: none; cursor: pointer; padding: 4px 0 0;
+  font: inherit; font-size: .9rem; font-weight: 700; color: var(--accent);
+  text-decoration: underline; text-underline-offset: 2px;
+}
