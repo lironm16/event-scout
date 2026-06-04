@@ -695,10 +695,11 @@
       parts.push(`<div class="occ-list"></div>`);
     }
 
-    // 5) Quiet "hide" entry → opens the suppression sheet. Shown only for
-    //    events that DON'T match the profile (matches "would show in בשבילי",
-    //    so we don't offer to filter them out).
-    if (!ev.forMe) {
+    // 5) Quiet "hide" entry → opens the suppression sheet. Shown for events
+    //    that ARE for you (so you can refine your feed). NOT shown for
+    //    non-matching events in כללי mode — those are already filtered out of
+    //    בשבילי, so there's nothing to suppress.
+    if (ev.forMe !== false) {
       parts.push(`<button class="hide-link" onclick="window.openSuppressSheet(${ev.id})">🙈 אל תראה לי אירועים כאלה</button>`);
     }
 
