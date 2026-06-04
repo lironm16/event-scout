@@ -61,6 +61,7 @@
   let tagDrilldown = null;
   const interestedIds = new Set();
   const watchedIds = new Set();
+  const eventsById = new Map(); // id → serialized event (for related lookups)
 
   // Server-side search state (sent to /miniapp/events, which runs the bot's
   // full search engine). Light client refinement (type/tag/free-text) still
@@ -575,6 +576,7 @@
     const card = document.createElement("div");
     card.className = "event-card";
     card.dataset.id = ev.id;
+    eventsById.set(ev.id, ev);
     const [c1, c2] = catColors(ev);
     card.style.setProperty("--c1", c1);
     card.style.setProperty("--c2", c2);
@@ -652,38 +654,37 @@
   function buildDetail(ev, isInterested, opts = {}) {
     const parts = [];
 
-    // Description — appears only when the card is expanded. Clamped to 3
-    // lines; an inline "קרא עוד" reveals the full text in place (long only).
-    if (ev.description) {
-      const descHtml = linkifyPhones(esc(ev.description).replace(/\n/g, "<br>"));
-      const isLong = ev.description.length > 140;
-      parts.push(`<div class="desc-wrap">
-        <div class="card-description${isLong ? " clamped" : ""}">${descHtml}</div>
-        ${isLong ? `<button class="desc-readmore" onclick="event.stopPropagation();window.expandDesc(this)">קרא עוד</button>` : ""}
-      </div>`);
-    }
-
-    // ── ONE clear primary action ──
+    // 1) Primary CTA — ALWAYS above the details.
     if (ev.bookingUrl) {
       parts.push(`<a class="btn btn-primary btn-block" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🔗 לאתר</a>`);
     } else if (ev.onlineUrl) {
       parts.push(`<a class="btn btn-primary btn-block" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרפו למפגש</a>`);
     }
 
-    // ── Secondary actions: real, labeled, tap-sized buttons ──
+    // 2) Description — clamped to 3 lines, with a קרא עוד ↔ סגור toggle.
+    if (ev.description) {
+      const descHtml = linkifyPhones(esc(ev.description).replace(/\n/g, "<br>"));
+      const isLong = ev.description.length > 140;
+      parts.push(`<div class="desc-wrap">
+        <div class="card-description${isLong ? " clamped" : ""}">${descHtml}</div>
+        ${isLong ? `<button class="desc-readmore" onclick="event.stopPropagation();window.toggleDesc(this)">קרא עוד</button>` : ""}
+      </div>`);
+    }
+
+    // 3) Secondary: navigation.
     const navUrl = ev.location && !isCityWide(ev.location)
       ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}`
       : (ev._lat && ev._lng ? `https://maps.google.com/?q=${ev._lat},${ev._lng}` : null);
-    const showOcc = !opts.hideOccurrences && (ev.totalOccurrences || 1) > 1;
+    if (navUrl) parts.push(`<div class="card-actions"><a class="btn btn-secondary" href="${esc(navUrl)}" target="_blank" rel="noopener">🧭 ניווט</a></div>`);
 
-    const sec = [];
-    if (navUrl) sec.push(`<a class="btn btn-secondary" href="${esc(navUrl)}" target="_blank" rel="noopener">🧭 ניווט</a>`);
-    if (showOcc) sec.push(`<button class="btn btn-secondary" onclick="window.showOccurrences(this,${ev.id})">📅 עוד ${ev.totalOccurrences} תאריכים</button>`);
-    if (sec.length) parts.push(`<div class="card-actions">${sec.join("")}</div>`);
+    // 4) Series → compact "עוד X מהסדרה" list; each row opens a popup.
+    //    (Umbrella keeps its purple link on the card face.)
+    if (!opts.hideOccurrences && (ev.totalOccurrences || 1) > 1) {
+      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">📅 עוד ${ev.totalOccurrences} מהסדרה ▾</button>`);
+      parts.push(`<div class="occ-list"></div>`);
+    }
 
-    if (!opts.hideOccurrences) parts.push(`<div class="occ-list"></div>`);
-
-    // ── Quiet "hide" entry → opens the organized suppression sheet ──
+    // 5) Quiet "hide" entry → opens the organized suppression sheet.
     parts.push(`<button class="hide-link" onclick="window.openSuppressSheet(${ev.id})">🙈 אל תראה לי אירועים כאלה</button>`);
 
     return parts.join("") || "<div class='card-description'>אין פרטים נוספים.</div>";
@@ -713,11 +714,12 @@
     }
   };
 
-  // "קרא עוד" inside an expanded card → reveal the full description in place.
-  window.expandDesc = function (btn) {
-    const wrap = btn.closest(".desc-wrap");
-    wrap?.querySelector(".card-description")?.classList.remove("clamped");
-    btn.remove();
+  // "קרא עוד" ↔ "סגור" — toggle the full description in place.
+  window.toggleDesc = function (btn) {
+    const desc = btn.closest(".desc-wrap")?.querySelector(".card-description");
+    if (!desc) return;
+    const clamped = desc.classList.toggle("clamped");
+    btn.textContent = clamped ? "קרא עוד" : "סגור";
   };
 
   // ⋯ overflow menu toggle.
@@ -812,7 +814,7 @@
       const ev = (await res.json()).event;
       if (!ev) { body.innerHTML = `<div class="card-description" style="padding:16px">האירוע לא נמצא.</div>`; return; }
       body.innerHTML = "";
-      const card = buildCard(ev);
+      const card = buildCard(ev, { hideOccurrences: true });
       card.classList.add("open");
       body.appendChild(card);
     } catch (_) {
@@ -933,37 +935,39 @@
     }
   };
 
-  // 🔁 Load & render other occurrences inline. Resolve the container RELATIVE
-  // to the button (the same card may be rendered in list + popup with the
-  // same id — getElementById would grab the wrong one).
-  window.showOccurrences = async function (btn, eventId) {
-    const box = btn.closest(".event-card")?.querySelector(".occ-list");
+  // Small inline ticket badge for the compact series rows.
+  function miniTicketBadge(t) {
+    if (t == null) return "";
+    if (t <= 0) return `<span class="status-badge soldout sm">אזל</span>`;
+    if (t <= 9) return `<span class="status-badge low sm">${t} אחרונים</span>`;
+    return `<span class="status-badge ok sm">${t} כרטיסים</span>`;
+  }
+
+  // 📅 "עוד X מהסדרה" → a compact date list. Each row opens that date as a
+  // popup (no nested inline expansion).
+  window.showSeries = async function (btn, eventId) {
+    const box = btn.closest(".card-detail")?.querySelector(".occ-list");
     if (!box) return;
     if (box.dataset.loaded === "1") { box.hidden = !box.hidden; return; }
     btn.disabled = true;
     try {
       const res = await fetch(`${API_PREFIX}/occurrences?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
       const list = (await res.json()).occurrences || [];
-      if (!list.length) { box.innerHTML = `<div class="occ-empty">אין מופעים נוספים.</div>`; }
+      if (!list.length) { box.innerHTML = `<div class="occ-empty">אין עוד תאריכים.</div>`; }
       else {
-        // If every occurrence is at the same venue, show it once as a header
-        // and omit it from each row (rows then show just date/time).
-        const locs = list.map((o) => o.location).filter(Boolean);
-        const sharedLoc = locs.length === list.length && new Set(locs).size === 1 ? locs[0] : null;
-        const header = sharedLoc ? `<div class="occ-shared-loc">📍 ${esc(sharedLoc)}</div>` : "";
-        box.innerHTML = header + list.map((o) => {
+        box.innerHTML = list.map((o) => {
           const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
-          const loc = !sharedLoc && o.location ? ` — ${esc(o.location)}` : "";
-          return `<div class="occ-item">
-            <div class="occ-row occ-row-clickable" onclick="window.toggleOccurrence(this,${o.id})">📅 ${esc(when)}${loc} <span class="occ-chevron">›</span></div>
-            <div class="occ-detail" id="occd-${o.id}" hidden></div>
-          </div>`;
+          return `<button class="series-row" onclick="window.openEventModal(${o.id})">
+            <span class="series-when">📅 ${esc(when)}</span>
+            ${miniTicketBadge(o.ticketsLeft)}
+            <span class="series-go">›</span>
+          </button>`;
         }).join("");
       }
       box.dataset.loaded = "1";
       box.hidden = false;
     } catch (_) {
-      box.innerHTML = `<div class="occ-empty">שגיאה בטעינת המופעים.</div>`;
+      box.innerHTML = `<div class="occ-empty">שגיאה בטעינת התאריכים.</div>`;
       box.hidden = false;
     } finally { btn.disabled = false; }
   };
