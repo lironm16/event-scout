@@ -1724,7 +1724,7 @@ async function sendWelcome(ctx) {
     `שלום${firstName}! 🎟️ אני Event Scout — מוצאת לך אירועים, חוגים וכרטיסים ברמת גן.`,
     "",
     "*📩 מה מגיע אליך כאן בהודעות*",
-    "🔔 אשלח לכאן אירועים חדשים שמתאימים לך, וגם ניוזלטר שבועי.",
+    "🔔 ברגע שעולה אירוע חדש שמתאים לך — אשלח לך אותו לכאן (רק מה שתואם, בלי הצפה).",
     "כדי שההתאמה תהיה מדויקת:",
     "• 📋 אפשר להגדיר *פרופיל* — גילאי ילדים, כתובת ותחומי עניין",
     "• 🚫 בכל אירוע שאשלח יש כפתור «אל תראה לי יותר» — והוא מעדכן לך את הפרופיל אוטומטית",
@@ -1737,8 +1737,8 @@ async function sendWelcome(ctx) {
     "",
     "*פקודות נוספות:*",
     "/menu — תפריט ראשי",
-    "/newsletter\\_preview — תצוגה מקדימה של הניוזלטר",
-    "/newsletter\\_off — להשבית את הניוזלטר השבועי (/newsletter\\_on להפעלה)",
+    "/newsletter\\_preview — תצוגה מקדימה של אירועים חדשים שמחכים לך",
+    "/newsletter\\_off — להשבית התראות על אירועים חדשים (/newsletter\\_on להפעלה)",
     "/connect\\_calendar — חיבור ליומן Google",
     "/invite — קישור להזמנת חברים",
     "/help — להציג שוב את ההסבר הזה",
@@ -4671,7 +4671,7 @@ bot.action(/^nl:tog:(\d+)$/, async (ctx) => {
   try {
     const state = sessionStore.getNewsletterState(telegramId);
     if (!state) {
-      await safeAck(ctx, "⏰ הניוזלטר הזה כבר לא בתוקף", { show_alert: false });
+      await safeAck(ctx, "⏰ העדכון הזה כבר לא בתוקף", { show_alert: false });
       return;
     }
     const eventId = parseInt(ctx.match[1], 10);
@@ -4739,7 +4739,7 @@ bot.action("nl:share", async (ctx) => {
   try {
     const state = sessionStore.getNewsletterState(telegramId);
     if (!state) {
-      await safeAck(ctx, "⏰ הניוזלטר הזה כבר לא בתוקף");
+      await safeAck(ctx, "⏰ העדכון הזה כבר לא בתוקף");
       return;
     }
     if (state.selectedEventIds.size === 0) {
@@ -4778,7 +4778,7 @@ bot.action("nl:notrel", async (ctx) => {
   try {
     const state = sessionStore.getNewsletterState(telegramId);
     if (!state) {
-      await safeAck(ctx, "⏰ הניוזלטר הזה כבר לא בתוקף");
+      await safeAck(ctx, "⏰ העדכון הזה כבר לא בתוקף");
       return;
     }
     if (state.selectedEventIds.size === 0) {
@@ -4820,7 +4820,7 @@ bot.action("nl:notrel", async (ctx) => {
 
     await ctx.reply(
       rtlLine(
-        `✅ סימנתי ${selected.length} אירועים כלא רלוונטיים. אזהר מתוכן דומה בניוזלטרים הבאים.`,
+        `✅ סימנתי ${selected.length} אירועים כלא רלוונטיים. אזהר מתוכן דומה בעדכונים הבאים.`,
       ),
     );
     await resetNewsletterSelection(ctx, telegramId);
@@ -4837,7 +4837,7 @@ bot.action("nl:cal", async (ctx) => {
   try {
     const state = sessionStore.getNewsletterState(telegramId);
     if (!state) {
-      await safeAck(ctx, "⏰ הניוזלטר הזה כבר לא בתוקף");
+      await safeAck(ctx, "⏰ העדכון הזה כבר לא בתוקף");
       return;
     }
     if (state.selectedEventIds.size === 0) {
@@ -5106,7 +5106,7 @@ async function loadGoogleTokens(telegramId) {
   return data || null;
 }
 
-// /newsletter_off — pause weekly delivery. Reversible via
+// /newsletter_off — pause new-event alerts. Reversible via
 // /newsletter_on. We do NOT delete the row so `last_sent_at` survives
 // — a user who re-subscribes after a quiet month picks up where the
 // schedule left off rather than getting flooded with backlog.
@@ -5115,11 +5115,11 @@ bot.command("newsletter_off", async (ctx) => {
     const { setNewsletterPaused } = require("../lib/newsletterService");
     await setNewsletterPaused(ctx.from.id, true);
     await ctx.reply(
-      "👍 השבתתי את הניוזלטר השבועי. תוכלי להפעיל בחזרה עם /newsletter_on.",
+      "👍 השבתתי את ההתראות על אירועים חדשים. אפשר להפעיל שוב עם /newsletter_on.",
     );
   } catch (err) {
     console.error("[Bot] /newsletter_off error:", err.message);
-    await ctx.reply("⚠️ שגיאה בהשבתת הניוזלטר. אפשר לנסות שוב.");
+    await ctx.reply("⚠️ שגיאה בהשבתת ההתראות. אפשר לנסות שוב.");
   }
 });
 
@@ -5128,11 +5128,11 @@ bot.command("newsletter_on", async (ctx) => {
     const { setNewsletterPaused } = require("../lib/newsletterService");
     await setNewsletterPaused(ctx.from.id, false);
     await ctx.reply(
-      "👍 הפעלתי את הניוזלטר השבועי. תקבלי אותו ביום חמישי בערב.",
+      "👍 הפעלתי התראות על אירועים חדשים — תקבלי אותם לכאן ברגע שיעלו אירועים שמתאימים לך.",
     );
   } catch (err) {
     console.error("[Bot] /newsletter_on error:", err.message);
-    await ctx.reply("⚠️ שגיאה בהפעלת הניוזלטר. אפשר לנסות שוב.");
+    await ctx.reply("⚠️ שגיאה בהפעלת ההתראות. אפשר לנסות שוב.");
   }
 });
 
@@ -5161,7 +5161,7 @@ bot.command("newsletter_preview", async (ctx) => {
     // closure on its own, and the prefix sets the right
     // expectation immediately ("she heard me, working on it").
     await ctx.reply(
-      "👀 תצוגה מקדימה של הניוזלטר — זה מה שהיית מקבלת ביום חמישי הקרוב:",
+      "👀 תצוגה מקדימה — אלה האירועים החדשים שהיו נשלחים אליך עכשיו:",
     );
     const result = await deliverPreview(bot, ctx.from.id);
     if (result.reason === "no_profile") {
@@ -5175,14 +5175,14 @@ bot.command("newsletter_preview", async (ctx) => {
       // same time as the bot — but a clear error beats a silent
       // "she sent the header and nothing else" UX.
       await ctx.reply(
-        "⚠️ שירות הניוזלטר עדיין מתעורר, נסי שוב בעוד רגע.",
+        "⚠️ שירות ההתראות עדיין מתעורר, נסי שוב בעוד רגע.",
       );
       return;
     }
     if (result.reason === "empty") {
       await ctx.reply(
-        "📭 אין כרגע אירועים שמתאימים לפרופיל שלך בטווח הקרוב. " +
-          "כשיתווספו חדשים — תקבלי אותם בניוזלטר או בתצוגה מקדימה.",
+        "📭 אין כרגע אירועים חדשים שמתאימים לפרופיל שלך בטווח הקרוב. " +
+          "כשיתווספו חדשים — אשלח לך אותם לכאן אוטומטית.",
       );
       return;
     }
@@ -5192,7 +5192,7 @@ bot.command("newsletter_preview", async (ctx) => {
     // photo card and a text caption into the same screen tick
     // and the count anchors the meaning).
     await ctx.reply(
-      `✅ זו תצוגה מקדימה בלבד — הניוזלטר האמיתי יישלח ביום חמישי כרגיל.`,
+      `✅ זו תצוגה מקדימה בלבד — אירועים חדשים יישלחו אליך אוטומטית ברגע שיעלו.`,
     );
   } catch (err) {
     console.error("[Bot] /newsletter_preview error:", err.stack || err.message);
@@ -5249,7 +5249,7 @@ bot.command("newsletter_now", async (ctx) => {
   }
   try {
     const { deliverOne } = require("../lib/newsletterScheduler");
-    await ctx.reply("🛠 מפעילה ניוזלטר עכשיו...");
+    await ctx.reply("🛠 שולחת עדכון אירועים חדשים עכשיו...");
     await deliverOne(bot, ctx.from.id);
     await ctx.reply("✅ נשלח. ה‑last_sent_at עודכן בהתאם.");
   } catch (err) {
