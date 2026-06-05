@@ -1128,15 +1128,8 @@ async function sendEventCard(ctx, event, opts = {}) {
     ]);
   }
 
-  // "Interested" toggle — marks the event for a day-before reminder and
-  // records a learning signal. State is fetched lazily so we don't block
-  // card rendering on a DB round-trip; the button reflects current state.
-  const interested = await isInterested(ctx.from.id, event.id).catch(() => false);
-  rows.push([
-    interested
-      ? Markup.button.callback("⭐ מעניין אותי ✓", `int:rem:${event.id}`)
-      : Markup.button.callback("⭐ מעניין אותי", `int:add:${event.id}`),
-  ]);
+  // ("מעניין אותי" removed from the card — the Web App is the place to
+  // save/track events now.)
 
   // "Not relevant" feedback path — opens a reason picker
   // (`fb:reasons:<event_id>`) to suppress future notifications + collect
@@ -1628,13 +1621,11 @@ bot.start(async (ctx) => {
   }
 
   if (existingProfile) {
-    // Returning user. Keep the reply terse — they know the bot
-    // already; the value of /start to them is the session reset
-    // we did above. /help is included so they can recall the
-    // feature overview without typing it from memory. To re-open
-    // the interests picker they can use /help or /interests; we
-    // deliberately don't auto-open it here on every /start.
+    // Returning user. Show the same welcome/explainer as עזרה (the only
+    // place this longer message appears now — NOT on תפריט ראשי), then the
+    // (clean) menu. Keeps the keyboard fresh too.
     await ctx.reply("שיחה חדשה התחילה 🔄", catalogReplyKeyboardMarkup());
+    await sendWelcome(ctx);
     await showMainMenu(ctx);
     return;
   }
@@ -2023,55 +2014,7 @@ async function sendInviteCard(ctx) {
   });
 }
 
-bot.command("saved", async (ctx) => {
-  try {
-    const items = await listSavedSearches(ctx.from.id);
-    if (!items.length) {
-      await ctx.reply(
-        "עדיין לא שמרת חיפושים.\n" +
-        "אפשר לכתוב לי 'עקבי אחרי...' ואני אגדיר מעקב.",
-      );
-      return;
-    }
-
-    await ctx.reply(`📂 ${items.length} חיפושים שמורים:`);
-    for (const item of items) {
-      const summary = describeSnapshot({
-        query: item.query,
-        tokens: item.tokens,
-        tickets_needed: item.tickets_needed,
-        filters: item.filters || {},
-      });
-      const modeLabel = item.mode === "one_time" ? "🎯 פעם אחת" : "♾️ קבוע";
-      const lines = [`🔍 ${item.query} — ${modeLabel}`];
-      if (summary) lines.push(rtlLine(`📋 ${summary}`));
-      if (item.tickets_remaining != null && item.tickets_needed != null) {
-        lines.push(`🎫 חסרים ${item.tickets_remaining}/${item.tickets_needed}`);
-      }
-      const buttonRows = [];
-      if (item.mode === "one_time") {
-        buttonRows.push([Markup.button.callback("♾️ עדכני גם על עתידיים", `ss:rec:${item.id}`)]);
-      }
-      // Edit + archive are the two most common follow-up actions, so
-      // they sit on a shared row right under the summary. Tapping
-      // "ערכי" loads this watcher into the same editable card the
-      // create-flow uses, but in "update" mode so save commits via
-      // `updateSavedSearch` (preserves id + notification history).
-      buttonRows.push([
-        Markup.button.callback("✏️ ערכי", `pse:edit:${item.id}`),
-        Markup.button.callback("🔕 הפסיקי לעקוב", `ss:rm:${item.id}`),
-      ]);
-      await ctx.reply(lines.join("\n"), Markup.inlineKeyboard(buttonRows));
-    }
-  } catch (err) {
-    console.error("[Bot] /saved error:", err.message);
-    await ctx.reply("⚠️ שגיאה בשליפת החיפושים השמורים.");
-  }
-});
-
-bot.command("search", async (ctx) => {
-  await showSearchHub(ctx);
-});
+// (/saved command removed — saved searches live in the Web App.)
 
 bot.command("menu", async (ctx) => {
   await showMainMenu(ctx);
@@ -2746,14 +2689,7 @@ async function openInterestsPicker(ctx, { target = "self", partnerName = null } 
   });
 }
 
-bot.command("interests", async (ctx) => {
-  try {
-    await openInterestsPicker(ctx, { target: "self" });
-  } catch (err) {
-    console.error("[Bot] /interests error:", err.message);
-    await ctx.reply("⚠️ שגיאה בפתיחת בחירת תחומי עניין.");
-  }
-});
+// (/interests command removed — interests are edited in the Web App profile.)
 
 // Toggle a single chip. Edits the keyboard in place on the SAME message
 // so the user sees the ✓ flip without the chat scrolling. Telegram
@@ -5414,20 +5350,7 @@ bot.command("debug", async (ctx) => {
   }
 });
 
-bot.command("watching", async (ctx) => {
-  try {
-    const watched = await getWatchedEvents(ctx.from.id);
-    if (!watched.length) {
-      await ctx.reply("🔕 אין אירועים ברשימת המעקב שלך כרגע.");
-      return;
-    }
-    await ctx.reply(`🔔 אירועים במעקב (${watched.length}):`);
-    await sendWatchListCards(ctx, watched);
-  } catch (err) {
-    console.error("[Bot] /watching error:", err.message);
-    await ctx.reply("⚠️ שגיאה.");
-  }
-});
+// (/watching command removed — watchlist lives in the Web App.)
 
 // /recap — admin-only WhatsApp ticket recap. Surfaces every
 // currently-active ticket (status='active' AND event_date in the

@@ -545,13 +545,16 @@
   function render() {
     const root = document.getElementById("pf-root");
     root.innerHTML = "";
+    // Frequently-tuned settings first; rarely-changed ones (ילדים, כתובת) go
+    // to the bottom.
     renderDetails(root);
-    renderKids(root);
-    renderLocation(root);
-    renderAvailability(root);
     renderTopics(root);
     renderAudiences(root);
+    renderAvailability(root);
     renderCommunities(root);
+    // ── rarely changed ──
+    renderKids(root);
+    renderLocation(root);
     renderSuppressions(root);
   }
 
