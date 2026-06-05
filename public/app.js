@@ -61,6 +61,7 @@
   let tagDrilldown = null;
   const interestedIds = new Set();
   const watchedIds = new Set();
+  let userHome = null; // { lat, lng, address } from the profile — distance/nav
   const eventsById = new Map(); // id → serialized event (for related lookups)
   let catalogScope = "me";      // "me" (בשבילי) | "all" (כללי)
 
@@ -188,6 +189,7 @@
       const body = await res.json();
       if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
       buildTagChips(body.profile?.interests || []);
+      userHome = body.profile?.home || null;
       catalogScope = body.scope || (serverSearch.ignore_profile ? "all" : "me");
       watchedIds.clear();
       (body.watchedIds || []).forEach((id) => watchedIds.add(id));
@@ -284,6 +286,13 @@
       arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.startTime || "").localeCompare(a.startTime || ""));
     } else if (activeSort === "name-asc") {
       arr.sort((a, b) => (a.name || "").localeCompare(b.name || "", "he"));
+    } else if (activeSort === "dist-asc") {
+      // Closest first; events with no known distance sink to the bottom.
+      arr.sort((a, b) => {
+        const da = a.distanceKm == null ? Infinity : a.distanceKm;
+        const db = b.distanceKm == null ? Infinity : b.distanceKm;
+        return da - db || (a.date || "").localeCompare(b.date || "");
+      });
     } else {
       // date-asc: sort by date then by start time within the same day
       arr.sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.startTime || "").localeCompare(b.startTime || ""));
@@ -694,15 +703,29 @@
     return card;
   }
 
+  // Navigation URL — directions FROM the user's home when we know it
+  // (origin=home → destination=venue), so the maps app opens a ROUTE from
+  // home rather than just dropping a pin. Falls back to a venue search when
+  // there's no home on file.
+  function navUrlFor(ev) {
+    if (isOnline(ev)) return null;
+    const dest = (ev._lat != null && ev._lng != null)
+      ? `${ev._lat},${ev._lng}`
+      : (ev.location && !isCityWide(ev.location) ? ev.location : null);
+    if (!dest) return null;
+    const destParam = encodeURIComponent(dest);
+    if (userHome && userHome.lat != null && userHome.lng != null) {
+      const origin = `${userHome.lat},${userHome.lng}`;
+      return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destParam}&travelmode=driving`;
+    }
+    return `https://www.google.com/maps/search/?api=1&query=${destParam}`;
+  }
+
   function buildDetail(ev, isInterested, opts = {}) {
     const parts = [];
 
-    // 1) Primary CTA + ניווט on one row (ניווט to the left of לאתר).
-    const navUrl = isOnline(ev)
-      ? null
-      : (ev.location && !isCityWide(ev.location)
-        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}`
-        : (ev._lat && ev._lng ? `https://maps.google.com/?q=${ev._lat},${ev._lng}` : null));
+    // 1) Primary CTA + ניווט (+ watch when sold out) on one row.
+    const navUrl = navUrlFor(ev);
     const ctaRow = [];
     if (ev.bookingUrl) {
       ctaRow.push(`<a class="btn btn-primary cta-main" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🔗 לאתר</a>`);
@@ -710,6 +733,13 @@
       ctaRow.push(`<a class="btn btn-primary cta-main" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרפו למפגש</a>`);
     }
     if (navUrl) ctaRow.push(`<a class="btn btn-secondary cta-nav" href="${esc(navUrl)}" target="_blank" rel="noopener">🧭 ניווט</a>`);
+    // Sold-out → watch-tickets button, leftmost on the row (RTL: last in the
+    // DOM renders leftmost). Opt-in alert when tickets free up / run low.
+    const soldOut = ev.ticketsLeft != null && ev.ticketsLeft <= 0;
+    if (soldOut) {
+      const watching = watchedIds.has(ev.id);
+      ctaRow.push(`<button class="btn btn-secondary cta-watch${watching ? " active" : ""}" onclick="event.stopPropagation();window.toggleWatch(this,${ev.id})">${watching ? "🔔 עוקבים" : "🔔 עקבו"}</button>`);
+    }
     if (ctaRow.length) parts.push(`<div class="cta-row">${ctaRow.join("")}</div>`);
 
     // 2) Description — clamped to 3 lines, with a קרא עוד ↔ סגור toggle.
@@ -838,6 +868,9 @@
       const watching = body.watching ?? now;
       if (watching) { watchedIds.add(eventId); btn.classList.add("active"); }
       else { watchedIds.delete(eventId); btn.classList.remove("active"); }
+      if (btn.classList.contains("cta-watch")) {
+        btn.textContent = watching ? "🔔 עוקבים" : "🔔 עקבו";
+      }
       tg?.HapticFeedback?.impactOccurred("light");
     } catch (_) { /* ignore */ } finally { btn.disabled = false; }
   };
@@ -1116,16 +1149,33 @@
         popupAnchor: [0, -42],
       });
       const marker = L.marker([g.lat, g.lng], { icon }).addTo(leafletMap);
-      const rows = g.list.map((ev) => `
+      const rows = g.list.map((ev) => {
+        const nav = navUrlFor(ev);
+        return `
         <div class="map-popup-ev map-popup-ev-clickable" onclick="window.openEventModal(${ev.id})">
           <div class="map-popup-title">${esc(ev.icon || "📌")} ${esc(ev.name)}</div>
           <div class="map-popup-meta">📅 ${esc(ev.dateHe || ev.date)}${ev.timeHe ? " · " + esc(ev.timeHe) : ""}</div>
-        </div>`).join("");
+          ${nav ? `<a class="map-popup-nav" href="${esc(nav)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🧭 ניווט מהבית</a>` : ""}
+        </div>`;
+      }).join("");
       const head = n > 1
         ? `<div class="map-popup-head">${n} אירועים${top.location ? " · 📍 " + esc(top.location) : ""}</div>`
         : (top.location ? `<div class="map-popup-head">📍 ${esc(top.location)}</div>` : "");
       marker.bindPopup(`<div class="map-popup${n > 1 ? " multi" : ""}">${head}${rows}</div>`);
       bounds.push([g.lat, g.lng]);
+    }
+    // "My location" — a distinct home marker so the user sees where events
+    // sit relative to home. Added to the bounds so it stays in view.
+    if (userHome && userHome.lat != null && userHome.lng != null) {
+      const homeIcon = L.divIcon({
+        className: "",
+        html: `<div class="map-pin map-pin-home">🏠</div>`,
+        iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -42],
+      });
+      L.marker([userHome.lat, userHome.lng], { icon: homeIcon })
+        .addTo(leafletMap)
+        .bindPopup(`<div class="map-popup"><div class="map-popup-head">🏠 הבית שלי${userHome.address ? " · " + esc(userHome.address) : ""}</div></div>`);
+      bounds.push([userHome.lat, userHome.lng]);
     }
     if (bounds.length) leafletMap.fitBounds(bounds, { padding: [30, 30] });
     resultsMeta.textContent = `${withCoords.length} אירועים על המפה`;

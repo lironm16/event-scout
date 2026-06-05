@@ -1532,10 +1532,14 @@ body {
 .series-row:active { background: color-mix(in srgb, var(--hint) 15%, transparent); }
 .sr-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .sr-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.sr-when, .sr-title { font-size: .95rem; font-weight: 700; color: var(--text);
+.sr-title { font-size: .95rem; font-weight: 700; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Date·time line WRAPS rather than clipping — a long programme was cutting
+   the time off the end on mobile. Same for the meta line. */
+.sr-when { font-size: .95rem; font-weight: 700; color: var(--text);
+  white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
 .sr-meta { font-size: .8rem; color: var(--hint);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .sr-tk.ok   { color: var(--hint); }
 .sr-tk.low  { color: var(--warn); font-weight: 700; }
 .sr-tk.sold { color: var(--bad); font-weight: 700; }
@@ -1720,3 +1724,35 @@ body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
   background: color-mix(in srgb, var(--warn) 16%, transparent);
   color: color-mix(in srgb, var(--warn) 90%, var(--text));
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   ✨ redesign part 12 — watch-tickets CTA, my-location marker, popup nav
+   ════════════════════════════════════════════════════════════════════ */
+/* Watch-tickets button shares the CTA row (לאתר · ניווט · עקבו). It sits
+   leftmost (last in DOM → leftmost in RTL). The row may wrap on very narrow
+   screens rather than overflow. */
+.cta-row { flex-wrap: wrap; }
+.cta-row .cta-watch {
+  flex: 0 0 auto; margin-top: 0; white-space: nowrap;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg2));
+  color: var(--accent);
+}
+.cta-row .cta-watch.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-color: transparent; color: #fff;
+}
+
+/* "My location" home pin — green-tinted so it stands out from white event pins. */
+.map-pin-home {
+  background: color-mix(in srgb, var(--ok) 18%, #fff);
+  border-color: var(--ok);
+}
+
+/* Navigation link inside a map popup. */
+.map-popup-nav {
+  display: inline-block; margin-top: 5px;
+  font-size: .82rem; font-weight: 700; color: var(--accent);
+  text-decoration: none;
+}
+.map-popup-nav:active { opacity: .6; }
