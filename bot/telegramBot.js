@@ -1737,8 +1737,8 @@ async function sendWelcome(ctx) {
     "",
     "*פקודות נוספות:*",
     "/menu — תפריט ראשי",
-    "/newsletter\\_preview — תצוגה מקדימה של אירועים חדשים שמחכים לך",
-    "/newsletter\\_off — להשבית התראות על אירועים חדשים (/newsletter\\_on להפעלה)",
+    "/alerts\\_preview — תצוגה מקדימה של אירועים חדשים שמחכים לך",
+    "/alerts\\_off — להשבית התראות על אירועים חדשים (/alerts\\_on להפעלה)",
     "/connect\\_calendar — חיבור ליומן Google",
     "/invite — קישור להזמנת חברים",
     "/help — להציג שוב את ההסבר הזה",
@@ -5106,16 +5106,16 @@ async function loadGoogleTokens(telegramId) {
   return data || null;
 }
 
-// /newsletter_off — pause new-event alerts. Reversible via
-// /newsletter_on. We do NOT delete the row so `last_sent_at` survives
+// /alerts_off (alias: /newsletter_off) — pause new-event alerts.
+// Reversible via /alerts_on. We do NOT delete the row so `last_sent_at` survives
 // — a user who re-subscribes after a quiet month picks up where the
 // schedule left off rather than getting flooded with backlog.
-bot.command("newsletter_off", async (ctx) => {
+bot.command(["alerts_off", "newsletter_off"], async (ctx) => {
   try {
     const { setNewsletterPaused } = require("../lib/newsletterService");
     await setNewsletterPaused(ctx.from.id, true);
     await ctx.reply(
-      "👍 השבתתי את ההתראות על אירועים חדשים. אפשר להפעיל שוב עם /newsletter_on.",
+      "👍 השבתתי את ההתראות על אירועים חדשים. אפשר להפעיל שוב עם /alerts_on.",
     );
   } catch (err) {
     console.error("[Bot] /newsletter_off error:", err.message);
@@ -5123,7 +5123,7 @@ bot.command("newsletter_off", async (ctx) => {
   }
 });
 
-bot.command("newsletter_on", async (ctx) => {
+bot.command(["alerts_on", "newsletter_on"], async (ctx) => {
   try {
     const { setNewsletterPaused } = require("../lib/newsletterService");
     await setNewsletterPaused(ctx.from.id, false);
@@ -5151,7 +5151,7 @@ bot.command("newsletter_on", async (ctx) => {
 // QA-style "did the copy actually ship?" testing), this command
 // is for any user who wants to see "what would arrive on Thursday".
 // Safe to tap repeatedly.
-bot.command("newsletter_preview", async (ctx) => {
+bot.command(["alerts_preview", "newsletter_preview"], async (ctx) => {
   try {
     const { deliverPreview } = require("../lib/newsletterScheduler");
     // Prefix BEFORE the cards so the user understands the cards
@@ -5243,7 +5243,7 @@ bot.command("connect_calendar", async (ctx) => {
 // /newsletter_now — admin-only manual trigger. Generates + delivers
 // the digest to the caller immediately, bypassing the schedule. Used
 // for testing copy + content quality without waiting for Thursday.
-bot.command("newsletter_now", async (ctx) => {
+bot.command(["alerts_now", "newsletter_now"], async (ctx) => {
   if (!ADMIN_CHAT_ID || String(ctx.from.id) !== String(ADMIN_CHAT_ID)) {
     return; // silent for non-admins
   }
