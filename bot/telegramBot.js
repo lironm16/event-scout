@@ -877,14 +877,6 @@ async function sendEventCard(ctx, event, opts = {}) {
     ? opts.seriesOccurrenceCount
     : 1;
   const additionalOccurrences = Math.max(0, seriesCount - 1);
-  // `seriesMultiVenue` flags a series whose occurrences span more
-  // than one venue (e.g. ביכורי תינוקות runs the same workshop at 6
-  // community centres). When true we suppress the representative's
-  // venue line — it would mislead the user into thinking ALL dates
-  // are at that one place. The per-occurrence venue is shown in the
-  // "כל המופעים" list instead, where it's actionable.
-  const multiVenue = Boolean(opts.seriesMultiVenue);
-
   const soldOut = event.tickets_left === 0 || event._is_sold_out;
   // Two-tier title (May-2026 user request, sql/056 cleanup).
   //   Primary   = umbrella_title — the "branding" line. For a non-
@@ -927,7 +919,6 @@ async function sendEventCard(ctx, event, opts = {}) {
           : `📍 ${escapeHtml(event.location)}`,
       );
     }
-    if (multiVenue) lines.push(`🗺️ מתקיים גם במיקומים נוספים — ראו «כל המופעים»`);
   }
   // Tickets line — the helper handles all branches:
   //   sold out         → "🚫 אזלו הכרטיסים"
@@ -955,15 +946,28 @@ async function sendEventCard(ctx, event, opts = {}) {
     lines.push(`🔁 ${moadStr}`);
   }
   if (event._proximity?.label) lines.push(escapeHtml(event._proximity.label));
-  if (event._reason) lines.push(`💡 ${escapeHtml(event._reason)}`);
+
+  // Minimal-bot model: when the Mini App is configured the card is a
+  // TEASER and a single "📖 לפרטים והרשמה" button opens the full event
+  // page in the Web App (startapp deep link → fresh launch, robust on
+  // stale messages; web_app fallback when we can't resolve the username).
+  // Without a Mini App URL the bot is the only UI → richer buttons below.
+  const catalogConfigured = Boolean(getMiniAppCatalogUrl());
+  const botUsername = catalogConfigured
+    ? await referralService.getBotUsername(ctx.telegram).catch(() => null)
+    : null;
+  const miniEventLink =
+    catalogConfigured && botUsername
+      ? buildMiniAppReadMoreLink(botUsername, event.id)
+      : null;
+  const miniEventWebUrl = catalogConfigured ? getMiniAppEventUrl(event.id) : null;
 
   // Description (sql/053) — excerpt + inline "קרא עוד" link when truncated.
-  // "קרא עוד" opens a full event page in the Mini App (web_app button)
-  // when configured. Falls back to the in-bot deep-link re-send otherwise.
-  const eventWebUrl = opts.fullDescription ? null : getMiniAppEventUrl(event.id);
-  const readMoreHref = opts.fullDescription || eventWebUrl
+  // Points at the Web App event page when configured, else the in-bot
+  // deep-link re-send.
+  const readMoreHref = opts.fullDescription
     ? null
-    : await readMoreHrefFor(ctx.telegram, event.id);
+    : miniEventLink || (await readMoreHrefFor(ctx.telegram, event.id));
   const descLine = formatDescriptionForCard(event.description, {
     fullDescription: Boolean(opts.fullDescription),
     readMoreHref,
@@ -971,68 +975,65 @@ async function sendEventCard(ctx, event, opts = {}) {
   });
   if (descLine) lines.push(`📝 ${descLine}`);
 
-  // Tag line — surfaces the topic at-a-glance ("מוזיקה • התפתחות") so
-  // the user gets the gist before tapping "פרטים". The renderer uses
-  // ORDER (search hits → personal interests → plain) to surface the
-  // most relevant tags first inside the (capped) line. No per-tag
-  // emojis — the leading 🏷️ is the only glyph on the line.
+  // Teaser caption: just the essentials (title / date / time / audience /
+  // location / tickets / series-count / proximity / short description).
+  // Topical tags, the match-reason line, low-confidence verdicts and the
+  // profile-fit line were dropped — the full context is one tap away in
+  // the Web App. `navOpts` is still needed by the no-Mini-App fallback.
   const navOpts = navOptsFromProfile(profile, event);
 
-  if (Array.isArray(event.tags) && event.tags.length) {
-    const { filterTagsForDisplay } = require("../lib/tagSuppressPrefs");
-    const displayTags = filterTagsForDisplay(event.tags, profile);
-    const interests = profile?.user_context?.interests || [];
-    const searched = Array.isArray(event._searchedTagNames) ? event._searchedTagNames : [];
-    const tagLine = formatTagLine(displayTags, {
-      highlight: interests,
-      searchHits: searched,
-    });
-    if (tagLine) lines.push(tagLine);
-  }
-  // Surface low-confidence audience matches honestly. We surface, never
-  // hide — silent classifications still get through to the user, but with
-  // a small warning so they can dismiss if irrelevant. The classifier
-  // marks 'silent' (no signal at all) and 'inferred_match' but only the
-  // first warrants a UI tag.
-  const v = event._audience_verdict;
-  if (v && v.decision === "include" && v.confidence != null && v.confidence < 0.6 && v.reason) {
-    lines.push(v.reason);
-  }
-
-  // «חיפוש כללי» — highlight events that DO fit the profile. Placed last,
-  // below the labels, so it reads as a closing summary line.
-  if (opts.profileFit) lines.push("✨ מתאים לפרופיל שלך");
-
-  // "🧭 ניווט" + "🔗 פרטים" share a row when both exist (compact and
-  // visually paired — directions next to the event page link). If
-  // only one is available it stands alone.
-  //
-  // Order matters: Telegram lays inline buttons out left-to-right in
-  // the order they appear in the array, regardless of the surrounding
-  // text's RTL direction. With Hebrew labels we want the primary
-  // action ("פרטים") on the RIGHT — closer to where the eye lands
-  // first in an RTL message — so it goes SECOND in the array.
-  //
-  // The nav button is ONE button now (down from Waze + Maps). On
-  // Android the OS shows its app picker when multiple map apps are
-  // installed; on iOS it opens the user's installed map app. See
-  // `lib/eventCard.js#buildNavigateButton` for the rationale.
+  // ── Buttons ──────────────────────────────────────────────────────────
   const rows = [];
-  const detailsBtn = buildDetailsButton(event);
-  const navBtns = buildNavButtons(event, navOpts);
-  const topRow = [...navBtns, detailsBtn].filter(Boolean);
-  if (topRow.length) rows.push(topRow);
 
-  // "📖 קרא עוד" → full event page in the Mini App (web_app). Only when a
-  // Mini App URL is configured and the card carries a description.
-  if (eventWebUrl && event.description) {
-    rows.push([Markup.button.webApp("📖 קרא עוד", eventWebUrl)]);
+  // Quick bot-native actions shared by both layouts: watch-when-available
+  // (sold-out events) and "אל תראה לי יותר". Built once, appended last so
+  // they sit on a single compact row beneath the primary CTA.
+  const quickRow = [];
+  if (soldOut) {
+    const watching = await isWatching(ctx.from.id, event.id).catch(() => false);
+    const watchCb = event._ticketsNeeded
+      ? `wt:${event.id}:${event._ticketsNeeded}`
+      : `wt:${event.id}`;
+    quickRow.push(
+      watching
+        ? Markup.button.callback("🔕 בטל מעקב", `unw:${event.id}`)
+        : Markup.button.callback("🔔 עדכן אם מתפנה", watchCb),
+    );
+  }
+  if (!opts.hideNotRelevant) {
+    // "אל תראה לי יותר" → reason picker (fb:reasons:<id>). Suppressed when
+    // `hideNotRelevant` is set (e.g. a «כללי» result already outside the
+    // profile — opting out is meaningless there).
+    quickRow.push(
+      Markup.button.callback("🚫 אל תראה לי יותר", `fb:reasons:${event.id}`),
+    );
   }
 
-  // Online meeting join button — shown only when event has a Zoom/Meet link.
-  if (event.online_url) {
-    rows.push([Markup.button.url("📹 הצטרף למפגש", event.online_url)]);
-  }
+  if (miniEventLink || miniEventWebUrl) {
+    // TEASER (Mini App configured): ONE primary CTA → the full event page
+    // in the Web App. Booking link, navigation, every occurrence/series and
+    // the online-join link all live there, so the card itself stays clean.
+    rows.push([
+      miniEventLink
+        ? Markup.button.url("📖 לפרטים והרשמה", miniEventLink)
+        : Markup.button.webApp("📖 לפרטים והרשמה", miniEventWebUrl),
+    ]);
+    if (quickRow.length) rows.push(quickRow);
+  } else {
+    // FALLBACK (no Mini App URL — the bot is the only UI). "🧭 ניווט" +
+    // "🔗 פרטים" share a row; Hebrew RTL puts the primary ("פרטים") on the
+    // right by placing it SECOND in the array.
+    const detailsBtn = buildDetailsButton(event);
+    const navBtns = buildNavButtons(event, navOpts);
+    const topRow = [...navBtns, detailsBtn].filter(Boolean);
+    if (topRow.length) rows.push(topRow);
+
+    if (readMoreHref && event.description) {
+      rows.push([Markup.button.url("📖 קרא עוד", readMoreHref)]);
+    }
+    if (event.online_url) {
+      rows.push([Markup.button.url("📹 הצטרף למפגש", event.online_url)]);
+    }
 
   // Series / umbrella button — TWO possible behaviours, mutually
   // exclusive (the user picked one button max for visual restraint):
@@ -1116,29 +1117,7 @@ async function sendEventCard(ctx, event, opts = {}) {
     ]);
   }
 
-  if (soldOut) {
-    const watching = await isWatching(ctx.from.id, event.id).catch(() => false);
-    const watchCb = event._ticketsNeeded
-      ? `wt:${event.id}:${event._ticketsNeeded}`
-      : `wt:${event.id}`;
-    rows.push([
-      watching
-        ? Markup.button.callback("🔕 בטל מעקב", `unw:${event.id}`)
-        : Markup.button.callback("🔔 עדכן אותי אם מתפנה", watchCb),
-    ]);
-  }
-
-  // ("מעניין אותי" removed from the card — the Web App is the place to
-  // save/track events now.)
-
-  // "Not relevant" feedback path — opens a reason picker
-  // (`fb:reasons:<event_id>`) to suppress future notifications + collect
-  // labelled data. Suppressed when `hideNotRelevant` is set: in a
-  // «חיפוש כללי» an event that's already OUTSIDE the user's profile
-  // (wouldn't show in «בשבילי») makes "אל תראה לי יותר" meaningless —
-  // they deliberately opted to see beyond their profile.
-  if (!opts.hideNotRelevant) {
-    rows.push([Markup.button.callback("🚫 אל תראה לי יותר", `fb:reasons:${event.id}`)]);
+    if (quickRow.length) rows.push(quickRow);
   }
 
   // RTL anchoring: every card line gets an RLM prefix so Telegram lays
