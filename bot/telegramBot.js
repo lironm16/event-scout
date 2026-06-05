@@ -1711,36 +1711,37 @@ async function sendWelcome(ctx) {
     ? `, ${escapeMarkdownStrict(ctx.from.first_name)}`
     : "";
 
-  // The bot is now MINIMAL: it finds events and notifies you, and the
-  // rich experience — search with filters, full event details, your
-  // profile, saved searches, watchlist — lives in the Web App. So the
-  // welcome explains the model + the two Web App entry points, and lists
-  // only the commands that still exist. (Underscores in command names
-  // are escaped for Markdown v1, or Telegram opens an italic span that
-  // never closes → "can't parse entities".)
+  // The bot is now MINIMAL. The welcome is split into two clear parts:
+  //   📩 in MESSAGES — what the bot sends here (matching events + weekly
+  //      newsletter), and the two ways to make it accurate: set up the
+  //      profile, or tap "אל תראה לי יותר" on an event (updates prefs).
+  //   📱 in the APP — what you can see (search/filters/details/map/
+  //      distances/profile) and how to open it (the buttons below).
+  // Only the still-existing commands are listed. (Underscores in command
+  // names are escaped for Markdown v1, or Telegram opens an italic span
+  // that never closes → "can't parse entities".)
   const lines = [
-    `שלום${firstName}! 🎟️ אני Event Scout — מוצאת לך אירועים, חוגים וכרטיסים ברמת גן, במקום אחד.`,
+    `שלום${firstName}! 🎟️ אני Event Scout — מוצאת לך אירועים, חוגים וכרטיסים ברמת גן.`,
     "",
-    "*איך זה עובד:*",
-    "📅 *הכול באפליקציה* — חיפוש עם סינונים, כל הפרטים, מפה, מרחקי הליכה/נסיעה וזמינות כרטיסים",
-    "📋 *פרופיל אישי* — גילאי הילדים, כתובת, תחומי עניין וקהלי יעד; ככל שתשלימי יותר, ההמלצות מדויקות יותר",
-    "🔔 *התראות שבועיות* — אשלח לכאן אירועים חדשים שמתאימים לך",
+    "*📩 מה מגיע אליך כאן בהודעות*",
+    "🔔 אשלח לכאן אירועים חדשים שמתאימים לך, וגם ניוזלטר שבועי.",
+    "כדי שההתאמה תהיה מדויקת:",
+    "• 📋 אפשר להגדיר *פרופיל* — גילאי ילדים, כתובת ותחומי עניין",
+    "• 🚫 בכל אירוע שאשלח יש כפתור «אל תראה לי יותר» — והוא מעדכן לך את הפרופיל אוטומטית",
     "",
-    "*הכפתורים שלמטה:*",
-    "📅 «קטלוג אירועים» — לחיפוש ולעיון",
-    "📋 «פרופיל אישי» — להעדפות שלך",
+    "*📱 מה אפשר לראות באפליקציה*",
+    "🔎 חיפוש עם סינונים, כל הפרטים, מפה, מרחקי הליכה/נסיעה וזמינות כרטיסים — וגם הפרופיל שלך.",
+    "👇 לפתיחה — הכפתורים שלמטה:",
+    "📅 «קטלוג אירועים»   ·   📋 «פרופיל אישי»",
+    "(אפשר גם בפקודות /catalog ו-/profile)",
     "",
-    "*פקודות:*",
+    "*פקודות נוספות:*",
     "/menu — תפריט ראשי",
-    "/catalog — קטלוג אירועים",
-    "/profile — הפרופיל שלך",
     "/newsletter\\_preview — תצוגה מקדימה של הניוזלטר",
     "/newsletter\\_off — להשבית את הניוזלטר השבועי (/newsletter\\_on להפעלה)",
-    "/connect\\_calendar — חיבור ליומן Google (הוספת אירועים מהניוזלטר)",
+    "/connect\\_calendar — חיבור ליומן Google",
     "/invite — קישור להזמנת חברים",
     "/help — להציג שוב את ההסבר הזה",
-    "",
-    "✨ טיפ: שווה להשלים את הפרופיל («📋 פרופיל אישי») — ככה ההמלצות יהיו הכי מדויקות עבורך.",
   ];
   // Persistent reply keyboard for the catalog; the actionable menu
   // (📅 קטלוג / 📋 פרופיל) is sent right after by the caller.
