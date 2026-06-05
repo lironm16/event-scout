@@ -672,6 +672,7 @@
           ${forMeMark ? `<span class="forme-dot" title="בשבילך">✨</span>` : ""}
           ${audiencePill}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
+          ${ev.distanceLabel ? `<span class="dist-pill${ev.requiresCar ? " car" : ""}">${esc(ev.distanceLabel)}</span>` : ""}
         </div>
         ${umbrellaHtml}
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}

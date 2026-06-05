@@ -1707,3 +1707,16 @@ body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
   content: ""; position: absolute; inset: 0; margin: auto;
   width: 8px; height: 8px; border-radius: 50%; background: #fff;
 }
+
+/* ── Distance pill on cards (🚶 walk = green, 🚗 car = amber) ───────── */
+.dist-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 11px; border-radius: 999px; white-space: nowrap;
+  font-size: .82rem; font-weight: 700;
+  background: color-mix(in srgb, var(--ok) 15%, transparent);
+  color: color-mix(in srgb, var(--ok) 88%, var(--text));
+}
+.dist-pill.car {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: color-mix(in srgb, var(--warn) 90%, var(--text));
+}
