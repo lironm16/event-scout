@@ -8870,6 +8870,25 @@ runCleanup()
           );
         }
 
+        // Register the slash-command list → powers the "/" autocomplete
+        // and the commands popup. (The ☰ button itself is the Mini App
+        // launcher, set below; "/" autocomplete is independent of that and
+        // still surfaces these.) Admin-only commands are omitted on purpose.
+        bot.telegram
+          .setMyCommands([
+            { command: "catalog", description: "📅 קטלוג אירועים — חיפוש ועיון" },
+            { command: "profile", description: "📋 הפרופיל שלי" },
+            { command: "menu", description: "🏠 תפריט ראשי" },
+            { command: "alerts_preview", description: "👀 תצוגה מקדימה של אירועים חדשים" },
+            { command: "alerts_off", description: "🔕 להשבית התראות על אירועים חדשים" },
+            { command: "alerts_on", description: "🔔 להפעיל התראות על אירועים חדשים" },
+            { command: "connect_calendar", description: "📆 חיבור ליומן Google" },
+            { command: "invite", description: "🤝 הזמנת חברים" },
+            { command: "help", description: "❓ הסבר ועזרה" },
+          ])
+          .then(() => console.log("[Bot] Slash-command menu set"))
+          .catch((err) => console.warn(`[Bot] setMyCommands failed: ${err.message}`));
+
         // Register the Mini App as the bot's Menu Button — appears as a
         // persistent "📅 קטלוג אירועים" button at the bottom of every chat.
         // Only registers when MINIAPP_URL is configured (set this to the
