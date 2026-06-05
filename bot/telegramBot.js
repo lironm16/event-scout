@@ -1482,7 +1482,6 @@ function buildAgentCtx(ctx, { traceId, markResponded } = {}) {
 const {
   genderForm,
   searchGoLabel,
-  searchMarkVerb,
   tryAgainVerb,
   pickActionVerb,
 } = require("../lib/genderForm");
@@ -1605,7 +1604,7 @@ bot.start(async (ctx) => {
     // (clean) menu. Keeps the keyboard fresh too.
     await ctx.reply("שיחה חדשה התחילה 🔄", catalogReplyKeyboardMarkup());
     await sendWelcome(ctx);
-    await showMainMenu(ctx);
+    await showFullMenu(ctx);
     return;
   }
 
@@ -1685,7 +1684,7 @@ bot.command("catalog", async (ctx) => {
 // the two stay byte-identical.
 bot.command(["help", "start_help"], async (ctx) => {
   await sendWelcome(ctx);
-  await showMainMenu(ctx);
+  await showFullMenu(ctx);
 });
 
 // Centralized welcome renderer. Both bot.start (first-timer branch)
@@ -1712,54 +1711,39 @@ async function sendWelcome(ctx) {
     ? `, ${escapeMarkdownStrict(ctx.from.first_name)}`
     : "";
 
-  // Pull the user's chosen gender form so the direct-address lines
-  // below pick the right verb. Defaults to null (→ neutral) when the
-  // profile fetch fails or the user hasn't been through the /start
-  // gender prompt — better than guessing and getting it wrong.
-  const profile = await getProfile(ctx.from.id).catch(() => null);
-  const gender = profile?.user_context?.gender || null;
-  const youCan = genderForm(gender, {
-    f: "תוכלי",
-    m: "תוכל",
-    n: "אפשר",
-  });
-  const mark = searchMarkVerb(gender);
-  const go = searchGoLabel(gender);
-
+  // The bot is now MINIMAL: it finds events and notifies you, and the
+  // rich experience — search with filters, full event details, your
+  // profile, saved searches, watchlist — lives in the Web App. So the
+  // welcome explains the model + the two Web App entry points, and lists
+  // only the commands that still exist. (Underscores in command names
+  // are escaped for Markdown v1, or Telegram opens an italic span that
+  // never closes → "can't parse entities".)
   const lines = [
-    `שלום${firstName}! 🎟️ אני הבוט של Event Scout — עוזרת למצוא אירועים, חוגים וכרטיסים ברמת גן.`,
+    `שלום${firstName}! 🎟️ אני Event Scout — מוצאת לך אירועים, חוגים וכרטיסים ברמת גן, במקום אחד.`,
     "",
-    "*🎯 למה דרכי:*",
-    "🧭 *כל האירועים במקום אחד* — אני מאחדת מקורות שונים, כדי לא לפספס כלום",
-    "🎫 *זמינות כרטיסים מראש* — מראה כאן אם נשארו כרטיסים, בלי לגלות באמצע הדרך שהכל אזל",
+    "*איך זה עובד:*",
+    "📅 *הכול באפליקציה* — חיפוש עם סינונים, כל הפרטים, מפה, מרחקי הליכה/נסיעה וזמינות כרטיסים",
+    "📋 *פרופיל אישי* — גילאי הילדים, כתובת, תחומי עניין וקהלי יעד; ככל שתשלימי יותר, ההמלצות מדויקות יותר",
+    "🔔 *התראות שבועיות* — אשלח לכאן אירועים חדשים שמתאימים לך",
     "",
-    "*✨ מה אפשר לעשות בכפתורים:*",
-    `🔍 *חיפוש* — כפתור «חיפוש אירוע» או /search (${mark} מסננים, ואז «${go}»)`,
-    "📋 *פרופיל* — ילדים, קהילות, כתובת, תחומי עניין",
-    "🔔 *מעקבים שמורים* · 👀 *אירועים במעקב*",
-    "⭐ *תחומי עניין* — /interests",
+    "*הכפתורים שלמטה:*",
+    "📅 «קטלוג אירועים» — לחיפוש ולעיון",
+    "📋 «פרופיל אישי» — להעדפות שלך",
     "",
-    "*📋 פקודות:*",
+    "*פקודות:*",
     "/menu — תפריט ראשי",
+    "/catalog — קטלוג אירועים",
     "/profile — הפרופיל שלך",
-    "/search — חיפוש בכפתורים",
-    "/saved · /watching",
-    // Underscores in command names must be escaped in Markdown v1, or
-    // Telegram parses "_off — להשבית..." as the start of an italic
-    // span that never closes → "can't parse entities: ... byte 1437".
-    "/newsletter\\_preview — תצוגה מקדימה של הניוזלטר \\(מה היית מקבלת ביום חמישי\\)",
-    "/newsletter\\_off — להשבית את הניוזלטר השבועי (/newsletter\\_on להפעיל בחזרה)",
-    "/connect\\_calendar — חיבור Google Calendar (להוספת אירועים מהניוזלטר)",
+    "/newsletter\\_preview — תצוגה מקדימה של הניוזלטר",
+    "/newsletter\\_off — להשבית את הניוזלטר השבועי (/newsletter\\_on להפעלה)",
+    "/connect\\_calendar — חיבור ליומן Google (הוספת אירועים מהניוזלטר)",
     "/invite — קישור להזמנת חברים",
-    "/catalog — קטלוג אירועים מותאם",
-    "/help — להציג את התפריט הזה שוב",
+    "/help — להציג שוב את ההסבר הזה",
     "",
-    "📅 *קטלוג* — כפתור «קטלוג אירועים» למטה, או בתפריט ליד שדה ההקלדה",
-    "",
-    `*נתחיל מתחומי העניין שלך* — אפתח לך כעת את הפיקר. בסיומו ${youCan} לספר לי על המשפחה (גילאי ילדים, בן/בת זוג) כדי שאתאים את האירועים.`,
+    "✨ טיפ: שווה להשלים את הפרופיל («📋 פרופיל אישי») — ככה ההמלצות יהיו הכי מדויקות עבורך.",
   ];
-  // Persistent reply keyboard for the catalog; onboarding picker follows
-  // in a separate message. /help and first-touch /start both route here.
+  // Persistent reply keyboard for the catalog; the actionable menu
+  // (📅 קטלוג / 📋 פרופיל) is sent right after by the caller.
   await ctx.reply(lines.join("\n"), {
     parse_mode: "Markdown",
     ...catalogReplyKeyboardMarkup(),
@@ -1904,19 +1888,16 @@ bot.action(/^age:(young_adult|mid_adult|senior|skip)$/, async (ctx) => {
     console.error("[Bot] age: sendWelcome failed:", err.message);
   }
 
-  // First-touch onboarding — auto-open the multi-step picker right
-  // after the welcome so the user lands in a guided flow instead of
-  // having to discover the "⭐ ערכי תחומי עניין" button. Triggered
-  // by "auto" so the summary card opens with the celebratory
-  // "✅ הכל מוכן!" header instead of the edit-mode header. A short
-  // delay lets Telegram render the welcome card before the picker
-  // arrives — otherwise both messages stack in the same screen tick
-  // and the user can miss the welcome's content entirely.
-  setTimeout(() => {
-    openOnboarding(ctx, { triggeredBy: "auto" }).catch((err) =>
-      console.error("[Bot] age: auto-onboarding failed:", err.message),
-    );
-  }, 1200);
+  // First-touch: the bot is minimal now, so we DON'T run an in-bot
+  // onboarding picker — all preferences (topics, audiences, kids,
+  // address) live in the Web App profile. Show the actionable menu
+  // (📅 קטלוג / 📋 פרופיל אישי) so the user can jump straight in; the
+  // welcome text already nudges them to fill the profile.
+  try {
+    await showFullMenu(ctx);
+  } catch (err) {
+    console.error("[Bot] age: showFullMenu failed:", err.message);
+  }
 });
 
 // /invite — produces the user's personal share-link and shows how
