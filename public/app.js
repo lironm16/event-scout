@@ -371,6 +371,38 @@
     applyFilters();
   }
 
+  // Full reset — clears BOTH client-side (date/type/tag) and server-side
+  // (audiences / activity / options / keyword) filters, then re-runs the
+  // search. Scope (בשבילי/כללי) is intentionally left untouched — it's a
+  // separate switch, not a "filter". The arrays are mutated IN PLACE
+  // because multiToggle() captured them by reference.
+  function resetAllFilters() {
+    activeDate = "all";
+    activeType = "all";
+    activeTag = null;
+    serverSearch.date_preset = "upcoming";
+    serverSearch.audiences.length = 0;
+    serverSearch.activity_types.length = 0;
+    serverSearch.keywords.length = 0;
+    serverSearch.proximity = false;
+    serverSearch.available_only = false;
+    serverSearch.unseen_only = false;
+    document
+      .querySelectorAll("#dateFilterBar .chip")
+      .forEach((c) => c.classList.toggle("active", c.dataset.date === "all"));
+    document
+      .querySelectorAll("#typeFilterBar .chip")
+      .forEach((c) => c.classList.toggle("active", c.dataset.type === "all"));
+    document
+      .querySelectorAll(
+        "#audienceFilterBar .chip, #activityFilterBar .chip, #optionFilterBar .chip, #tagFilterBar .chip",
+      )
+      .forEach((c) => c.classList.remove("active"));
+    const kw = document.getElementById("keywordInput");
+    if (kw) kw.value = "";
+    loadEvents();
+  }
+
   function syncScopeChips() {
     document.querySelectorAll("#scopeFilterBar .chip").forEach((c) => {
       const isAll = c.dataset.scope === "all";
@@ -1217,6 +1249,12 @@
   filterSheetClose?.addEventListener("click", closeFilterSheet);
   filterSheetApply?.addEventListener("click", () => { closeFilterSheet(); loadEvents(); });
   filterBackdrop?.addEventListener("click", closeFilterSheet);
+  // "נקה הכל" — reset every filter; keep the sheet open so the user sees
+  // the cleared state (results refresh underneath).
+  document.getElementById("filterSheetClear")?.addEventListener("click", () => {
+    resetAllFilters();
+    tg?.HapticFeedback?.impactOccurred("light");
+  });
 
   // ── Saved searches ────────────────────────────────────────────────────
   const savedPanel    = document.getElementById("savedPanel");

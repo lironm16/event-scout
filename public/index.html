@@ -54,27 +54,30 @@
     <div class="sort-options">
       <label class="sort-option">
         <input type="radio" name="sort" value="date-asc" checked />
+        <span class="sort-option-ic">⏱️</span>
         <span class="sort-option-label">
           <span class="sort-option-title">תאריך קרוב ראשון</span>
           <span class="sort-option-sub">ברירת מחדל</span>
         </span>
-        <span class="sort-option-check">✓</span>
+        <span class="sort-option-check"></span>
       </label>
       <label class="sort-option">
         <input type="radio" name="sort" value="date-desc" />
+        <span class="sort-option-ic">📆</span>
         <span class="sort-option-label">
           <span class="sort-option-title">תאריך רחוק ראשון</span>
           <span class="sort-option-sub">מהאחרון לקרוב</span>
         </span>
-        <span class="sort-option-check">✓</span>
+        <span class="sort-option-check"></span>
       </label>
       <label class="sort-option">
         <input type="radio" name="sort" value="name-asc" />
+        <span class="sort-option-ic">🔤</span>
         <span class="sort-option-label">
           <span class="sort-option-title">לפי שם</span>
           <span class="sort-option-sub">א׳ עד ת׳</span>
         </span>
-        <span class="sort-option-check">✓</span>
+        <span class="sort-option-check"></span>
       </label>
     </div>
   </div>
@@ -88,12 +91,15 @@
   <div class="filter-sheet-handle"></div>
   <div class="filter-sheet-header">
     <span class="filter-sheet-title">סינון</span>
-    <button class="filter-sheet-close" id="filterSheetClose" aria-label="סגור">✕</button>
+    <div class="filter-header-actions">
+      <button class="filter-sheet-clear" id="filterSheetClear" type="button">נקה הכל</button>
+      <button class="filter-sheet-close" id="filterSheetClose" aria-label="סגור">✕</button>
+    </div>
   </div>
   <div class="filter-sheet-body">
     <!-- Date quick-filters -->
     <div class="filter-section">
-      <div class="filter-label">תאריך</div>
+      <div class="filter-label">📅 תאריך</div>
       <div class="filter-bar wrap" id="dateFilterBar">
         <button class="chip active" data-date="all">הכל</button>
         <button class="chip" data-date="today">היום</button>
@@ -106,7 +112,7 @@
 
     <!-- Type filter -->
     <div class="filter-section">
-      <div class="filter-label">סוג</div>
+      <div class="filter-label">🎟️ סוג</div>
       <div class="filter-bar wrap" id="typeFilterBar">
         <button class="chip active" data-type="all">הכל</button>
         <button class="chip" data-type="registration">📋 מחייב הרשמה</button>
@@ -118,7 +124,7 @@
 
     <!-- Audience -->
     <div class="filter-section">
-      <div class="filter-label">קהל יעד</div>
+      <div class="filter-label">👥 קהל יעד</div>
       <div class="filter-bar wrap" id="audienceFilterBar">
         <button class="chip" data-aud="toddlers">👶 תינוקות</button>
         <button class="chip" data-aud="kids">🧒 ילדים</button>
@@ -132,7 +138,7 @@
 
     <!-- Activity type -->
     <div class="filter-section">
-      <div class="filter-label">סוג פעילות</div>
+      <div class="filter-label">🎨 סוג פעילות</div>
       <div class="filter-bar wrap" id="activityFilterBar">
         <button class="chip" data-act="workshop">🔧 סדנה</button>
         <button class="chip" data-act="tour">🚶 סיור</button>
@@ -147,7 +153,7 @@
 
     <!-- Options -->
     <div class="filter-section">
-      <div class="filter-label">עוד</div>
+      <div class="filter-label">⚙️ אפשרויות</div>
       <div class="filter-bar wrap" id="optionFilterBar">
         <button class="chip" data-opt="proximity">🚶 קרוב אליי</button>
         <button class="chip" data-opt="available_only">🎫 עם כרטיסים</button>
@@ -157,13 +163,13 @@
 
     <!-- Keyword -->
     <div class="filter-section">
-      <div class="filter-label">מילת חיפוש</div>
+      <div class="filter-label">🔎 מילת חיפוש</div>
       <input class="pf-input" id="keywordInput" type="text" placeholder="למשל: עששיות, גיטרה…" />
     </div>
 
     <!-- Interest tag filters — populated after profile loads -->
     <div class="filter-section" id="tagsSection" style="display:none">
-      <div class="filter-label">תחומי עניין שלי</div>
+      <div class="filter-label">⭐ תחומי עניין שלי</div>
       <div class="filter-bar wrap" id="tagFilterBar"></div>
     </div>
 

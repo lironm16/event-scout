@@ -1569,3 +1569,141 @@ body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
 /* keep floating controls above the tab bar */
 .view-fab { bottom: calc(var(--tabbar-h) + 18px) !important; }
 .pf-save  { bottom: calc(var(--tabbar-h) + 14px) !important; }
+
+/* ════════════════════════════════════════════════════════════════════
+   ✨ redesign part 11 — filter & sort sheets (match the card language:
+   rounded, layered, gradient accents, card-style sort options)
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Backdrop — a touch darker with a soft blur so the sheet pops */
+.filter-backdrop {
+  background: rgba(10,12,30,.55);
+  backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+}
+
+/* Sheet shell — bigger top radius + a deeper lift */
+.filter-sheet {
+  border-radius: 26px 26px 0 0;
+  box-shadow: 0 -12px 50px rgba(20,20,50,.30);
+}
+.filter-sheet-handle {
+  width: 42px; height: 5px; border-radius: 3px;
+  background: color-mix(in srgb, var(--hint) 32%, transparent);
+  margin: 9px auto 2px;
+}
+
+/* Header — larger title, hairline under it, inline actions */
+.filter-sheet-header {
+  padding: 8px 18px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--hint) 10%, transparent);
+}
+.filter-sheet-title { font-size: 1.24rem; font-weight: 800; letter-spacing: -.2px; }
+.filter-header-actions { display: flex; align-items: center; gap: 8px; }
+.filter-sheet-clear {
+  border: none; background: none; color: var(--accent);
+  font-size: .9rem; font-weight: 700; cursor: pointer;
+  padding: 6px 10px; border-radius: 9px; transition: background .15s;
+}
+.filter-sheet-clear:active { background: color-mix(in srgb, var(--accent) 13%, transparent); }
+.filter-sheet-close {
+  background: color-mix(in srgb, var(--hint) 12%, transparent);
+  color: var(--hint); transition: background .15s, color .15s;
+}
+.filter-sheet-close:active { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+
+/* Sections — gentle dividers + a friendly icon-led label */
+.filter-section {
+  padding: 12px 0 14px;
+  border-top: 1px solid color-mix(in srgb, var(--hint) 8%, transparent);
+}
+.filter-section:first-child { border-top: none; }
+.filter-label {
+  font-size: .84rem; font-weight: 800; color: var(--text);
+  text-transform: none; letter-spacing: 0;
+  padding: 2px 20px 9px;
+  display: flex; align-items: center; gap: 7px;
+}
+
+/* Chips inside the sheet — pill, soft tinted rest state, gradient active */
+.filter-sheet .chip {
+  border-radius: 999px;
+  border: 1.5px solid color-mix(in srgb, var(--hint) 16%, transparent);
+  background: color-mix(in srgb, var(--hint) 7%, var(--bg2));
+  font-weight: 600; padding: 9px 15px;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s, transform .1s;
+}
+.filter-sheet .chip.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-color: transparent; color: #fff;
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.filter-sheet .chip:active { transform: scale(.94); }
+
+/* Keyword input — rounded + tinted to match the chips */
+#keywordInput {
+  width: calc(100% - 40px); margin: 0 20px;
+  border-radius: 12px; padding: 11px 14px;
+  background: color-mix(in srgb, var(--hint) 8%, var(--bg2));
+  border: 1.5px solid transparent;
+  transition: background .15s, border-color .15s;
+}
+#keywordInput:focus { outline: none; border-color: var(--accent); background: var(--bg2); }
+
+/* Footer — glassy bar, gradient primary, tinted secondary */
+.filter-sheet-footer {
+  gap: 10px;
+  background: color-mix(in srgb, var(--bg2) 90%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.filter-sheet-apply {
+  flex: 1;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-radius: 14px; font-weight: 800; font-size: 1.02rem;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent);
+  transition: transform .12s, opacity .15s;
+}
+.filter-sheet-apply:active { transform: scale(.98); opacity: .95; }
+.filter-sheet-save {
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg2));
+  border: 1.5px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  font-weight: 700;
+  transition: transform .12s;
+}
+.filter-sheet-save:active { transform: scale(.97); }
+
+/* ── Sort options as selectable cards ─────────────────────────────── */
+.sort-options { gap: 10px; padding: 8px 16px 12px; }
+.sort-option {
+  gap: 12px; padding: 14px 16px;
+  border: 1.5px solid color-mix(in srgb, var(--hint) 15%, transparent);
+  border-radius: 16px;
+  background: var(--bg2);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .15s, background .15s, box-shadow .15s, transform .12s;
+}
+.sort-option:last-child { border-bottom: 1.5px solid color-mix(in srgb, var(--hint) 15%, transparent); }
+.sort-option:active { transform: scale(.985); }
+.sort-option:has(input:checked) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg2));
+  box-shadow: 0 5px 18px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.sort-option-ic {
+  font-size: 1.4rem; width: 30px; text-align: center; flex-shrink: 0;
+}
+/* Selection indicator — an empty ring that fills when checked */
+.sort-option-check {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--hint) 38%, transparent);
+  background: transparent; flex-shrink: 0; opacity: 1;
+  position: relative; transition: border-color .15s, background .15s;
+}
+.sort-option:has(input:checked) .sort-option-check {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.sort-option:has(input:checked) .sort-option-check::after {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: 8px; height: 8px; border-radius: 50%; background: #fff;
+}
