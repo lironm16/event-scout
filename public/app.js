@@ -740,14 +740,18 @@
       ctaRow.push(`<a class="btn btn-primary cta-main" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרפו למפגש</a>`);
     }
     if (navUrl) ctaRow.push(`<a class="btn btn-secondary cta-nav" href="${esc(navUrl)}" target="_blank" rel="noopener">🧭 ניווט</a>`);
-    // Sold-out → watch-tickets button, leftmost on the row (RTL: last in the
-    // DOM renders leftmost). Opt-in alert when tickets free up / run low.
+    if (ctaRow.length) parts.push(`<div class="cta-row">${ctaRow.join("")}</div>`);
+
+    // Sold-out → a dedicated watch block on its own row, with a short prompt
+    // so it's clear what "follow" does (availability from the site + 2nd-hand).
     const soldOut = ev.ticketsLeft != null && ev.ticketsLeft <= 0;
     if (soldOut) {
       const watching = watchedIds.has(ev.id);
-      ctaRow.push(`<button class="btn btn-secondary cta-watch${watching ? " active" : ""}" onclick="event.stopPropagation();window.toggleWatch(this,${ev.id})">${watching ? "🔔 עוקבים" : "🔔 עקבו"}</button>`);
+      parts.push(`<div class="watch-block">
+        <div class="watch-q">🎫 אזל — רוצה שנעדכן אותך כשמתפנים כרטיסים? (זמינות מהאתר וגם כרטיסים יד שנייה)</div>
+        <button class="btn btn-watch${watching ? " active" : ""}" onclick="event.stopPropagation();window.toggleWatch(this,${ev.id})">${watching ? "🔔 עוקבים — נעדכן אותך" : "🔔 כן, עדכנו אותי"}</button>
+      </div>`);
     }
-    if (ctaRow.length) parts.push(`<div class="cta-row">${ctaRow.join("")}</div>`);
 
     // 2) Description — clamped to 3 lines, with a קרא עוד ↔ סגור toggle.
     if (ev.description) {
@@ -875,8 +879,8 @@
       const watching = body.watching ?? now;
       if (watching) { watchedIds.add(eventId); btn.classList.add("active"); }
       else { watchedIds.delete(eventId); btn.classList.remove("active"); }
-      if (btn.classList.contains("cta-watch")) {
-        btn.textContent = watching ? "🔔 עוקבים" : "🔔 עקבו";
+      if (btn.classList.contains("btn-watch")) {
+        btn.textContent = watching ? "🔔 עוקבים — נעדכן אותך" : "🔔 כן, עדכנו אותי";
       }
       tg?.HapticFeedback?.impactOccurred("light");
     } catch (_) { /* ignore */ } finally { btn.disabled = false; }
@@ -1178,8 +1182,8 @@
         return `
         <div class="map-popup-ev map-popup-ev-clickable" onclick="window.openEventModal(${ev.id})">
           <div class="map-popup-title">${esc(ev.icon || "📌")} ${esc(ev.name)}</div>
-          <div class="map-popup-meta">📅 ${esc(ev.dateHe || ev.date)}${ev.timeHe ? " · " + esc(ev.timeHe) : ""}</div>
-          ${nav ? `<a class="map-popup-nav" href="${esc(nav)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🧭 ניווט מהבית</a>` : ""}
+          <div class="map-popup-meta">📅 ${esc(ev.dateHe || ev.date)}${ev.timeHe ? " · " + esc(ev.timeHe) : ""}${ev.distanceLabel ? " · " + esc(ev.distanceLabel) : ""}</div>
+          ${nav ? `<a class="map-popup-nav" href="${esc(nav)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🧭 ניווט</a>` : ""}
         </div>`;
       }).join("");
       const head = n > 1

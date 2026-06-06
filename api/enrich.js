@@ -117,8 +117,27 @@ function extractEventData($, eventId, source) {
   let address = null;
   const theaterDiv = container.find(".theater_name");
   if (theaterDiv.length) {
-    theaterDiv.find("span").remove();
-    address = theaterDiv.text().replace(/\s+/g, " ").trim() || null;
+    // Prefer the embedded Google-Maps link's address (street + city) over the
+    // bare venue NAME. A bare name geocodes to the wrong city far too often
+    // (e.g. "אשכול אופק" → Jaffa); Smarticket renders the real address inside
+    // a <a href="maps.google.com/?q=רועי+קליין+3+רמת+גן">(מפת הגעה)</a>.
+    const mapsHref = theaterDiv
+      .find("a[href*='maps.goog'], a[href*='google.com/maps'], a[href*='maps.app']")
+      .attr("href");
+    if (mapsHref) {
+      try {
+        const u = new URL(mapsHref, "https://maps.google.com");
+        const q = u.searchParams.get("q") || u.searchParams.get("daddr");
+        if (q) {
+          const decoded = decodeURIComponent(q).replace(/\+/g, " ").trim();
+          if (decoded.length > 2) address = decoded;
+        }
+      } catch { /* fall through to the venue text below */ }
+    }
+    if (!address) {
+      theaterDiv.find("span").remove();
+      address = theaterDiv.text().replace(/\s+/g, " ").trim() || null;
+    }
   }
 
   let imageUrl = null;

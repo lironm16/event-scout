@@ -806,7 +806,7 @@ body {
 }
 .event-modal-backdrop.open { display: flex; }
 .event-modal {
-  width: 100%; max-width: 560px; margin: auto 0;
+  width: 100%; max-width: 560px; margin: 0 auto;
   background: var(--bg, #000); border-radius: 14px;
 }
 .event-modal-head {
@@ -1756,3 +1756,22 @@ body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
   text-decoration: none;
 }
 .map-popup-nav:active { opacity: .6; }
+
+/* ── Sold-out watch block — own row + a short prompt ──────────────── */
+.watch-block {
+  margin-top: 12px; padding: 12px 14px; border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg2));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.watch-q { font-size: .9rem; color: var(--text); margin-bottom: 10px; line-height: 1.4; }
+.btn-watch {
+  width: 100%; border-radius: 12px; font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg2));
+  border: 1.5px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent); transition: transform .12s;
+}
+.btn-watch:active { transform: scale(.98); }
+.btn-watch.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-color: transparent; color: #fff;
+}
