@@ -512,11 +512,15 @@
       if (!items || !items.length) return;
       card.appendChild(el("div", "pf-sub-title", titleText));
       const wrap = el("div", "pf-chips");
-      items.forEach((name) => {
-        const b = el("button", "pf-chip removable", `${name} ✕`);
+      items.forEach((item) => {
+        // item is a plain string (e.g. series) OR { key, name } (venues —
+        // show the readable name, remove by key).
+        const label = typeof item === "string" ? item : (item.name || item.key);
+        const rmVal = typeof item === "string" ? item : item.key;
+        const b = el("button", "pf-chip removable", `${label} ✕`);
         b.type = "button";
         b.addEventListener("click", () => {
-          if (!removedArr.includes(name)) removedArr.push(name);
+          if (!removedArr.includes(rmVal)) removedArr.push(rmVal);
           b.remove();
         });
         wrap.appendChild(b);

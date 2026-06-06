@@ -709,14 +709,21 @@
   // there's no home on file.
   function navUrlFor(ev) {
     if (isOnline(ev)) return null;
-    const dest = (ev._lat != null && ev._lng != null)
-      ? `${ev._lat},${ev._lng}`
-      : (ev.location && !isCityWide(ev.location) ? ev.location : null);
+    // Destination: the venue's textual address (a readable place name in the
+    // maps app) when we have one; fall back to raw coords only otherwise.
+    const dest = (ev.location && !isCityWide(ev.location))
+      ? ev.location
+      : (ev._lat != null && ev._lng != null ? `${ev._lat},${ev._lng}` : null);
     if (!dest) return null;
     const destParam = encodeURIComponent(dest);
-    if (userHome && userHome.lat != null && userHome.lng != null) {
-      const origin = `${userHome.lat},${userHome.lng}`;
-      return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destParam}&travelmode=driving`;
+    // Origin: the saved home ADDRESS as words (so the route starts from the
+    // place name, not a lat/lng pin). Fall back to coords, then no origin.
+    const originRaw = userHome
+      ? (userHome.address ||
+          (userHome.lat != null && userHome.lng != null ? `${userHome.lat},${userHome.lng}` : null))
+      : null;
+    if (originRaw) {
+      return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(originRaw)}&destination=${destParam}&travelmode=driving`;
     }
     return `https://www.google.com/maps/search/?api=1&query=${destParam}`;
   }
@@ -967,6 +974,14 @@
       groups.push(`<div class="ss-group"><div class="ss-glabel">לפי קהל</div><div class="ss-chips">
         <button class="ss-chip" data-kind="childaud">👶 אירועי ${esc(ev.audience)}</button></div></div>`);
     }
+    // Travel-time opt-out — when we know the drive time, offer to cap the
+    // profile's max drive distance just under this event's (e.g. 12 → 11 דק').
+    const cachedEv = eventsById.get(eventId) || eventsById.get(Number(eventId)) || {};
+    const driveMin = Number(cachedEv.driveMinutes);
+    if (Number.isFinite(driveMin) && driveMin > 1) {
+      groups.push(`<div class="ss-group"><div class="ss-glabel">לפי זמן נסיעה</div><div class="ss-chips">
+        <button class="ss-chip" data-kind="toofar" data-min="${driveMin}">🚗 רחוק מדי (${driveMin} דק' נסיעה)</button></div></div>`);
+    }
     groups.push(`<div class="ss-group"><div class="ss-chips">
       <button class="ss-chip ss-chip-wide" data-kind="this">🙈 רק את האירוע הזה</button></div></div>`);
     body.innerHTML = groups.join("");
@@ -980,6 +995,15 @@
       const patch = {};
       if (tagsToHide.length) patch.add_suppressed_labels = tagsToHide;
       if (sel.some((c) => c.dataset.kind === "childaud")) patch.suppress_child_audiences = true;
+      // "Too far" → cap max drive minutes just under this event's drive time
+      // (and turn on drive mode so the cap actually engages).
+      const tooFar = sel.find((c) => c.dataset.kind === "toofar");
+      if (tooFar) {
+        const x = parseInt(tooFar.dataset.min, 10);
+        if (Number.isFinite(x) && x > 1) {
+          patch.constraints = { location_modes: ["walk", "drive"], max_drive_minutes: x - 1 };
+        }
+      }
       const jobs = [];
       if (Object.keys(patch).length) {
         jobs.push(fetch(`${API_PREFIX}/profile`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, patch }) }));
