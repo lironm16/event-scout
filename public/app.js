@@ -1077,19 +1077,19 @@
       else {
         box.innerHTML = list.map((o) => {
           const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
-          const mark = o.forMe ? `<span class="forme-dot xs" title="בשבילך">✨</span>` : "";
           const tk = seriesTicketText(o.ticketsLeft);
           const meta = [];
           let top;
           if (varied) { // umbrella program — the event name is primary
-            top = `${mark}<span class="sr-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>`;
+            top = `<span class="sr-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>`;
             meta.push(`🗓️ ${esc(when)}`);
           } else {       // same-name series — the date is primary
-            top = `${mark}<span class="sr-when">🗓️ ${esc(when)}</span>`;
+            top = `<span class="sr-when">🗓️ ${esc(when)}</span>`;
           }
           if (tk) meta.push(tk);
           if (variedLoc && o.location) meta.push(`📍 ${esc(o.location)}`);
-          return `<button class="series-row" onclick="window.openEventModal(${o.id})">
+          // For-me occurrences get a bold accent FRAME (replaces the ✨ dot).
+          return `<button class="series-row${o.forMe ? " forme" : ""}" onclick="window.openEventModal(${o.id})"${o.forMe ? ' title="בשבילך"' : ""}>
             <span class="sr-body">
               <span class="sr-top">${top}</span>
               ${meta.length ? `<span class="sr-meta">${meta.join(" · ")}</span>` : ""}

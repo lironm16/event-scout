@@ -1775,3 +1775,9 @@ body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
   background: linear-gradient(135deg, var(--accent), var(--accent2));
   border-color: transparent; color: #fff;
 }
+
+/* For-me occurrences in the series list — a bold accent frame instead of a ✨. */
+.series-row.forme {
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
