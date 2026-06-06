@@ -813,7 +813,7 @@ async function check() {
   console.log(`Synced ${upserted} events to Supabase`);
 
   const cleanup = await runCleanup();
-  console.log(`Cleanup: deleted=${cleanup.deleted}, archived=${cleanup.archived}`);
+  console.log(`Cleanup: deleted=${cleanup.deleted}, archived=${cleanup.archived}, prunedLabels=${cleanup.prunedLabels || 0}`);
 
   // Resolve any locations rows that are still pending (newly inserted stubs
   // from this run, or stragglers from prior runs). Each unique venue is hit
