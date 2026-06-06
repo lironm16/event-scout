@@ -519,7 +519,7 @@ async function findMatchesForUser(profile, events, options = {}) {
 
   try {
     const model = genai.getGenerativeModel({
-      model: "gemini-flash-latest",
+      model: require("../lib/geminiModel").GEMINI_MODEL,
       systemInstruction: buildSystemPrompt(),
       generationConfig: {
         responseMimeType: "application/json",
