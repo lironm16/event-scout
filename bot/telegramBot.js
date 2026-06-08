@@ -89,7 +89,7 @@ const {
   createSavedSearch,
 } = require("../lib/savedSearchService");
 const {
-  getTicket, logClick, isStillActive, updateQuantity, markSoldById,
+  getTicket, isStillActive, updateQuantity, markSoldById,
 } = require("../lib/ticketService");
 const { _saveOffer: saveTicketOfferToDb } = require("../lib/agent/tools/ticketOffer");
 const referralService = require("../lib/referralService");
@@ -8470,7 +8470,6 @@ bot.action(/^ct:(.+)$/, async (ctx) => {
       await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
       return;
     }
-    await logClick(String(ctx.from.id), ticketId);
     const ticket = await getTicket(ticketId);
 
     if (ticket?.seller_phone) {
@@ -8753,7 +8752,6 @@ bot.action(/^tint:(.+)$/, async (ctx) => {
       return;
     }
 
-    await logClick(String(ctx.from.id), ticketId);
 
     const seller = await sellerContactView(ticket.seller_telegram_id);
     const buyerHandle = ctx.from.username ? `@${ctx.from.username}` : null;
