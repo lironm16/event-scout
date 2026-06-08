@@ -892,6 +892,7 @@
   };
 
   // Open a single event as a full card in a popup (used by the map).
+  let _lastModalEvId = null;
   window.openEventModal = async function (eventId) {
     let overlay = document.getElementById("eventModal");
     if (!overlay) {
@@ -912,6 +913,7 @@
     body.innerHTML = `<div class="card-description" style="padding:16px">טוען…</div>`;
     overlay.classList.add("open");
     document.body.style.overflow = "hidden";
+    _lastModalEvId = String(eventId);
     try {
       const res = await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
       const ev = (await res.json()).event;
@@ -1558,22 +1560,32 @@
     return "";
   }
   const _sp = startParam();
-  const _evMatch = /^ev[_-]?(.+)$/.exec(_sp || "");
-  // Telegram puts the launch auth in the URL hash (#tgWebAppData=…) and/or
-  // query. A full navigation to a clean URL drops it → the target page has
-  // no initData. Carry both across the redirect so profile/event authenticate.
   const _search = window.location.search;       // "?…" or ""
   const _hash = window.location.hash;            // "#…" or ""
+  // Which event was requested? From ?ev=<id> (query) or start_param "ev_<id>".
+  function requestedEventId() {
+    const fromQuery = new URLSearchParams(window.location.search).get("ev");
+    if (fromQuery) return fromQuery;
+    const m = /^ev[_-]?(.+)$/.exec(startParam() || "");
+    return m ? m[1] : null;
+  }
   if (_sp === "profile") {
     // Opened via t.me/<bot>?startapp=profile (inline-menu profile button).
     location.replace("profile.html" + _search + _hash);
-  } else if (_evMatch) {
-    const extra = _search ? "&" + _search.slice(1) : ""; // merge into ?ev=…
-    location.replace(
-      `event.html?ev=${encodeURIComponent(_evMatch[1])}${extra}${_hash}`,
-    );
   } else {
-    // start_param "catalog" (or none) → just the catalog.
+    // Catalog. If an event was requested, open it as an in-app modal OVER the
+    // catalog (single, reusable "← חזרה" popup) — NOT a separate window. A new
+    // event just swaps the same popup.
     loadEvents();
+    const _evId = requestedEventId();
+    if (_evId) window.openEventModal(_evId);
+    // Telegram reuses the open Mini App when a new event deep-link is tapped;
+    // on foreground, re-read and swap the popup — but only when the id actually
+    // changed, so we never reopen a modal the user just closed.
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      const id = requestedEventId();
+      if (id && String(id) !== String(_lastModalEvId)) window.openEventModal(id);
+    });
   }
 })();
