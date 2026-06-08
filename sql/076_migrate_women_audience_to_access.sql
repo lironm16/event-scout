@@ -17,9 +17,9 @@
 -- backfill suspect set will include audience = 'נשים'.
 
 UPDATE public.events
-SET access = ARRAY['community-women']::public.access_t[]
+SET access = '{community-women}'::public.access_t[]
 WHERE audience = 'נשים'
-  AND NOT (access @> ARRAY['community-women']::public.access_t[]);
+  AND NOT (access @> '{community-women}'::public.access_t[]);
 
 -- Sanity check (run manually to see the affected rows):
 --   SELECT id, name, audience, access FROM public.events WHERE audience = 'נשים';
