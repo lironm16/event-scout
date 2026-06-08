@@ -189,6 +189,9 @@ const OPTIONAL_COLS = [
   // The consolidated newsletter renderer reads this when present so
   // a digest entry can carry a sentence of context.
   { col: "description", migration: "sql/053_events_description.sql" },
+  // Typed lossless age range (sql/077). When present, the card shows its
+  // original wording ("זחילה עד שלוש"); absent → falls back to min/max_months.
+  { col: "age_range", migration: "sql/077_events_age_jsonb.sql" },
 ];
 let _availableColsCache = null;
 
@@ -280,6 +283,7 @@ function flattenEvent(row) {
     category: row.category || null,
     tag_ids: row.tag_ids || [],
     access: row.access ?? null,
+    age_range: row.age_range ?? null,
     _coords: coords,
     _locationFound: loc?.found ?? null,
     _locationKind: loc?.kind || (row.location_key ? "unknown" : null),
