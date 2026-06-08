@@ -1575,8 +1575,18 @@
     return m ? m[1] : null;
   }
   if (_sp === "profile") {
-    // Opened via t.me/<bot>?startapp=profile (inline-menu profile button).
-    location.replace("profile.html" + _search + _hash);
+    // Opened via t.me/<bot>?startapp=profile. start_param stays "profile" for
+    // the whole session, so redirect ONLY on the first load — otherwise tapping
+    // "← אירועים" back from the profile lands on the catalog, which would see
+    // start_param=profile and bounce straight back → an endless ping-pong.
+    let done = false;
+    try { done = !!sessionStorage.getItem("dl_profile_done"); } catch (_) {}
+    if (done) {
+      loadEvents(); // returned from the profile — stay on the catalog
+    } else {
+      try { sessionStorage.setItem("dl_profile_done", "1"); } catch (_) {}
+      location.replace("profile.html" + _search + _hash);
+    }
   } else {
     // Catalog. If an event was requested, open it as an in-app modal OVER the
     // catalog (single, reusable "← חזרה" popup) — NOT a separate window. A new
