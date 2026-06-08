@@ -297,10 +297,10 @@
       distWrap.innerHTML = "";
       const modes = STATE.constraints.location_modes;
       if (modes.includes("walk")) {
-        distWrap.appendChild(minutesField("מרחק הליכה מקסימלי", "max_walking_minutes", 15, 5, 30));
+        distWrap.appendChild(minutesField("מרחק הליכה מקסימלי", "max_walking_minutes", 15, 5, 120));
       }
       if (modes.includes("drive")) {
-        distWrap.appendChild(minutesField("מרחק נסיעה מקסימלי", "max_drive_minutes", 10, 5, 60));
+        distWrap.appendChild(minutesField("מרחק נסיעה מקסימלי", "max_drive_minutes", 10, 5, 120));
       }
     }
 
