@@ -273,27 +273,32 @@
     const distWrap = el("div", "pf-dist");
     STATE.constraints.location_modes = STATE.constraints.location_modes || [];
 
-    function minutesField(label, key, def) {
-      const f = field(label);
-      const i = el("input", "pf-input");
-      i.type = "number"; i.min = "1"; i.max = "120";
+    function minutesField(label, key, def, min = 5, max = 60, step = 5) {
       if (STATE.constraints[key] == null) STATE.constraints[key] = def;
-      i.value = STATE.constraints[key] ?? "";
+      const f = field(label);
+      const row = el("div", "pf-slider-row");
+      const i = el("input", "pf-slider");
+      i.type = "range"; i.min = String(min); i.max = String(max); i.step = String(step);
+      i.value = String(STATE.constraints[key]);
+      const out = el("span", "pf-slider-val", `${STATE.constraints[key]} דק׳`);
       i.addEventListener("input", () => {
         const n = parseInt(i.value, 10);
-        STATE.constraints[key] = Number.isFinite(n) ? n : null;
+        STATE.constraints[key] = n;
+        out.textContent = `${n} דק׳`;
       });
-      f.appendChild(i);
+      row.appendChild(i);
+      row.appendChild(out);
+      f.appendChild(row);
       return f;
     }
     function redrawDist() {
       distWrap.innerHTML = "";
       const modes = STATE.constraints.location_modes;
       if (modes.includes("walk")) {
-        distWrap.appendChild(minutesField("מרחק הליכה מקסימלי (דק׳)", "max_walking_minutes", 15));
+        distWrap.appendChild(minutesField("מרחק הליכה מקסימלי", "max_walking_minutes", 15, 5, 30, 5));
       }
       if (modes.includes("drive")) {
-        distWrap.appendChild(minutesField("מרחק נסיעה מקסימלי (דק׳)", "max_drive_minutes", 10));
+        distWrap.appendChild(minutesField("מרחק נסיעה מקסימלי", "max_drive_minutes", 10, 5, 60, 5));
       }
     }
 

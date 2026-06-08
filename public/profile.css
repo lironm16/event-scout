@@ -52,6 +52,13 @@
   color: var(--text);
   font-family: inherit;
 }
+/* Distance sliders (walking / drive minutes) */
+.pf-slider-row { display: flex; align-items: center; gap: 12px; }
+.pf-slider { flex: 1; accent-color: var(--accent, #2f6fed); height: 24px; }
+.pf-slider-val {
+  min-width: 56px; text-align: center; font-weight: 700;
+  font-size: .95rem; color: var(--accent, #2f6fed); white-space: nowrap;
+}
 .pf-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
 
 .pf-chips { display: flex; flex-wrap: wrap; gap: 8px; }
