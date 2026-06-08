@@ -508,6 +508,7 @@
 
   function renderSuppressions(root) {
     const card = section("🔕 השתקות");
+    const _base = card.childElementCount;
     function removableList(titleText, items, removedArr) {
       if (!items || !items.length) return;
       card.appendChild(el("div", "pf-sub-title", titleText));
@@ -531,19 +532,10 @@
     removableList("מקומות שלא להציג", STATE.suppressed_locations, removedLocations);
     removableList("סדרות חוזרות שלא להציג", STATE.known_series, removedSeries);
 
-    // toggles
-    function toggle(labelText, val, onChange) {
-      const wrap = el("label", "pf-toggle");
-      const cb = el("input");
-      cb.type = "checkbox"; cb.checked = !!val;
-      cb.addEventListener("change", () => onChange(cb.checked));
-      wrap.appendChild(cb);
-      wrap.appendChild(el("span", null, labelText));
-      card.appendChild(wrap);
-    }
-    toggle("אל תראו לי אירועי ילדים/תינוקות/נוער", STATE.suppress_child_audiences,
-      (v) => { STATE.suppress_child_audiences = v; });
-    root.appendChild(card);
+    // (Removed the "אל תראו לי אירועי ילדים/תינוקות/נוער" toggle — child-event
+    // visibility is owned solely by the 🎯 קהלי יעד selector now.) Only show
+    // the section when it actually has suppressions.
+    if (card.childElementCount > _base) root.appendChild(card);
   }
 
   function render() {
@@ -573,7 +565,6 @@
       audience_chip_ids: STATE.audience_chip_ids,
       communities: STATE.communities,
       constraints: STATE.constraints,
-      suppress_child_audiences: STATE.suppress_child_audiences,
       suppress_online_events: STATE.suppress_online_events,
       add_suppressed_labels: STATE.add_suppress,
       remove_suppressed_labels: removedLabels,
