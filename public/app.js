@@ -925,6 +925,10 @@
     if (preloaded) { renderInto(preloaded); return; }
     body.innerHTML = `<div class="card-description" style="padding:16px">טוען…</div>`;
     try {
+      // Deep-link opens the modal at load time, BEFORE loadEvents() has resolved
+      // ensureInitData() — so INIT_DATA may still be "" here → ensure it first,
+      // otherwise the /event fetch 401s and shows "לא נמצא".
+      if (!INIT_DATA) INIT_DATA = await ensureInitData();
       const res = await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
       renderInto((await res.json()).event);
     } catch (_) {
