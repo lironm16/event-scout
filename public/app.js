@@ -696,14 +696,15 @@
       </div>
     `;
 
-    // Body tap → expand/collapse. Hero: an image opens the lightbox (zoom);
-    // an image-less gradient hero expands the card.
-    card.querySelector(".card-body")?.addEventListener("click", () => toggleCard(card, ev));
+    // Body tap → open the event in the shared popup modal (same one the bot
+    // deep-link uses; tapping another card swaps it). Hero: an image opens the
+    // lightbox (zoom); an image-less gradient hero opens the modal too.
+    card.querySelector(".card-body")?.addEventListener("click", () => window.openEventModal(ev.id, ev));
     const heroEl = card.querySelector(".card-hero");
     if (ev.image) {
       heroEl?.addEventListener("click", () => openLightbox(ev.image, ev.name));
     } else {
-      heroEl?.addEventListener("click", () => toggleCard(card, ev));
+      heroEl?.addEventListener("click", () => window.openEventModal(ev.id, ev));
     }
     return card;
   }
@@ -893,7 +894,7 @@
 
   // Open a single event as a full card in a popup (used by the map).
   let _lastModalEvId = null;
-  window.openEventModal = async function (eventId) {
+  window.openEventModal = async function (eventId, preloaded) {
     let overlay = document.getElementById("eventModal");
     if (!overlay) {
       overlay = document.createElement("div");
@@ -910,18 +911,22 @@
       overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
     }
     const body = overlay.querySelector(".event-modal-body");
-    body.innerHTML = `<div class="card-description" style="padding:16px">טוען…</div>`;
     overlay.classList.add("open");
     document.body.style.overflow = "hidden";
     _lastModalEvId = String(eventId);
-    try {
-      const res = await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
-      const ev = (await res.json()).event;
+    const renderInto = (ev) => {
       if (!ev) { body.innerHTML = `<div class="card-description" style="padding:16px">האירוע לא נמצא.</div>`; return; }
       body.innerHTML = "";
       const card = buildCard(ev, { hideOccurrences: true });
       card.classList.add("open");
       body.appendChild(card);
+    };
+    // Card taps pass the already-loaded event → render instantly (no refetch).
+    if (preloaded) { renderInto(preloaded); return; }
+    body.innerHTML = `<div class="card-description" style="padding:16px">טוען…</div>`;
+    try {
+      const res = await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
+      renderInto((await res.json()).event);
     } catch (_) {
       body.innerHTML = `<div class="card-description" style="padding:16px">שגיאה בטעינה.</div>`;
     }
