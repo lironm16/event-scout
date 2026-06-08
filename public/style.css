@@ -1080,7 +1080,7 @@ body {
   --bad:  #e23b4e;
 }
 
-#cardGrid { gap: 16px; padding-bottom: 90px; }
+#cardGrid { gap: 16px; padding-bottom: 24px; }
 
 .event-card {
   background: var(--bg2);
@@ -1557,7 +1557,7 @@ body {
    ✨ unified app — bottom tab bar (Events ⇄ Profile)
    ════════════════════════════════════════════════════════════════════ */
 :root { --tabbar-h: 58px; }
-body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
+body { padding-bottom: env(safe-area-inset-bottom); } /* tabbar removed — profile moved to the search row */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 150;
   height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));

@@ -10,6 +10,8 @@
 </head>
 <body>
   <header class="pf-header">
+    <a id="pfBack" href="index.html" title="חזרה לאירועים"
+       style="display:inline-flex;align-items:center;gap:4px;color:var(--accent,#2f6fed);text-decoration:none;font-weight:700;font-size:.95rem;margin-bottom:6px">← אירועים</a>
     <h1>👤 הפרופיל שלי</h1>
     <p class="pf-sub">עדכנו את ההעדפות — ההמלצות יתעדכנו בהתאם</p>
   </header>
@@ -21,17 +23,21 @@
   <div id="pf-toast" class="pf-toast" hidden></div>
   <button id="pf-save" class="pf-save" hidden>שמירה</button>
 
-  <!-- Bottom tab bar — switch between Events and Profile (one app) -->
-  <nav class="tabbar" id="tabbar">
-    <a class="tab" data-tab="events" href="index.html"><span class="tab-ic">🔍</span><span class="tab-tx">אירועים</span></a>
-    <a class="tab active" data-tab="profile" href="profile.html"><span class="tab-ic">👤</span><span class="tab-tx">פרופיל</span></a>
-  </nav>
   <script>
+    // Tab bar removed (profile is reached from the catalog search row). Carry
+    // the Telegram launch params onto the back link + wire the native
+    // BackButton so both routes back to the events catalog stay authenticated.
     (function () {
       var q = location.search + location.hash;
-      document.querySelectorAll("#tabbar .tab").forEach(function (a) {
-        a.href = a.getAttribute("href") + q;
-      });
+      var back = document.getElementById("pfBack");
+      if (back) back.href = back.getAttribute("href") + q;
+      var tg = window.Telegram && window.Telegram.WebApp;
+      if (tg && tg.BackButton) {
+        try {
+          tg.BackButton.show();
+          tg.BackButton.onClick(function () { location.href = "index.html" + q; });
+        } catch (e) {}
+      }
     })();
   </script>
 
