@@ -71,20 +71,29 @@
     root.innerHTML = parts.join("");
   }
 
+  let _renderedId = null;
   async function boot() {
     const root = document.getElementById("ev-root");
     const initData = await ensureInitData();
     const id = eventIdFromUrl();
     if (!id) { root.innerHTML = '<div class="ev-error">לא צוין אירוע.</div>'; return; }
     if (!initData) { root.innerHTML = '<div class="ev-error">פתחו מתוך טלגרם.</div>'; return; }
+    if (id === _renderedId) return; // already showing this event
     try {
       const res = await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData, id })}`);
       if (!res.ok) throw new Error(res.status);
       const body = await res.json();
+      _renderedId = id;
       render(body.event);
     } catch (_) {
       root.innerHTML = '<div class="ev-error">לא הצלחנו לטעון את האירוע.</div>';
     }
   }
   boot();
+  // Telegram reuses the webview WITHOUT reloading when the Mini App is
+  // reopened for a different event — re-resolve + re-fetch when the page
+  // becomes visible again (also handles back/forward bfcache restores) so a
+  // new ?ev= / start_param actually replaces the previous event.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) boot(); });
+  window.addEventListener("pageshow", () => boot());
 })();

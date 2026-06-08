@@ -1014,9 +1014,13 @@ async function sendEventCard(ctx, event, opts = {}) {
     // in the Web App. Booking link, navigation, every occurrence/series and
     // the online-join link all live there, so the card itself stays clean.
     rows.push([
-      miniEventLink
-        ? Markup.button.url("📖 לפרטים והרשמה", miniEventLink)
-        : Markup.button.webApp("📖 לפרטים והרשמה", miniEventWebUrl),
+      // Prefer the web_app button (a distinct event.html?ev=<id> URL the page
+      // reads directly) over the startapp deep link: startapp REUSES an
+      // already-open Mini App WITHOUT reloading, so it kept showing the
+      // PREVIOUS event. The web_app URL is stable (static MINIAPP_URL).
+      miniEventWebUrl
+        ? Markup.button.webApp("📖 לפרטים והרשמה", miniEventWebUrl)
+        : Markup.button.url("📖 לפרטים והרשמה", miniEventLink),
     ]);
     if (quickRow.length) rows.push(quickRow);
   } else {
