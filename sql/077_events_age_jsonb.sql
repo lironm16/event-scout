@@ -1,0 +1,28 @@
+-- events.age — a typed, lossless age representation (source of truth + display).
+--
+-- Shape (the Gemini enricher fills it in ONE call from title + description):
+--   {
+--     "min": { "kind": <K>, "value": <V>, "inclusive": <bool> } | null,
+--     "max": { "kind": <K>, "value": <V>, "inclusive": <bool> } | null
+--   }
+--   kind="stage"  → value ∈ 'birth' | 'crawl' | 'walk'   (display: לידה / זחילה / הליכה)
+--   kind="months" → value = number of months
+--   kind="years"  → value = number of years
+--   value is kept in its ORIGINAL unit (no forced conversion to months).
+--   inclusive defaults true; inclusive=false encodes "עד X (לא כולל)".
+--   a null endpoint = open-ended ("מ-3 ומעלה" / "עד שנה").
+--
+-- WHY: storing only numeric min/max_months was lossy — "זחילה עד שלוש" collapsed
+-- to "6 חודשים…", forcing brittle render-time regex to recover the wording.
+-- `age` keeps exactly what Gemini understood, so the card shows "זחילה עד שלוש"
+-- directly.
+--
+-- The existing min_months / max_months columns STAY — but become DERIVED,
+-- inclusive numeric bounds resolved from `age` on write (stage→months:
+-- birth 0 / crawl 6 / walk 12; years×12; a ±1-month shift for exclusive
+-- endpoints). They remain the indexed fields used for kid-age matching/filtering.
+--
+-- Nullable: rows enriched before this stay NULL and fall back to the numeric
+-- columns for display until the backfill repopulates `age`.
+
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS age JSONB;
