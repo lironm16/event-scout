@@ -1194,6 +1194,13 @@ body {
   color: var(--accent); font-size: .82rem; font-weight: 700;
 }
 .aud-pill::before { content: "👥"; font-size: .8em; }
+/* Community-restriction row — shown only when access is narrowed (≠ open). */
+.card-access {
+  margin-top: 8px; padding: 5px 11px; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent2) 12%, transparent);
+  color: var(--accent2); font-size: .82rem; font-weight: 700;
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+}
 .loc-pill {
   font-size: .86rem; color: var(--hint); font-weight: 600;
   display: inline-flex; align-items: center; max-width: 100%;

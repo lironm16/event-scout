@@ -649,6 +649,10 @@
     const audiencePill = ev.audienceLine
       ? `<span class="aud-pill">${esc(ev.audienceLine.replace(/^🎯\s*/, ""))}</span>` : "";
 
+    // Own row, shown only when the event is narrowed to specific community/ies.
+    const accessHtml = ev.accessLine
+      ? `<div class="card-access">${esc(ev.accessLine)}</div>` : "";
+
     const umbrellaHtml = ev.umbrella_title
       ? `<button class="card-umbrella" onclick="event.stopPropagation();window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 ${esc(ev.umbrella_title)}</button>`
       : "";
@@ -683,6 +687,7 @@
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
           ${ev.distanceLabel ? `<span class="dist-pill${ev.requiresCar ? " car" : ""}">${esc(ev.distanceLabel)}</span>` : ""}
         </div>
+        ${accessHtml}
         ${umbrellaHtml}
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}
       </div>
