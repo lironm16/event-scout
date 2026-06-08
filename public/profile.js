@@ -273,32 +273,34 @@
     const distWrap = el("div", "pf-dist");
     STATE.constraints.location_modes = STATE.constraints.location_modes || [];
 
-    function minutesField(label, key, def, min = 5, max = 60, step = 5) {
+    function minutesField(label, key, def, min = 5, max = 60) {
       if (STATE.constraints[key] == null) STATE.constraints[key] = def;
+      const cur = STATE.constraints[key];
       const f = field(label);
-      const row = el("div", "pf-slider-row");
-      const i = el("input", "pf-slider");
-      i.type = "range"; i.min = String(min); i.max = String(max); i.step = String(step);
-      i.value = String(STATE.constraints[key]);
-      const out = el("span", "pf-slider-val", `${STATE.constraints[key]} דק׳`);
-      i.addEventListener("input", () => {
-        const n = parseInt(i.value, 10);
-        STATE.constraints[key] = n;
-        out.textContent = `${n} דק׳`;
-      });
-      row.appendChild(i);
-      row.appendChild(out);
-      f.appendChild(row);
+      // A <select> renders as a native scroll-wheel picker on mobile and gives
+      // every single minute (not coarse slider steps).
+      const sel = el("select", "pf-input pf-select");
+      const vals = [];
+      for (let n = min; n <= max; n++) vals.push(n);
+      if (cur != null && !vals.includes(cur)) { vals.push(cur); vals.sort((a, b) => a - b); }
+      for (const n of vals) {
+        const o = el("option", null, `${n} דק׳`);
+        o.value = String(n);
+        if (n === cur) o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.addEventListener("change", () => { STATE.constraints[key] = parseInt(sel.value, 10); });
+      f.appendChild(sel);
       return f;
     }
     function redrawDist() {
       distWrap.innerHTML = "";
       const modes = STATE.constraints.location_modes;
       if (modes.includes("walk")) {
-        distWrap.appendChild(minutesField("מרחק הליכה מקסימלי", "max_walking_minutes", 15, 5, 30, 5));
+        distWrap.appendChild(minutesField("מרחק הליכה מקסימלי", "max_walking_minutes", 15, 5, 30));
       }
       if (modes.includes("drive")) {
-        distWrap.appendChild(minutesField("מרחק נסיעה מקסימלי", "max_drive_minutes", 10, 5, 60, 5));
+        distWrap.appendChild(minutesField("מרחק נסיעה מקסימלי", "max_drive_minutes", 10, 5, 60));
       }
     }
 
