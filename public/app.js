@@ -1024,27 +1024,10 @@
           patch.constraints = { location_modes: ["walk", "drive"], max_drive_minutes: x - 1 };
         }
       }
-      // Profile patch first, awaited — a suppressed tag may contradict an
-      // audience/community membership (409). Tag-hiding can't be resolved here,
-      // so we send the user to the profile to decide.
-      if (Object.keys(patch).length) {
-        let pres;
-        try {
-          pres = await fetch(`${API_PREFIX}/profile`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, patch }) });
-        } catch (_) { pres = null; }
-        if (pres && pres.status === 409) {
-          const data = await pres.json().catch(() => ({}));
-          const names = (data.conflicts || []).map((c) => `«${c.label}»`).join(", ");
-          applyBtn.disabled = false; applyBtn.textContent = "החל סינון";
-          if (confirm(`לא ניתן לסנן את ${names} כי הם מסומנים בפרופיל שלך כקהל יעד/קהילה. לפתוח את הפרופיל כדי להסדיר?`)) {
-            close();
-            const _search = location.search || "", _hash = location.hash || "";
-            location.replace("profile.html" + _search + _hash);
-          }
-          return;
-        }
-      }
       const jobs = [];
+      if (Object.keys(patch).length) {
+        jobs.push(fetch(`${API_PREFIX}/profile`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, patch }) }));
+      }
       if (sel.some((c) => c.dataset.kind === "place")) {
         jobs.push(fetch(`${API_PREFIX}/exclude-place`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventId }) }));
       }

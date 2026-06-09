@@ -4612,21 +4612,7 @@ async function applySemanticAction(ctx, action) {
       const existing = Array.isArray(ctxJson.suppressed_labels)
         ? ctxJson.suppressed_labels
         : [];
-      // Conflict guard: don't let the user suppress a tag whose concept they
-      // also belong to (audience target / community). Send them to the profile
-      // to resolve it explicitly.
-      const { detectProfileConflicts } = require("../lib/conceptConflict");
-      const { hydrateTargetAudienceChipIds } = require("../lib/audienceTargets");
-      const conflicts = detectProfileConflicts({
-        suppressedNames: [...existing, labelName],
-        audienceChipIds: [...hydrateTargetAudienceChipIds(profile)],
-        communities: ctxJson.communities || {},
-      });
-      if (conflicts.some((c) => c.name === labelName)) {
-        const which = conflicts.find((c) => c.name === labelName).control === "community" ? "קהילה" : "קהל יעד";
-        await safeAck(ctx, `סומן אצלך כ${which} — הסדירי בפרופיל`);
-        return;
-      }
+      // Tag suppression is purely mechanical — just filter events with this tag.
       const set = new Set(existing);
       const wasPresent = set.has(labelName);
       set.add(labelName);
