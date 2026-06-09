@@ -6,36 +6,22 @@
 --
 -- Three guarantees, all in-DB (no app code, cache-proof):
 --   1. WRITE-TIME SANITIZE: any insert/update of events.tag_ids drops ids with
---      no matching labels row, then recomputes events.tags. A stale cached id
---      is stripped the instant it's written.
---   2. LABEL DELETE → remove that id from EVERY event's tag_ids (incl.
---      archived), so a prune/merge never leaves a dangling reference.
---   3. LABEL RENAME → resync events.tags for every event referencing it, so the
---      readable column never lags the label's name.
+--      no matching labels row, then recomputes events.tags.
+--   2. LABEL DELETE → remove that id from EVERY event's tag_ids (incl archived).
+--   3. LABEL RENAME → resync events.tags for every event referencing it.
 --
--- Idempotent / safe to re-run.
+-- Idempotent / safe to re-run. Requires sql/080 (events.tags column).
 
 -- ── 1) Sanitize + sync (replaces the 080 sync function) ─────────────────────
 CREATE OR REPLACE FUNCTION events_sync_tags() RETURNS trigger AS $$
 BEGIN
-  -- Keep only ids that exist in labels (drops orphans / stale-cache writes),
-  -- preserving order.
-  NEW.tag_ids := COALESCE(
-    (
-      SELECT array_agg(t.id ORDER BY t.ord)
-      FROM unnest(COALESCE(NEW.tag_ids, '{}')) WITH ORDINALITY AS t(id, ord)
-      WHERE EXISTS (SELECT 1 FROM labels l WHERE l.id = t.id)
-    ),
-    '{}'
+  NEW.tag_ids := ARRAY(
+    SELECT id FROM unnest(COALESCE(NEW.tag_ids, '{}'::int[])) AS id
+    WHERE id IN (SELECT l.id FROM labels l)
   );
-  -- Readable names, same order.
-  NEW.tags := COALESCE(
-    (
-      SELECT array_agg(l.name ORDER BY t.ord)
-      FROM unnest(NEW.tag_ids) WITH ORDINALITY AS t(id, ord)
-      JOIN labels l ON l.id = t.id
-    ),
-    '{}'
+  NEW.tags := ARRAY(
+    SELECT l.name FROM unnest(NEW.tag_ids) AS id
+    JOIN labels l ON l.id = id
   );
   RETURN NEW;
 END;
@@ -49,9 +35,7 @@ CREATE TRIGGER trg_events_sync_tags
 -- ── 2) Label DELETE → strip the id from every event ─────────────────────────
 CREATE OR REPLACE FUNCTION labels_cascade_delete() RETURNS trigger AS $$
 BEGIN
-  -- array_remove changes tag_ids → fires trg_events_sync_tags (re-sync tags).
-  UPDATE events
-     SET tag_ids = array_remove(tag_ids, OLD.id)
+  UPDATE events SET tag_ids = array_remove(tag_ids, OLD.id)
    WHERE tag_ids @> ARRAY[OLD.id];
   RETURN OLD;
 END;
@@ -63,20 +47,13 @@ CREATE TRIGGER trg_labels_cascade_delete
   FOR EACH ROW EXECUTE FUNCTION labels_cascade_delete();
 
 -- ── 3) Label RENAME → resync events.tags for referencing events ─────────────
--- Updates events.tags directly (NOT tag_ids), so it does not re-fire the sync
--- or label-count triggers — no recursion.
 CREATE OR REPLACE FUNCTION labels_cascade_rename() RETURNS trigger AS $$
 BEGIN
-  UPDATE events e
-     SET tags = COALESCE(
-       (
-         SELECT array_agg(l.name ORDER BY t.ord)
-         FROM unnest(e.tag_ids) WITH ORDINALITY AS t(id, ord)
-         JOIN labels l ON l.id = t.id
-       ),
-       '{}'
-     )
-   WHERE e.tag_ids @> ARRAY[NEW.id];
+  UPDATE events e SET tags = ARRAY(
+    SELECT l.name FROM unnest(e.tag_ids) AS id
+    JOIN labels l ON l.id = id
+  )
+  WHERE e.tag_ids @> ARRAY[NEW.id];
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -89,16 +66,14 @@ CREATE TRIGGER trg_labels_cascade_rename
   EXECUTE FUNCTION labels_cascade_rename();
 
 -- ── 4) One-time cleanup of the existing orphan backlog ──────────────────────
--- Writing tag_ids fires the sanitize trigger, which also fixes tags.
 UPDATE events e
-   SET tag_ids = (
-     SELECT COALESCE(array_agg(t.id ORDER BY t.ord), '{}')
-     FROM unnest(e.tag_ids) WITH ORDINALITY AS t(id, ord)
-     WHERE EXISTS (SELECT 1 FROM labels l WHERE l.id = t.id)
-   )
- WHERE EXISTS (
-   SELECT 1 FROM unnest(e.tag_ids) AS x(id)
-   WHERE NOT EXISTS (SELECT 1 FROM labels l WHERE l.id = x.id)
- );
+SET tag_ids = ARRAY(
+  SELECT id FROM unnest(e.tag_ids) AS id
+  WHERE id IN (SELECT l.id FROM labels l)
+)
+WHERE EXISTS (
+  SELECT 1 FROM unnest(e.tag_ids) AS id
+  WHERE id NOT IN (SELECT l.id FROM labels l)
+);
 
 NOTIFY pgrst, 'reload schema';
