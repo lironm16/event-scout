@@ -737,16 +737,6 @@
   function buildDetail(ev, isInterested, opts = {}) {
     const parts = [];
 
-    // 0) Date + time header — shown only in the modal (opts.showDateHeader=true),
-    //    NOT in the list cards (date headers shown between groups there).
-    if (opts.showDateHeader && (ev.dateHe || ev.date)) {
-      const datePart = ev.dateHe || ev.date;
-      // Clean up timeHe: remove trailing dash (e.g. "09:30-" → "09:30")
-      const rawTime = (ev.timeHe || "").replace(/-$/, "").trim();
-      const timePart = rawTime ? ` · ${esc(rawTime)}` : "";
-      parts.push(`<div class="date-header" style="position:static;padding:12px 0 8px">📅 ${esc(datePart)}${timePart}</div>`);
-    }
-
     // 1) Primary CTA + ניווט (+ watch when sold out) on one row.
     const navUrl = navUrlFor(ev);
     const ctaRow = [];
@@ -944,7 +934,16 @@
     const renderInto = (ev) => {
       if (!ev) { body.innerHTML = `<div class="card-description" style="padding:16px">האירוע לא נמצא.</div>`; return; }
       body.innerHTML = "";
-      const card = buildCard(ev, { hideOccurrences: !!opts.hideOccurrences, showDateHeader: true });
+      // Date header — identical to the sticky date-headers in the catalog list,
+      // placed ABOVE the card (not inside it).
+      if (ev.dateHe || ev.date) {
+        const hdr = document.createElement("div");
+        hdr.className = "date-header";
+        hdr.style.position = "static";
+        hdr.textContent = ev.dateHe || ev.date;
+        body.appendChild(hdr);
+      }
+      const card = buildCard(ev, { hideOccurrences: !!opts.hideOccurrences });
       card.classList.add("open");
       body.appendChild(card);
     };
