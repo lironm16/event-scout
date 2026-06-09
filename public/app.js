@@ -1116,30 +1116,38 @@
       const varied = new Set(list.map((o) => o.name)).size > 1;
       // Show the venue per row only when occurrences span DIFFERENT places.
       const variedLoc = new Set(list.map((o) => o.location || "")).size > 1;
+      // Show a short description per row only when the children's descriptions
+      // actually DIFFER (an umbrella of distinct events) — for a same-name
+      // series the description is identical, so it'd be noise.
+      const variedDesc = new Set(list.map((o) => (o.description || "").trim())).size > 1;
       if (!list.length) { box.innerHTML = `<div class="occ-empty">אין עוד מופעים.</div>`; }
       else {
         box.innerHTML = list.map((o) => {
-          // Time on its own line below the date; keep the range unbreakable so
-          // "16:40-17:20" never wraps mid-dash.
+          // Each meta item on its OWN line (date / time / location) — no " · "
+          // run that wraps mid-value. Time range kept unbreakable.
           const rawTime = (o.timeHe || "").trim();
-          const timeLine = rawTime
-            ? `<span class="sr-time">🕒 ${esc(rawTime)}</span>` : "";
-          const tk = seriesTicketText(o.ticketsLeft);
-          const meta = [];
+          const lines = [];
           let top;
           if (varied) { // umbrella program — the event name is primary
             top = `<span class="sr-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>`;
-            if (o.dateHe) meta.push(`🗓️ ${esc(o.dateHe)}`);
+            if (o.dateHe) lines.push(`🗓️ ${esc(o.dateHe)}`);
+            if (rawTime) lines.push(`<span class="sr-nowrap">🕒 ${esc(rawTime)}</span>`);
           } else {       // same-name series — the date is primary
-            top = `<span class="sr-when">🗓️ ${esc(o.dateHe || "")}</span>${timeLine}`;
+            top = `<span class="sr-when">🗓️ ${esc(o.dateHe || "")}</span>${rawTime ? `<span class="sr-time">🕒 ${esc(rawTime)}</span>` : ""}`;
           }
-          if (tk) meta.push(tk);
-          if (variedLoc && o.location) meta.push(`📍 ${esc(o.location)}`);
+          const tk = seriesTicketText(o.ticketsLeft);
+          if (tk) lines.push(tk);
+          if (variedLoc && o.location) lines.push(`📍 ${esc(o.location)}`);
+          const metaHtml = lines.length
+            ? `<span class="sr-meta">${lines.map((l) => `<span class="sr-line">${l}</span>`).join("")}</span>` : "";
+          const descHtml = (variedDesc && o.description)
+            ? `<span class="sr-desc">${esc(o.description)}</span>` : "";
           // For-me occurrences get a bold accent FRAME (replaces the ✨ dot).
           return `<button class="series-row${o.forMe ? " forme" : ""}" onclick="window.openEventModal(${o.id},null,{hideOccurrences:true,parentId:${eventId}})"${o.forMe ? ' title="בשבילך"' : ""}>
             <span class="sr-body">
               <span class="sr-top">${top}</span>
-              ${meta.length ? `<span class="sr-meta">${meta.join(" · ")}</span>` : ""}
+              ${metaHtml}
+              ${descHtml}
             </span>
             <span class="sr-go">›</span>
           </button>`;

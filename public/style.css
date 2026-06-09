@@ -1547,7 +1547,15 @@ body {
 .sr-when { font-size: .95rem; font-weight: 700; color: var(--text);
   white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
 .sr-meta { font-size: .8rem; color: var(--hint);
-  white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+  display: flex; flex-direction: column; gap: 2px; line-height: 1.35; }
+.sr-line { white-space: normal; overflow-wrap: anywhere; }
+.sr-nowrap { white-space: nowrap; }
+/* Per-child description (umbrella of distinct events) — max 2 lines. */
+.sr-desc {
+  font-size: .8rem; color: var(--hint); line-height: 1.35; margin-top: 2px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; white-space: normal;
+}
 .sr-tk.ok   { color: var(--hint); }
 .sr-tk.low  { color: var(--warn); font-weight: 700; }
 .sr-tk.sold { color: var(--bad); font-weight: 700; }
