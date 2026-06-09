@@ -1119,15 +1119,19 @@
       if (!list.length) { box.innerHTML = `<div class="occ-empty">אין עוד מופעים.</div>`; }
       else {
         box.innerHTML = list.map((o) => {
-          const when = [o.dateHe, o.timeHe].filter(Boolean).join(" · ");
+          // Time on its own line below the date; keep the range unbreakable so
+          // "16:40-17:20" never wraps mid-dash.
+          const rawTime = (o.timeHe || "").trim();
+          const timeLine = rawTime
+            ? `<span class="sr-time">🕒 ${esc(rawTime)}</span>` : "";
           const tk = seriesTicketText(o.ticketsLeft);
           const meta = [];
           let top;
           if (varied) { // umbrella program — the event name is primary
             top = `<span class="sr-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>`;
-            meta.push(`🗓️ ${esc(when)}`);
+            if (o.dateHe) meta.push(`🗓️ ${esc(o.dateHe)}`);
           } else {       // same-name series — the date is primary
-            top = `<span class="sr-when">🗓️ ${esc(when)}</span>`;
+            top = `<span class="sr-when">🗓️ ${esc(o.dateHe || "")}</span>${timeLine}`;
           }
           if (tk) meta.push(tk);
           if (variedLoc && o.location) meta.push(`📍 ${esc(o.location)}`);
