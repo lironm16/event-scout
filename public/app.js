@@ -737,6 +737,14 @@
   function buildDetail(ev, isInterested, opts = {}) {
     const parts = [];
 
+    // 0) Date + time header — shown only in the modal (opts.showDateHeader=true),
+    //    NOT in the list cards (date headers shown between groups there).
+    if (opts.showDateHeader && (ev.dateHe || ev.date)) {
+      const datePart = ev.dateHe || ev.date;
+      const timePart = ev.timeHe ? ` · ${esc(ev.timeHe)}` : "";
+      parts.push(`<div class="detail-date-header">📅 ${esc(datePart)}${timePart}</div>`);
+    }
+
     // 1) Primary CTA + ניווט (+ watch when sold out) on one row.
     const navUrl = navUrlFor(ev);
     const ctaRow = [];
@@ -934,7 +942,7 @@
     const renderInto = (ev) => {
       if (!ev) { body.innerHTML = `<div class="card-description" style="padding:16px">האירוע לא נמצא.</div>`; return; }
       body.innerHTML = "";
-      const card = buildCard(ev, { hideOccurrences: !!opts.hideOccurrences });
+      const card = buildCard(ev, { hideOccurrences: !!opts.hideOccurrences, showDateHeader: true });
       card.classList.add("open");
       body.appendChild(card);
     };

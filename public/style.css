@@ -614,6 +614,14 @@ body {
   border-top: 1px solid color-mix(in srgb, var(--hint) 12%, transparent);
   animation: slideDown .2s cubic-bezier(.25,.46,.45,.94);
 }
+.detail-date-header {
+  font-size: .9rem;
+  font-weight: 600;
+  color: var(--text);
+  padding: 12px 0 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--hint) 15%, transparent);
+  margin-bottom: 8px;
+}
 .event-card.open .card-detail { display: block; }
 
 @keyframes slideDown {
