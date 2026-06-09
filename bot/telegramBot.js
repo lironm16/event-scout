@@ -8877,15 +8877,11 @@ runCleanup()
         // launcher, set below; "/" autocomplete is independent of that and
         // still surfaces these.) Admin-only commands are omitted on purpose.
         bot.telegram
+          // Keep the "/" menu SHORT — a long list is cut off at the bottom on
+          // mobile. Just the main-menu hub + help; every other command still
+          // works when typed, and the persistent Menu Button opens the catalog.
           .setMyCommands([
-            { command: "catalog", description: "📅 קטלוג אירועים — חיפוש ועיון" },
-            { command: "profile", description: "📋 הפרופיל שלי" },
             { command: "menu", description: "🏠 תפריט ראשי" },
-            { command: "alerts_preview", description: "👀 תצוגה מקדימה של אירועים חדשים" },
-            { command: "alerts_off", description: "🔕 להשבית התראות על אירועים חדשים" },
-            { command: "alerts_on", description: "🔔 להפעיל התראות על אירועים חדשים" },
-            { command: "connect_calendar", description: "📆 חיבור ליומן Google" },
-            { command: "invite", description: "🤝 הזמנת חברים" },
             { command: "help", description: "❓ הסבר ועזרה" },
           ])
           .then(() => console.log("[Bot] Slash-command menu set"))
