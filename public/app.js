@@ -940,6 +940,7 @@
         const hdr = document.createElement("div");
         hdr.className = "date-header";
         hdr.style.position = "static";
+        hdr.style.marginBottom = "12px";
         hdr.textContent = ev.dateHe || ev.date;
         body.appendChild(hdr);
       }
