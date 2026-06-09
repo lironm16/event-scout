@@ -16,12 +16,12 @@
 CREATE OR REPLACE FUNCTION events_sync_tags() RETURNS trigger AS $$
 BEGIN
   NEW.tag_ids := ARRAY(
-    SELECT id FROM unnest(COALESCE(NEW.tag_ids, '{}'::int[])) AS id
-    WHERE id IN (SELECT l.id FROM labels l)
+    SELECT t.id FROM unnest(COALESCE(NEW.tag_ids, '{}'::int[])) AS t(id)
+    WHERE t.id IN (SELECT l.id FROM labels l)
   );
   NEW.tags := ARRAY(
-    SELECT l.name FROM unnest(NEW.tag_ids) AS id
-    JOIN labels l ON l.id = id
+    SELECT l.name FROM unnest(NEW.tag_ids) AS t(id)
+    JOIN labels l ON l.id = t.id
   );
   RETURN NEW;
 END;
@@ -50,8 +50,8 @@ CREATE TRIGGER trg_labels_cascade_delete
 CREATE OR REPLACE FUNCTION labels_cascade_rename() RETURNS trigger AS $$
 BEGIN
   UPDATE events e SET tags = ARRAY(
-    SELECT l.name FROM unnest(e.tag_ids) AS id
-    JOIN labels l ON l.id = id
+    SELECT l.name FROM unnest(e.tag_ids) AS t(id)
+    JOIN labels l ON l.id = t.id
   )
   WHERE e.tag_ids @> ARRAY[NEW.id];
   RETURN NEW;
