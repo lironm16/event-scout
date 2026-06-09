@@ -1648,12 +1648,15 @@ const {
 
 /** Persistent reply keyboard — quick actions + optional Mini App catalog. */
 function catalogReplyKeyboardMarkup() {
-  // Single persistent button. Tapping it sends the text "📋 תפריט ראשי",
-  // which routes to the full inline button menu (sent fresh, so its
-  // web_app buttons reliably carry initData).
+  // Two buttons on ONE row: a compact "❓ עזרה" (help) to the LEFT of the
+  // "📋 תפריט ראשי" button. Tapping תפריט ראשי routes to the full inline button
+  // menu (sent fresh, so its web_app buttons reliably carry initData); עזרה
+  // routes to the welcome/overview. (Reply-keyboard buttons in a row split
+  // width evenly — Telegram has no per-button width — so "smaller" is just the
+  // shorter label.)
   return {
     reply_markup: {
-      keyboard: [[{ text: "📋 תפריט ראשי" }]],
+      keyboard: [[{ text: "❓ עזרה" }, { text: "📋 תפריט ראשי" }]],
       resize_keyboard: true,
       is_persistent: true,
     },
@@ -8876,15 +8879,14 @@ runCleanup()
         // and the commands popup. (The ☰ button itself is the Mini App
         // launcher, set below; "/" autocomplete is independent of that and
         // still surfaces these.) Admin-only commands are omitted on purpose.
+        // Clear the "/" command menu entirely — on mobile the popup was cut off
+        // at the bottom, and the actions now live on the persistent reply
+        // keyboard ("❓ עזרה" + "📋 תפריט ראשי"). Every command still works when
+        // typed; the persistent Menu Button opens the catalog. setMyCommands([])
+        // removes the list so "/" surfaces nothing.
         bot.telegram
-          // Keep the "/" menu SHORT — a long list is cut off at the bottom on
-          // mobile. Just the main-menu hub + help; every other command still
-          // works when typed, and the persistent Menu Button opens the catalog.
-          .setMyCommands([
-            { command: "menu", description: "🏠 תפריט ראשי" },
-            { command: "help", description: "❓ הסבר ועזרה" },
-          ])
-          .then(() => console.log("[Bot] Slash-command menu set"))
+          .setMyCommands([])
+          .then(() => console.log("[Bot] Slash-command menu cleared"))
           .catch((err) => console.warn(`[Bot] setMyCommands failed: ${err.message}`));
 
         // Register the Mini App as the bot's Menu Button — appears as a
