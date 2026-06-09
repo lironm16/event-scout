@@ -741,7 +741,9 @@
     //    NOT in the list cards (date headers shown between groups there).
     if (opts.showDateHeader && (ev.dateHe || ev.date)) {
       const datePart = ev.dateHe || ev.date;
-      const timePart = ev.timeHe ? ` · ${esc(ev.timeHe)}` : "";
+      // Clean up timeHe: remove trailing dash (e.g. "09:30-" → "09:30")
+      const rawTime = (ev.timeHe || "").replace(/-$/, "").trim();
+      const timePart = rawTime ? `<div class="detail-date-time">🕒 ${esc(rawTime)}</div>` : "";
       parts.push(`<div class="detail-date-header">📅 ${esc(datePart)}${timePart}</div>`);
     }
 

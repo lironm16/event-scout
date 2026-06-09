@@ -622,6 +622,12 @@ body {
   border-bottom: 1px solid color-mix(in srgb, var(--hint) 15%, transparent);
   margin-bottom: 8px;
 }
+.detail-date-time {
+  font-size: .85rem;
+  font-weight: 400;
+  color: var(--hint);
+  margin-top: 2px;
+}
 .event-card.open .card-detail { display: block; }
 
 @keyframes slideDown {
