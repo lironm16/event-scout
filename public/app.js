@@ -894,7 +894,11 @@
 
   // Open a single event as a full card in a popup (used by the map).
   let _lastModalEvId = null;
-  window.openEventModal = async function (eventId, preloaded) {
+  // opts.hideOccurrences — suppress the "עוד N מהסדרה" button (used when the
+  //   modal was opened from within a series list, to prevent an infinite loop).
+  // opts.parentId — when set, "← חזרה" reopens the parent event instead of
+  //   closing the modal (used for occurrence→series-representative navigation).
+  window.openEventModal = async function (eventId, preloaded, opts = {}) {
     let overlay = document.getElementById("eventModal");
     if (!overlay) {
       overlay = document.createElement("div");
@@ -906,10 +910,23 @@
           <div class="event-modal-body"></div>
         </div>`;
       document.body.appendChild(overlay);
-      const close = () => { overlay.classList.remove("open"); document.body.style.overflow = ""; };
-      overlay.querySelector(".event-modal-back").addEventListener("click", close);
-      overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) { overlay.classList.remove("open"); document.body.style.overflow = ""; } });
     }
+    // Wire back button: if called with a parentId, navigate back to the parent;
+    // otherwise close the modal. Replace the listener each open so it captures
+    // the current opts (avoids stale closure from a previous call).
+    const backBtn = overlay.querySelector(".event-modal-back");
+    const newBack = backBtn.cloneNode(true); // removes old listener
+    backBtn.replaceWith(newBack);
+    newBack.addEventListener("click", () => {
+      if (opts.parentId) {
+        window.openEventModal(opts.parentId); // back to series representative
+      } else {
+        overlay.classList.remove("open");
+        document.body.style.overflow = "";
+      }
+    });
+
     const body = overlay.querySelector(".event-modal-body");
     overlay.classList.add("open");
     document.body.style.overflow = "hidden";
@@ -917,7 +934,7 @@
     const renderInto = (ev) => {
       if (!ev) { body.innerHTML = `<div class="card-description" style="padding:16px">האירוע לא נמצא.</div>`; return; }
       body.innerHTML = "";
-      const card = buildCard(ev, {});
+      const card = buildCard(ev, { hideOccurrences: !!opts.hideOccurrences });
       card.classList.add("open");
       body.appendChild(card);
     };
@@ -1105,7 +1122,7 @@
           if (tk) meta.push(tk);
           if (variedLoc && o.location) meta.push(`📍 ${esc(o.location)}`);
           // For-me occurrences get a bold accent FRAME (replaces the ✨ dot).
-          return `<button class="series-row${o.forMe ? " forme" : ""}" onclick="window.openEventModal(${o.id})"${o.forMe ? ' title="בשבילך"' : ""}>
+          return `<button class="series-row${o.forMe ? " forme" : ""}" onclick="window.openEventModal(${o.id},null,{hideOccurrences:true,parentId:${eventId}})"${o.forMe ? ' title="בשבילך"' : ""}>
             <span class="sr-body">
               <span class="sr-top">${top}</span>
               ${meta.length ? `<span class="sr-meta">${meta.join(" · ")}</span>` : ""}
