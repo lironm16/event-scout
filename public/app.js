@@ -743,8 +743,8 @@
       const datePart = ev.dateHe || ev.date;
       // Clean up timeHe: remove trailing dash (e.g. "09:30-" → "09:30")
       const rawTime = (ev.timeHe || "").replace(/-$/, "").trim();
-      const timePart = rawTime ? `<div class="detail-date-time">🕒 ${esc(rawTime)}</div>` : "";
-      parts.push(`<div class="detail-date-header">📅 ${esc(datePart)}${timePart}</div>`);
+      const timePart = rawTime ? ` · ${esc(rawTime)}` : "";
+      parts.push(`<div class="date-header" style="position:static;padding:12px 0 8px">📅 ${esc(datePart)}${timePart}</div>`);
     }
 
     // 1) Primary CTA + ניווט (+ watch when sold out) on one row.
