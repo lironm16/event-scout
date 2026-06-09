@@ -917,11 +917,11 @@
     const renderInto = (ev) => {
       if (!ev) { body.innerHTML = `<div class="card-description" style="padding:16px">האירוע לא נמצא.</div>`; return; }
       body.innerHTML = "";
-      const card = buildCard(ev, { hideOccurrences: true });
+      const card = buildCard(ev, {});
       card.classList.add("open");
       body.appendChild(card);
     };
-    // Card taps pass the already-loaded event → render instantly (no refetch).
+    // Card taps pass the already-loaded event (with totalOccurrences) → render instantly.
     if (preloaded) { renderInto(preloaded); return; }
     body.innerHTML = `<div class="card-description" style="padding:16px">טוען…</div>`;
     try {
