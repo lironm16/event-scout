@@ -579,6 +579,81 @@
       remove_suppressed_locations: removedLocations,
     };
   }
+  // Resolve a suppress-vs-membership contradiction the server rejected (409).
+  // For each conflict the user chooses: drop the positive membership, OR cancel
+  // the suppression. Once ALL are resolved we re-save automatically.
+  function showConflictDialog(conflicts) {
+    if (!conflicts.length) { save(); return; }
+    const overlay = el("div", "pf-modal-backdrop");
+    const sheet = el("div", "pf-modal");
+    const head = el("div", "pf-modal-head");
+    head.appendChild(el("span", "pf-card-title", "⚠️ סתירה בהגדרות"));
+    const close = el("button", "filter-sheet-close", "✕");
+    close.type = "button";
+    close.addEventListener("click", () => document.body.removeChild(overlay));
+    head.appendChild(close);
+    sheet.appendChild(head);
+
+    sheet.appendChild(el(
+      "p", "pf-hint",
+      "סימנת לסנן תגית שאת/ה גם משויך/ת אליה. צריך להחליט לכל אחת:",
+    ));
+
+    const remaining = new Set(conflicts.map((c) => c.name));
+    const list = el("div", "pf-modal-list");
+
+    function cancelSuppression(name) {
+      // session-only add → just drop it; otherwise mark the saved one removed.
+      if (STATE.add_suppress.includes(name)) {
+        STATE.add_suppress = STATE.add_suppress.filter((x) => x !== name);
+      } else if (!removedLabels.includes(name)) {
+        removedLabels.push(name);
+      }
+    }
+    function dropMembership(c) {
+      if (c.control === "audience") {
+        STATE.audience_chip_ids = (STATE.audience_chip_ids || []).filter((id) => id !== c.chipId);
+      } else if (c.control === "community") {
+        STATE.communities = STATE.communities || {};
+        STATE.communities[c.access] = "not-member";
+      }
+    }
+    function resolved(name, rowEl) {
+      remaining.delete(name);
+      rowEl.remove();
+      if (remaining.size === 0) {
+        document.body.removeChild(overlay);
+        save(); // re-save with the contradiction gone
+      }
+    }
+
+    conflicts.forEach((c) => {
+      const row = el("div", "pf-conflict-row");
+      const which = c.control === "community" ? "קהילה" : "קהל יעד";
+      row.appendChild(el(
+        "div", "pf-conflict-text",
+        `בפרופיל שלך מסומן ${which} «${c.label}», ולכן אי אפשר לסנן את התגית «${c.name}».`,
+      ));
+      const btns = el("div", "pf-chips");
+      const removeBtn = el("button", "pf-chip removable", `הסר «${c.label}» מ${which}`);
+      const keepBtn = el("button", "pf-chip", `בטל סינון «${c.name}»`);
+      [removeBtn, keepBtn].forEach((b) => (b.type = "button"));
+      removeBtn.addEventListener("click", () => { dropMembership(c); resolved(c.name, row); });
+      keepBtn.addEventListener("click", () => { cancelSuppression(c.name); resolved(c.name, row); });
+      btns.appendChild(removeBtn);
+      btns.appendChild(keepBtn);
+      row.appendChild(btns);
+      list.appendChild(row);
+    });
+
+    sheet.appendChild(list);
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) document.body.removeChild(overlay);
+    });
+  }
+
   async function save() {
     // Birth date is required for any kid row that has data; drop empty rows.
     STATE.kids = (STATE.kids || []).filter(
@@ -595,6 +670,13 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ initData: INIT_DATA, patch: buildPatch() }),
       });
+      if (res.status === 409) {
+        // Suppressed tag contradicts an audience/community membership — let the
+        // user resolve, then this dialog re-saves.
+        const data = await res.json().catch(() => ({}));
+        showConflictDialog(data.conflicts || []);
+        return;
+      }
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
       const updated = await res.json();
       applyPayload(updated);
