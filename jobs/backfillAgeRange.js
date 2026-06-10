@@ -59,15 +59,23 @@ function saveDone(set) {
     if (processed >= BATCH_MAX) break;
     try {
       const res = await enricher.callGemini(ev.name, ev.description || "", [], ev.umbrella_title || null);
+      const upd = {};
+      let b = { min_months: null, max_months: null };
       if (res.age_range) {
-        const b = resolveBounds(res.age_range);
-        const { error: uerr } = await supabase
-          .from("events")
-          .update({ age_range: res.age_range, min_months: b.min_months, max_months: b.max_months })
-          .eq("id", ev.id);
+        b = resolveBounds(res.age_range);
+        upd.age_range = res.age_range;
+        upd.min_months = b.min_months;
+        upd.max_months = b.max_months;
+      }
+      // dev_stages can be present even with no chronological age ("סדנת גמילה").
+      if (Array.isArray(res.dev_stages) && res.dev_stages.length) {
+        upd.dev_stages = res.dev_stages;
+      }
+      if (Object.keys(upd).length) {
+        const { error: uerr } = await supabase.from("events").update(upd).eq("id", ev.id);
         if (uerr) { console.warn(`#${ev.id} update failed: ${uerr.message}`); continue; }
         filled++;
-        console.log(`✓ #${ev.id} "${(ev.name||"").slice(0,40)}" → "${formatAgeRangeLabel(res.age_range)}" [${b.min_months}..${b.max_months}]`);
+        console.log(`✓ #${ev.id} "${(ev.name||"").slice(0,40)}" → "${formatAgeRangeLabel(res.age_range)}" [${b.min_months}..${b.max_months}]${upd.dev_stages ? " stages="+JSON.stringify(upd.dev_stages) : ""}`);
       } else {
         noInfo++;
         console.log(`· #${ev.id} "${(ev.name||"").slice(0,40)}" → no age info`);

@@ -192,6 +192,8 @@ const OPTIONAL_COLS = [
   // Typed lossless age range (sql/077). When present, the card shows its
   // original wording ("זחילה עד שלוש"); absent → falls back to min/max_months.
   { col: "age_range", migration: "sql/077_events_age_jsonb.sql" },
+  // Developmental-stage targeting (sql/082). Matched against profile kid stages.
+  { col: "dev_stages", migration: "sql/082_events_dev_stages.sql" },
 ];
 let _availableColsCache = null;
 
@@ -284,6 +286,7 @@ function flattenEvent(row) {
     tag_ids: row.tag_ids || [],
     access: row.access ?? null,
     age_range: row.age_range ?? null,
+    dev_stages: row.dev_stages ?? [],
     _coords: coords,
     _locationFound: loc?.found ?? null,
     _locationKind: loc?.kind || (row.location_key ? "unknown" : null),
