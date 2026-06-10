@@ -194,6 +194,8 @@ const OPTIONAL_COLS = [
   { col: "age_range", migration: "sql/077_events_age_jsonb.sql" },
   // Developmental-stage targeting (sql/082). Matched against profile kid stages.
   { col: "dev_stages", migration: "sql/082_events_dev_stages.sql" },
+  // LLM-chosen content emoji (sql/083). Drives the card icon (getEventIcon).
+  { col: "emoji", migration: "sql/083_events_emoji.sql" },
 ];
 let _availableColsCache = null;
 
@@ -287,6 +289,7 @@ function flattenEvent(row) {
     access: row.access ?? null,
     age_range: row.age_range ?? null,
     dev_stages: row.dev_stages ?? [],
+    emoji: row.emoji ?? null,
     _coords: coords,
     _locationFound: loc?.found ?? null,
     _locationKind: loc?.kind || (row.location_key ? "unknown" : null),

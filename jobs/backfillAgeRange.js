@@ -71,6 +71,7 @@ function saveDone(set) {
       if (Array.isArray(res.dev_stages) && res.dev_stages.length) {
         upd.dev_stages = res.dev_stages;
       }
+      if (res.emoji) upd.emoji = res.emoji;
       if (Object.keys(upd).length) {
         const { error: uerr } = await supabase.from("events").update(upd).eq("id", ev.id);
         if (uerr) { console.warn(`#${ev.id} update failed: ${uerr.message}`); continue; }
