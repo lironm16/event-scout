@@ -59,6 +59,15 @@ function saveDone(set) {
     if (processed >= BATCH_MAX) break;
     try {
       const res = await enricher.callGemini(ev.name, ev.description || "", [], ev.umbrella_title || null);
+      if (process.env.DRY_RUN) {
+        const b = res.age_range ? resolveBounds(res.age_range) : { min_months: null, max_months: null };
+        console.log(`#${ev.id} "${(ev.name||"").slice(0,46)}"`);
+        console.log(`   audience=${res.audience} category=${res.category} emoji=${res.emoji||"-"}`);
+        console.log(`   age_range="${formatAgeRangeLabel(res.age_range)}" [${b.min_months}..${b.max_months}]  dev_stages=${JSON.stringify(res.dev_stages)}\n`);
+        processed++;
+        await sleep(GAP_MS);
+        continue; // NO write, NO state change
+      }
       const upd = {};
       let b = { min_months: null, max_months: null };
       if (res.age_range) {
