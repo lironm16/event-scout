@@ -51,7 +51,15 @@ function saveDone(set) {
     .limit(400);
   if (error) { console.error("query failed:", error.message); process.exit(1); }
 
-  const queue = (rows || []).filter((e) => !done.has(e.id));
+  let queue = (rows || []).filter((e) => !done.has(e.id));
+  // DRY_RUN doesn't record state, so nearest-date order keeps returning the
+  // same head every run. Shuffle in dry-run to sample a varied set.
+  if (process.env.DRY_RUN) {
+    queue = queue
+      .map((e) => [Math.random(), e])
+      .sort((a, b) => a[0] - b[0])
+      .map(([, e]) => e);
+  }
   console.log(`model=${process.env.GEMINI_MODEL} | candidates(no age_range, future)=${(rows||[]).length} | already-attempted=${done.size} | queue=${queue.length} | batchMax=${BATCH_MAX}`);
 
   let filled = 0, noInfo = 0, processed = 0;
@@ -109,7 +117,6 @@ function saveDone(set) {
   const { count: remainingFuture } = await supabase
     .from("events").select("id", { count: "exact", head: true })
     .eq("archived", false).is("age_range", null).gte("date", today);
-  const remaining = Math.max(0, (remainingFuture || 0) - [...done].length >= 0 ? (remainingFuture || 0) : 0);
   console.log(`\nrun done: filled=${filled}, no-info=${noInfo}, processed=${processed}`);
   console.log(`future events still without age_range (DB): ${remainingFuture}`);
   process.exit(0);
