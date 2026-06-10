@@ -9,12 +9,12 @@ require("dotenv").config({ path: ".env.local" });
 require("dotenv").config({ path: ".env" });
 
 const { fetchLobby } = require("../lib/cityApi");
-const { fillMissingLocationsFromLobby } = require("../lib/lobbyLocationFill");
+const { fillMissingFieldsFromLobby } = require("../lib/lobbyLocationFill");
 
 (async () => {
   const dryRun = !!process.env.DRY_RUN;
   const lobby = await fetchLobby();
-  const { matched, filled } = await fillMissingLocationsFromLobby(lobby, { dryRun });
-  console.log(`matched=${matched}${dryRun ? "  (DRY RUN — no writes)" : ` filled=${filled}`}`);
+  const { matched, locations, images } = await fillMissingFieldsFromLobby(lobby, { dryRun });
+  console.log(`matched=${matched} locations=${locations} images=${images}${dryRun ? "  (DRY RUN — no writes)" : ""}`);
   process.exit(0);
 })().catch((e) => { console.error("ERR", e.message); process.exit(1); });
