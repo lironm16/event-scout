@@ -795,15 +795,16 @@
       </div>
     `;
 
-    // Body tap → open the event in the shared popup modal (same one the bot
-    // deep-link uses; tapping another card swaps it). Hero: an image opens the
-    // lightbox (zoom); an image-less gradient hero opens the modal too.
-    card.querySelector(".card-body")?.addEventListener("click", () => window.openEventModal(ev.id, ev));
+    // Body tap → EXPAND the card inline (toggle .open), not a separate modal
+    // window. (The modal is still used for map popups / deep links / series
+    // navigation.) Hero: an image opens the lightbox (zoom); an image-less
+    // gradient hero just toggles the card too.
+    card.querySelector(".card-body")?.addEventListener("click", () => card.classList.toggle("open"));
     const heroEl = card.querySelector(".card-hero");
     if (ev.image) {
       heroEl?.addEventListener("click", () => openLightbox(ev.image, ev.name));
     } else {
-      heroEl?.addEventListener("click", () => window.openEventModal(ev.id, ev));
+      heroEl?.addEventListener("click", () => card.classList.toggle("open"));
     }
     return card;
   }
