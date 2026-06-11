@@ -382,11 +382,23 @@
     activeDate = "all";
     activeType = "all";
     activeTag  = null;
+    // Also clear the server-side search-hub filters.
+    serverSearch.audiences.length = 0;
+    serverSearch.activity_types.length = 0;
+    serverSearch.tags.length = 0;
+    serverSearch.keywords.length = 0;
+    serverSearch.proximity = false;
+    serverSearch.available_only = false;
+    serverSearch.unseen_only = false;
     // Sync chip UI inside the filter sheet.
     dateBar.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.date === "all"));
     typeBar?.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.type === "all"));
     tagBar?.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
-    applyFilters();
+    document.querySelectorAll("#audienceFilterBar .chip, #activityFilterBar .chip, #optionFilterBar .chip").forEach((c) => c.classList.remove("active"));
+    document.querySelector('#audienceFilterBar .chip[data-aud="all"]')?.classList.add("active");
+    const kw = document.getElementById("keywordInput");
+    if (kw) kw.value = "";
+    loadEvents(); // server filters changed → re-fetch
   }
 
   // Full reset — clears BOTH client-side (date/type/tag) and server-side
@@ -462,6 +474,56 @@
         activeTag = null;
         tagBar?.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
         applyFilters();
+      }});
+    }
+
+    // ── Server-side search-hub filters (audience / activity / interest tags /
+    //    options / keyword). Each pill removes that one filter and reloads. ──
+    function chipLabel(barId, attr, val) {
+      const c = document.querySelector(`#${barId} .chip[data-${attr}="${CSS.escape(val)}"]`);
+      return (c?.textContent || val).trim();
+    }
+    function deactivateChip(barId, attr, val) {
+      document.querySelector(`#${barId} .chip[data-${attr}="${CSS.escape(val)}"]`)?.classList.remove("active");
+    }
+    const serverGroups = [
+      { arr: serverSearch.audiences, bar: "audienceFilterBar", attr: "aud", reactivateAll: true },
+      { arr: serverSearch.activity_types, bar: "activityFilterBar", attr: "act" },
+      { arr: serverSearch.tags, bar: "tagFilterBar", attr: "tag" },
+    ];
+    for (const g of serverGroups) {
+      for (const val of [...g.arr]) {
+        pills.push({ label: chipLabel(g.bar, g.attr, val), clear: () => {
+          const i = g.arr.indexOf(val);
+          if (i >= 0) g.arr.splice(i, 1);
+          deactivateChip(g.bar, g.attr, val);
+          if (g.reactivateAll && !g.arr.length) {
+            document.querySelector('#audienceFilterBar .chip[data-aud="all"]')?.classList.add("active");
+          }
+          loadEvents();
+        }});
+      }
+    }
+    const optionPills = [
+      { key: "proximity", label: "🚶 קרוב", opt: "proximity" },
+      { key: "available_only", label: "🎫 עם כרטיסים", opt: "available_only" },
+      { key: "unseen_only", label: "👀 שלא ראיתי", opt: "unseen_only" },
+    ];
+    for (const o of optionPills) {
+      if (serverSearch[o.key]) {
+        pills.push({ label: o.label, clear: () => {
+          serverSearch[o.key] = false;
+          document.querySelector(`#optionFilterBar .chip[data-opt="${o.opt}"]`)?.classList.remove("active");
+          loadEvents();
+        }});
+      }
+    }
+    if (serverSearch.keywords.length) {
+      pills.push({ label: `🔎 ${serverSearch.keywords.join(", ")}`, clear: () => {
+        serverSearch.keywords.length = 0;
+        const kw = document.getElementById("keywordInput");
+        if (kw) kw.value = "";
+        loadEvents();
       }});
     }
 
