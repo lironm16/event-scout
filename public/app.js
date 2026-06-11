@@ -168,7 +168,9 @@
     if (serverSearch.date_preset) p.set("date_preset", serverSearch.date_preset);
     if (serverSearch.audiences.length) p.set("audiences", serverSearch.audiences.join(","));
     if (serverSearch.activity_types.length) p.set("activity_types", serverSearch.activity_types.join(","));
-    if (serverSearch.tags.length) p.set("tags", serverSearch.tags.join(","));
+    // NB: interest tags are filtered CLIENT-side (see applyFilters) against the
+    // event's own tags — exact & predictable, unlike the server's fuzzy
+    // name→label resolution. So we do NOT send `tags` to the server.
     if (serverSearch.keywords.length) p.set("keywords", serverSearch.keywords.join(","));
     if (serverSearch.proximity) p.set("proximity", "walk");
     if (serverSearch.available_only) p.set("available_only", "1");
@@ -327,6 +329,13 @@
       if (activeType === "low_stock") {
         const t = e.ticketsLeft;
         if (t == null || t <= 0 || t > 9) return false;
+      }
+      // Interest-tag filter (search hub chips): event must carry at least one
+      // of the selected tags. Client-side & exact so removing a pill restores
+      // results immediately.
+      if (serverSearch.tags.length) {
+        const et = e.tags || [];
+        if (!serverSearch.tags.some((t) => et.includes(t))) return false;
       }
       // Profile tag chip filter.
       if (activeTag && !(e.tags || []).includes(activeTag)) return false;
@@ -489,7 +498,6 @@
     const serverGroups = [
       { arr: serverSearch.audiences, bar: "audienceFilterBar", attr: "aud", reactivateAll: true },
       { arr: serverSearch.activity_types, bar: "activityFilterBar", attr: "act" },
-      { arr: serverSearch.tags, bar: "tagFilterBar", attr: "tag" },
     ];
     for (const g of serverGroups) {
       for (const val of [...g.arr]) {
@@ -503,6 +511,15 @@
           loadEvents();
         }});
       }
+    }
+    // Interest tags are filtered client-side → instant applyFilters(), no fetch.
+    for (const val of [...serverSearch.tags]) {
+      pills.push({ label: `🏷️ ${chipLabel("tagFilterBar", "tag", val)}`, clear: () => {
+        const i = serverSearch.tags.indexOf(val);
+        if (i >= 0) serverSearch.tags.splice(i, 1);
+        deactivateChip("tagFilterBar", "tag", val);
+        applyFilters();
+      }});
     }
     const optionPills = [
       { key: "proximity", label: "🚶 קרוב", opt: "proximity" },
