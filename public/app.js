@@ -1383,6 +1383,8 @@
     currentView = view;
     // Sort is meaningful only for the list — hide its button on the map.
     if (sortToggleBtn) sortToggleBtn.style.display = view === "map" ? "none" : "";
+    // Float the active-filters bar above the fullscreen map so filters stay visible.
+    document.getElementById("activeFiltersBar")?.classList.toggle("over-map", view === "map");
     if (view === "map") {
       catalog.style.display = "none";
       mapView.style.display = "block";

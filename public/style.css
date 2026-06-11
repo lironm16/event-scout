@@ -132,6 +132,14 @@ body {
   border-bottom: 1px solid color-mix(in srgb, var(--hint) 10%, transparent);
 }
 .active-filters-bar::-webkit-scrollbar { display: none; }
+/* In map mode the fullscreen map (#mapView, z-index 50) would cover the bar —
+   float it just below the sticky header so active filters stay visible. */
+.active-filters-bar.over-map {
+  position: fixed;
+  top: var(--header-h, 56px);
+  inset-inline: 0;
+  z-index: 60;
+}
 
 .active-filter-pill {
   display: inline-flex;
