@@ -782,7 +782,7 @@
         <div class="card-pillrow">
           ${forMeMark ? `<span class="forme-dot" title="בשבילך">✨</span>` : ""}
           ${audiencePill}
-          ${(ev.totalOccurrences || 1) > 1 ? `<button class="series-pill" onclick="event.stopPropagation();window.openEventModal(${ev.id},null,{expandSeries:true})">🗓️ ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}</button>` : ""}
+          ${(ev.totalOccurrences || 1) > 1 ? `<button class="series-pill" onclick="event.stopPropagation();window.openEventModal(${ev.id},null,{expandSeries:true})">🔁 ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}</button>` : ""}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
           ${ev.distanceLabel ? `<span class="dist-pill${ev.requiresCar ? " car" : ""}">${esc(ev.distanceLabel)}</span>` : ""}
         </div>
@@ -875,7 +875,7 @@
       const word = ev.umbrella_slug ? "בתוכנית" : "מהסדרה";
       // "עוד N" = the OTHERS (the list excludes the current occurrence).
       const more = (ev.totalOccurrences || 1) - 1;
-      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">🗓️ עוד ${more} ${word} ▾</button>`);
+      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">🔁 עוד ${more} ${word} ▾</button>`);
       parts.push(`<div class="occ-list"></div>`);
     }
 
@@ -1344,7 +1344,7 @@
         return `
         <div class="map-popup-ev map-popup-ev-clickable" onclick="window.openEventModal(${ev.id})">
           <div class="map-popup-title">${esc(ev.icon || "📌")} ${esc(ev.name)}</div>
-          <div class="map-popup-meta">📅 ${esc(ev.dateHe || ev.date)}${ev.timeHe ? " · " + esc(ev.timeHe) : ""}${ev.distanceLabel ? " · " + esc(ev.distanceLabel) : ""}${(ev.totalOccurrences || 1) > 1 ? ` · 🗓️ ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}` : ""}</div>
+          <div class="map-popup-meta">📅 ${esc(ev.dateHe || ev.date)}${ev.timeHe ? " · " + esc(ev.timeHe) : ""}${ev.distanceLabel ? " · " + esc(ev.distanceLabel) : ""}${(ev.totalOccurrences || 1) > 1 ? ` · 🔁 ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}` : ""}</div>
           ${nav ? `<a class="map-popup-nav" href="${esc(nav)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🧭 ניווט</a>` : ""}
         </div>`;
       }).join("");
