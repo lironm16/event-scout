@@ -123,6 +123,21 @@
     if (md < 0 || (md === 0 && now.getDate() < b.getDate())) a--;
     return a;
   }
+  function ageMonths(iso) {
+    if (!iso) return null;
+    const b = new Date(iso);
+    if (isNaN(b.getTime())) return null;
+    const now = new Date();
+    let m = (now.getFullYear() - b.getFullYear()) * 12 + (now.getMonth() - b.getMonth());
+    if (now.getDate() < b.getDate()) m -= 1;
+    return m < 0 ? null : m;
+  }
+  // Age-implied default readiness level for a stage (mirrors lib/devStages).
+  function defaultLevel(stage, months) {
+    if (months == null || months < stage.fromM) return "na";
+    if (months <= stage.toM) return "during";
+    return "established";
+  }
 
   // ── sections ──────────────────────────────────────────────────────
   function renderDetails(root) {
@@ -189,21 +204,30 @@
         (id) => { kid.gender = id; });
       k.appendChild(gF);
 
-      // Developmental milestones — only for kids up to age 5.
-      kid.stages = Array.isArray(kid.stages) ? kid.stages : [];
-      const age = ageYears(kid.birth_date);
-      if (age != null && age < 5) {
-        const sF = field("אבני דרך התפתחותיים");
-        const sRow = chipRow();
-        OPTIONS.devStages.forEach((s) => {
-          sRow.appendChild(chip(s.label, kid.stages.includes(s.id), (on) => {
-            if (on) { if (!kid.stages.includes(s.id)) kid.stages.push(s.id); }
-            else kid.stages = kid.stages.filter((x) => x !== s.id);
-          }));
+      // Developmental readiness — per stage RELEVANT to the kid's age, a
+      // 4-level selector (עדיין לא רלוונטי / לפני / בתהליך / מבוסס). Defaults to
+      // the age-implied level; the parent overrides only when the kid differs.
+      kid.dev_stages = (kid.dev_stages && typeof kid.dev_stages === "object") ? kid.dev_stages : {};
+      const months = ageMonths(kid.birth_date);
+      const levels = OPTIONS.devLevels || [];
+      const M = 4; // months of margin (mirror lib/devStages.relevantStagesForAge)
+      const relevant = (OPTIONS.devStages || []).filter(
+        (s) => months == null || (months >= s.fromM - M && months <= s.toM + M),
+      );
+      if (relevant.length && levels.length) {
+        const sF = field("שלבי התפתחות");
+        relevant.forEach((s) => {
+          const row = el("div", "pf-devstage");
+          row.appendChild(el("div", "pf-devstage-label", s.label));
+          const sel = el("div", "pf-chips");
+          const cur = kid.dev_stages[s.id] || defaultLevel(s, months);
+          singleSelect(sel, levels, (x) => x.id, (x) => x.label, cur, (id) => {
+            kid.dev_stages[s.id] = id;
+          });
+          row.appendChild(sel);
+          sF.appendChild(row);
         });
-        sF.appendChild(sRow); k.appendChild(sF);
-      } else {
-        kid.stages = []; // not shown for age 5+ / unknown
+        k.appendChild(sF);
       }
       list.appendChild(k);
     }
@@ -582,7 +606,7 @@
   async function save() {
     // Birth date is required for any kid row that has data; drop empty rows.
     STATE.kids = (STATE.kids || []).filter(
-      (k) => k.name || k.birth_date || (k.stages && k.stages.length),
+      (k) => k.name || k.birth_date || (k.dev_stages && Object.keys(k.dev_stages).length),
     );
     if (STATE.kids.some((k) => !k.birth_date)) {
       toast("לכל ילד צריך תאריך לידה");

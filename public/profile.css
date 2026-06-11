@@ -202,3 +202,8 @@
   cursor: pointer; border-bottom: 1px solid color-mix(in srgb, var(--hint) 12%, transparent);
 }
 .pf-suggest-item:hover { background: var(--bg); }
+
+/* ── Per-stage developmental readiness (kid editor) ─────────────────── */
+.pf-devstage { margin: 8px 0; }
+.pf-devstage-label { font-size: .85rem; font-weight: 600; margin-bottom: 4px; }
+.pf-devstage .pf-chips { gap: 6px; flex-wrap: wrap; }
