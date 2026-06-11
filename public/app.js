@@ -392,6 +392,7 @@
     activeType = "all";
     activeTag  = null;
     // Also clear the server-side search-hub filters.
+    serverSearch.date_preset = "upcoming";
     serverSearch.audiences.length = 0;
     serverSearch.activity_types.length = 0;
     serverSearch.tags.length = 0;
@@ -467,8 +468,9 @@
     if (activeDate !== "all") {
       pills.push({ label: DATE_LABELS[activeDate] || activeDate, clear: () => {
         activeDate = "all";
+        serverSearch.date_preset = "upcoming"; // date is a server filter → reset + refetch
         dateBar.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.date === "all"));
-        applyFilters();
+        loadEvents();
       }});
     }
     if (activeType !== "all") {
