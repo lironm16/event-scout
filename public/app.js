@@ -72,6 +72,7 @@
     date_preset: "upcoming",
     audiences: [],
     activity_types: [],
+    tags: [],
     keywords: [],
     proximity: false,
     available_only: false,
@@ -167,6 +168,7 @@
     if (serverSearch.date_preset) p.set("date_preset", serverSearch.date_preset);
     if (serverSearch.audiences.length) p.set("audiences", serverSearch.audiences.join(","));
     if (serverSearch.activity_types.length) p.set("activity_types", serverSearch.activity_types.join(","));
+    if (serverSearch.tags.length) p.set("tags", serverSearch.tags.join(","));
     if (serverSearch.keywords.length) p.set("keywords", serverSearch.keywords.join(","));
     if (serverSearch.proximity) p.set("proximity", "walk");
     if (serverSearch.available_only) p.set("available_only", "1");
@@ -233,10 +235,17 @@
   }
 
   // ── Build tag chips ───────────────────────────────────────────────────
-  function buildTagChips(_interests) {
-    // Interest-tag chips removed — the concept was unclear to users.
-    // (May return later in a clearer form.)
-    if (tagsSection) tagsSection.style.display = "none";
+  function buildTagChips(interests) {
+    if (!tagBar || !tagsSection) return;
+    // Show the user's interest tags as a search filter. Exclude the audience
+    // enum values (they have their own קהל-יעד filter) — keep genuine topics.
+    const AUD = new Set(["תינוקות", "ילדים", "נוער", "מבוגרים", "לכל המשפחה", "הורים", "ותיקים"]);
+    const tags = [...new Set((interests || []).map((s) => String(s).trim()).filter(Boolean))]
+      .filter((t) => !AUD.has(t));
+    tagBar.innerHTML = "";
+    if (!tags.length) { tagsSection.style.display = "none"; return; }
+    tags.forEach((t) => tagBar.appendChild(makeChip(t, t, serverSearch.tags.includes(t))));
+    tagsSection.style.display = "";
   }
   function makeChip(label, val, active) {
     const b = document.createElement("button");
@@ -392,6 +401,7 @@
     serverSearch.date_preset = "upcoming";
     serverSearch.audiences.length = 0;
     serverSearch.activity_types.length = 0;
+    serverSearch.tags.length = 0;
     serverSearch.keywords.length = 0;
     serverSearch.proximity = false;
     serverSearch.available_only = false;
@@ -1332,6 +1342,7 @@
   }
   multiToggle("audienceFilterBar", "aud", serverSearch.audiences);
   multiToggle("activityFilterBar", "act", serverSearch.activity_types);
+  multiToggle("tagFilterBar", "tag", serverSearch.tags); // interest-tag filter (chips built per profile)
   document.getElementById("optionFilterBar")?.addEventListener("click", (e) => {
     const chip = e.target.closest(".chip[data-opt]");
     if (!chip) return;
