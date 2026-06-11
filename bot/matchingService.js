@@ -193,7 +193,7 @@ const OPTIONAL_COLS = [
   // original wording ("זחילה עד שלוש"); absent → falls back to min/max_months.
   { col: "age_range", migration: "sql/077_events_age_jsonb.sql" },
   // Developmental-stage targeting (sql/082). Matched against profile kid stages.
-  { col: "dev_stages", migration: "sql/082_events_dev_stages.sql" },
+  { col: "dev_targets", migration: "sql/084_events_dev_targets.sql" },
   // LLM-chosen content emoji (sql/083). Drives the card icon (getEventIcon).
   { col: "emoji", migration: "sql/083_events_emoji.sql" },
 ];
@@ -288,7 +288,7 @@ function flattenEvent(row) {
     tag_ids: row.tag_ids || [],
     access: row.access ?? null,
     age_range: row.age_range ?? null,
-    dev_stages: row.dev_stages ?? [],
+    dev_targets: row.dev_targets ?? [],
     emoji: row.emoji ?? null,
     _coords: coords,
     _locationFound: loc?.found ?? null,

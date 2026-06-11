@@ -71,7 +71,7 @@ function saveDone(set) {
         const b = res.age_range ? resolveBounds(res.age_range) : { min_months: null, max_months: null };
         console.log(`#${ev.id} "${(ev.name||"").slice(0,46)}"`);
         console.log(`   audience=${res.audience} category=${res.category} emoji=${res.emoji||"-"}`);
-        console.log(`   age_range="${formatAgeRangeLabel(res.age_range)}" [${b.min_months}..${b.max_months}]  dev_stages=${JSON.stringify(res.dev_stages)}\n`);
+        console.log(`   age_range="${formatAgeRangeLabel(res.age_range)}" [${b.min_months}..${b.max_months}]  dev_targets=${JSON.stringify(res.dev_targets)}\n`);
         processed++;
         await sleep(GAP_MS);
         continue; // NO write, NO state change
@@ -84,16 +84,16 @@ function saveDone(set) {
         upd.min_months = b.min_months;
         upd.max_months = b.max_months;
       }
-      // dev_stages can be present even with no chronological age ("סדנת גמילה").
-      if (Array.isArray(res.dev_stages) && res.dev_stages.length) {
-        upd.dev_stages = res.dev_stages;
+      // dev_targets can be present even with no chronological age ("סדנת גמילה").
+      if (Array.isArray(res.dev_targets) && res.dev_targets.length) {
+        upd.dev_targets = res.dev_targets;
       }
       if (res.emoji) upd.emoji = res.emoji;
       if (Object.keys(upd).length) {
         const { error: uerr } = await supabase.from("events").update(upd).eq("id", ev.id);
         if (uerr) { console.warn(`#${ev.id} update failed: ${uerr.message}`); continue; }
         filled++;
-        console.log(`✓ #${ev.id} "${(ev.name||"").slice(0,40)}" → "${formatAgeRangeLabel(res.age_range)}" [${b.min_months}..${b.max_months}]${upd.dev_stages ? " stages="+JSON.stringify(upd.dev_stages) : ""}`);
+        console.log(`✓ #${ev.id} "${(ev.name||"").slice(0,40)}" → "${formatAgeRangeLabel(res.age_range)}" [${b.min_months}..${b.max_months}]${upd.dev_targets ? " targets="+JSON.stringify(upd.dev_targets) : ""}`);
       } else {
         noInfo++;
         console.log(`· #${ev.id} "${(ev.name||"").slice(0,40)}" → no age info`);
