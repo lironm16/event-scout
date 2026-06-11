@@ -203,7 +203,58 @@
 }
 .pf-suggest-item:hover { background: var(--bg); }
 
-/* ── Per-stage developmental readiness (kid editor) ─────────────────── */
-.pf-devstage { margin: 8px 0; }
-.pf-devstage-label { font-size: .85rem; font-weight: 600; margin-bottom: 4px; }
-.pf-devstage .pf-chips { gap: 6px; flex-wrap: wrap; }
+/* ── Per-stage developmental readiness — compact table ──────────────── */
+.pf-devtable {
+  display: grid;
+  grid-template-columns: minmax(72px, 1.4fr) repeat(4, 1fr);
+  gap: 4px 2px;
+  align-items: stretch;
+}
+/* top-left empty corner */
+.pf-devtable-corner { }
+/* column headers — short level names, once at the top */
+.pf-devtable-h {
+  font-size: .66rem;
+  line-height: 1.1;
+  color: var(--hint);
+  text-align: center;
+  align-self: end;
+  padding: 0 1px 4px;
+}
+/* row header — stage name */
+.pf-devtable-stage {
+  font-size: .82rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  padding-inline-end: 6px;
+}
+/* a level cell — radio-style, tap to pick */
+.pf-devtable-cell {
+  border: 1px solid color-mix(in srgb, var(--hint) 28%, transparent);
+  background: var(--bg);
+  border-radius: 8px;
+  min-height: 32px;
+  cursor: pointer;
+  font-family: inherit;
+  position: relative;
+  transition: background .12s, border-color .12s;
+}
+.pf-devtable-cell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--hint) 35%, transparent);
+  transition: background .12s, transform .12s;
+}
+.pf-devtable-cell.on {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+  border-color: var(--accent);
+}
+.pf-devtable-cell.on::after {
+  background: var(--accent);
+  transform: scale(1.5);
+}

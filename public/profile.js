@@ -216,17 +216,37 @@
       );
       if (relevant.length && levels.length) {
         const sF = field("שלבי התפתחות");
-        relevant.forEach((s) => {
-          const row = el("div", "pf-devstage");
-          row.appendChild(el("div", "pf-devstage-label", s.label));
-          const sel = el("div", "pf-chips");
-          const cur = kid.dev_stages[s.id] || defaultLevel(s, months);
-          singleSelect(sel, levels, (x) => x.id, (x) => x.label, cur, (id) => {
-            kid.dev_stages[s.id] = id;
-          });
-          row.appendChild(sel);
-          sF.appendChild(row);
+        // Compact table: one row per stage, the 4 levels as columns with a
+        // single shared header row — far more readable than a pile of long
+        // wrapping pills. Long level names are abbreviated in the header.
+        const SHORT = { na: "לא רלוונטי", before: "לפני", during: "בתהליך", established: "מבוסס" };
+        const table = el("div", "pf-devtable");
+        // header: empty corner + level columns
+        table.appendChild(el("div", "pf-devtable-corner"));
+        levels.forEach((lv) => {
+          const h = el("div", "pf-devtable-h", SHORT[lv.id] || lv.label);
+          h.title = lv.label;
+          table.appendChild(h);
         });
+        // one row per relevant stage
+        relevant.forEach((s) => {
+          table.appendChild(el("div", "pf-devtable-stage", s.label));
+          const cur = kid.dev_stages[s.id] || defaultLevel(s, months);
+          const cells = [];
+          levels.forEach((lv) => {
+            const cell = el("button", "pf-devtable-cell" + (lv.id === cur ? " on" : ""));
+            cell.type = "button";
+            cell.setAttribute("aria-label", `${s.label}: ${lv.label}`);
+            cell.title = lv.label;
+            cell.addEventListener("click", () => {
+              kid.dev_stages[s.id] = lv.id;
+              cells.forEach((c) => c.el.classList.toggle("on", c.id === lv.id));
+            });
+            cells.push({ el: cell, id: lv.id });
+            table.appendChild(cell);
+          });
+        });
+        sF.appendChild(table);
         k.appendChild(sF);
       }
       list.appendChild(k);
