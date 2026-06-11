@@ -726,9 +726,12 @@
     card.style.setProperty("--c2", c2);
 
     // ── Location line — 📷 for online, 📍 physical, 🗺️ city-wide ──
+    // For a named venue ("ספריית בית לזרוס, רחוב איינשטיין 16") show only the
+    // short venue name (text before the first comma), dropping the street.
+    const shortLoc = (s) => String(s || "").split(",")[0].trim();
     let locText = "";
     if (isOnline(ev)) locText = "📷 אונליין";
-    else if (ev.location && !isCityWide(ev.location)) locText = `📍 ${esc(ev.location)}`;
+    else if (ev.location && !isCityWide(ev.location)) locText = `📍 ${esc(shortLoc(ev.location))}`;
     else if (isCityWide(ev.location)) locText = "🗺️ ברחבי העיר";
 
     // ── Visual ticket status (overlay badge, not a body line) ──
@@ -781,11 +784,11 @@
       <div class="card-body card-click">
         <div class="card-pillrow">
           ${audiencePill}
+          ${ev.accessLine ? `<span class="access-pill">${esc(ev.accessLine.replace(/^👥\s*קהל ייעודי:\s*/, ""))}</span>` : ""}
           ${(ev.totalOccurrences || 1) > 1 ? `<button class="series-pill" onclick="event.stopPropagation();window.openEventModal(${ev.id},null,{expandSeries:true})">🔁 ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}</button>` : ""}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
           ${ev.distanceLabel ? `<span class="dist-pill${ev.requiresCar ? " car" : ""}">${esc(ev.distanceLabel)}</span>` : ""}
         </div>
-        ${accessHtml}
         ${umbrellaHtml}
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}
       </div>
@@ -799,6 +802,13 @@
     // navigation.) Hero: an image opens the lightbox (zoom); an image-less
     // gradient hero just toggles the card too.
     card.querySelector(".card-body")?.addEventListener("click", () => card.classList.toggle("open"));
+    // Clicking the EXPANDED area collapses the card too — except interactive
+    // controls (buttons/links/tags) and the description text itself (so reading
+    // / using "קרא עוד" doesn't close it).
+    card.querySelector(".card-detail")?.addEventListener("click", (e) => {
+      if (e.target.closest("button, a, input, .tag-pill, .card-description, .desc-wrap")) return;
+      card.classList.remove("open");
+    });
     const heroEl = card.querySelector(".card-hero");
     if (ev.image) {
       heroEl?.addEventListener("click", () => openLightbox(ev.image, ev.name));
@@ -1017,13 +1027,12 @@
     const backBtn = overlay.querySelector(".event-modal-back");
     const newBack = backBtn.cloneNode(true); // removes old listener
     backBtn.replaceWith(newBack);
+    // "חזרה" simply closes the floating modal — no reload/re-fetch of a parent
+    // (which used to bounce back to the series representative with everything
+    // collapsed). The user returns to exactly the list/card they came from.
     newBack.addEventListener("click", () => {
-      if (opts.parentId) {
-        window.openEventModal(opts.parentId); // back to series representative
-      } else {
-        overlay.classList.remove("open");
-        document.body.style.overflow = "";
-      }
+      overlay.classList.remove("open");
+      document.body.style.overflow = "";
     });
 
     const body = overlay.querySelector(".event-modal-body");

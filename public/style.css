@@ -1214,6 +1214,12 @@ body {
   display: inline-flex; align-items: center; max-width: 100%;
   white-space: normal; overflow-wrap: anywhere; line-height: 1.3;
 }
+.access-pill {
+  display: inline-flex; align-items: center;
+  padding: 3px 10px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent2) 16%, transparent);
+  color: var(--accent2); font-size: .8rem; font-weight: 700; white-space: nowrap;
+}
 .series-pill {
   display: inline-flex; align-items: center;
   padding: 3px 10px; border-radius: 999px;
