@@ -1124,8 +1124,6 @@
       groups.push(`<div class="ss-group"><div class="ss-glabel">לפי זמן נסיעה</div><div class="ss-chips">
         <button class="ss-chip" data-kind="toofar" data-min="${driveMin}">🚗 רחוק מדי (${driveMin} דק' נסיעה)</button></div></div>`);
     }
-    groups.push(`<div class="ss-group"><div class="ss-chips">
-      <button class="ss-chip ss-chip-wide" data-kind="this">🙈 רק את האירוע הזה</button></div></div>`);
     body.innerHTML = groups.join("");
 
     ov.querySelector(".ss-report").onclick = () => { close(); window.openReportSheet(eventId); };
