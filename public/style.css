@@ -1418,6 +1418,11 @@ body {
   background: none; border: none; cursor: pointer;
   color: var(--hint); font: inherit; font-size: .84rem; padding: 6px; text-align: center;
 }
+.ss-profile {
+  display: block; width: 100%; margin-top: 10px;
+  color: var(--link, #4ea1ff); font-size: .9rem; text-align: center;
+  text-decoration: none; padding: 8px;
+}
 
 /* ════════════════════════════════════════════════════════════════════
    ✨ redesign part 5 — green ticket badge + description preview w/ קרא עוד

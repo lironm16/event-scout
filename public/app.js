@@ -1076,6 +1076,7 @@
           <div class="ss-body"></div>
           <div class="ss-foot">
             <button class="ss-apply btn btn-primary btn-block">החל סינון</button>
+            <a class="ss-profile" href="profile.html">⚙️ לא מתאים? לכוונון מלא בפרופיל</a>
             <button class="ss-report">משהו שגוי באירוע? דווחו לנו</button>
           </div>
         </div>`;
@@ -1114,7 +1115,7 @@
     const AUD_EMOJI = { "תינוקות": "👶", "ילדים": "🧒", "נוער": "🎒", "מבוגרים": "🧑", "לכל המשפחה": "👨‍👩‍👧", "הורים": "🤱", "ותיקים": "🌷" };
     if (ev.audience && AUD_EMOJI[ev.audience]) {
       groups.push(`<div class="ss-group"><div class="ss-glabel">לפי קהל</div><div class="ss-chips">
-        <button class="ss-chip" data-kind="audience" data-val="${esc(ev.audience)}">${AUD_EMOJI[ev.audience]} אירועי ${esc(ev.audience)}</button></div></div>`);
+        <button class="ss-chip" data-kind="audience" data-val="${esc(ev.audience)}">${AUD_EMOJI[ev.audience]} ${esc(ev.audience)}</button></div></div>`);
     }
     // Travel-time opt-out — when we know the drive time, offer to cap the
     // profile's max drive distance just under this event's (e.g. 12 → 11 דק').
