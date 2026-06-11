@@ -1110,9 +1110,11 @@
       groups.push(`<div class="ss-group"><div class="ss-glabel">לפי מקום</div><div class="ss-chips">
         <button class="ss-chip" data-kind="place">📍 ${esc(ev.location)}</button></div></div>`);
     }
-    if (ev.audience && CHILD_AUD.has(ev.audience)) {
+    // Any of the 7 audience_t values (same set as profile/search) is suppressible.
+    const AUD_EMOJI = { "תינוקות": "👶", "ילדים": "🧒", "נוער": "🎒", "מבוגרים": "🧑", "לכל המשפחה": "👨‍👩‍👧", "הורים": "🤱", "ותיקים": "🌷" };
+    if (ev.audience && AUD_EMOJI[ev.audience]) {
       groups.push(`<div class="ss-group"><div class="ss-glabel">לפי קהל</div><div class="ss-chips">
-        <button class="ss-chip" data-kind="childaud">👶 אירועי ${esc(ev.audience)}</button></div></div>`);
+        <button class="ss-chip" data-kind="audience" data-val="${esc(ev.audience)}">${AUD_EMOJI[ev.audience]} אירועי ${esc(ev.audience)}</button></div></div>`);
     }
     // Travel-time opt-out — when we know the drive time, offer to cap the
     // profile's max drive distance just under this event's (e.g. 12 → 11 דק').
@@ -1134,7 +1136,8 @@
       const tagsToHide = sel.filter((c) => c.dataset.kind === "tag").map((c) => c.dataset.val);
       const patch = {};
       if (tagsToHide.length) patch.add_suppressed_labels = tagsToHide;
-      if (sel.some((c) => c.dataset.kind === "childaud")) patch.suppress_child_audiences = true;
+      const audChip = sel.find((c) => c.dataset.kind === "audience");
+      if (audChip) patch.remove_audience = audChip.dataset.val;
       // "Too far" → cap max drive minutes just under this event's drive time
       // (and turn on drive mode so the cap actually engages).
       const tooFar = sel.find((c) => c.dataset.kind === "toofar");
