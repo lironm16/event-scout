@@ -584,7 +584,9 @@
     tagDrilldown = tag;
     document.querySelectorAll(".event-card.open").forEach((c) => c.classList.remove("open"));
     applyFilters();
-    // Don't scroll to top — user stays where they were.
+    // A tag drill-down is a fresh "all events under this tag" view → start at
+    // the top. (Back restores the previous scroll via tagReturnScroll.)
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
   };
 
   // ── Render list (grouped by date) ────────────────────────────────────
@@ -928,8 +930,14 @@
   window.toggleDesc = function (btn) {
     const desc = btn.closest(".desc-wrap")?.querySelector(".card-description");
     if (!desc) return;
+    const expanding = desc.classList.contains("clamped");
+    if (expanding) btn._scrollBefore = window.scrollY; // remember where we were
     const clamped = desc.classList.toggle("clamped");
     btn.textContent = clamped ? "קרא עוד" : "סגור";
+    // Collapsing → return to the scroll position we had when we expanded.
+    if (clamped && btn._scrollBefore != null) {
+      requestAnimationFrame(() => window.scrollTo({ top: btn._scrollBefore, behavior: "instant" }));
+    }
   };
 
   // ⋯ overflow menu toggle.
