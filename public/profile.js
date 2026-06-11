@@ -369,43 +369,6 @@
     root.appendChild(card);
   }
 
-  function renderAvailability(root) {
-    const card = section("🕒 זמינות");
-    const row = chipRow();
-    // Default: everything selected (no availability stored yet = available always).
-    const existing = availabilitySlotIds(STATE.constraints.availability);
-    const selected = new Set(
-      existing.length ? existing : OPTIONS.timeSlots.map((s) => s.id),
-    );
-    OPTIONS.timeSlots.forEach((s) => {
-      // ⁦…⁩ = LTR isolate so the time range renders 08:00–13:00
-      // (not flipped by the RTL layout).
-      row.appendChild(chip(`${s.label} ⁦${s.start}–${s.end}⁩`, selected.has(s.id), (on) => {
-        if (on) selected.add(s.id); else selected.delete(s.id);
-        STATE.constraints.availability = buildAvailability([...selected]);
-      }));
-    });
-    card.appendChild(row);
-    root.appendChild(card);
-  }
-  function availabilitySlotIds(av) {
-    const ids = [];
-    const blocks = av?.blocks || [];
-    OPTIONS.timeSlots.forEach((s) => {
-      if (blocks.some((b) => b.start === s.start && b.end === s.end)) ids.push(s.id);
-    });
-    return ids;
-  }
-  function buildAvailability(slotIds) {
-    if (!slotIds.length) return null;
-    const days = [0, 1, 2, 3, 4, 5, 6];
-    const blocks = slotIds
-      .map((id) => OPTIONS.timeSlots.find((s) => s.id === id))
-      .filter(Boolean)
-      .map((s) => ({ days, start: s.start, end: s.end }));
-    return { preset: "custom", blocks };
-  }
-
   function renderTopics(root) {
     const card = section("🏷️ תגיות עניין");
 
@@ -599,7 +562,6 @@
     renderDetails(root);
     renderTopics(root);
     renderAudiences(root);
-    renderAvailability(root);
     renderCommunities(root);
     // ── rarely changed ──
     renderKids(root);
