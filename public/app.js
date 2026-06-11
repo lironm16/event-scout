@@ -1215,6 +1215,9 @@
     if (!box) return;
     if (box.dataset.loaded === "1") { box.hidden = !box.hidden; return; }
     btn.disabled = true;
+    // Show a spinner until the occurrences arrive.
+    box.hidden = false;
+    box.innerHTML = `<div class="occ-loading"><span class="occ-spinner"></span></div>`;
     try {
       const res = await fetch(`${API_PREFIX}/occurrences?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
       const list = (await res.json()).occurrences || [];

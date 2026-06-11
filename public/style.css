@@ -1561,7 +1561,16 @@ body {
 .sr-top { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
 .sr-time { font-size: .85rem; font-weight: 600; color: var(--hint); white-space: nowrap; }
 .sr-title { font-size: .95rem; font-weight: 700; color: var(--text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+/* Loading spinner for the "עוד N בסדרה" expansion. */
+.occ-loading { display: flex; justify-content: center; padding: 14px 0; }
+.occ-spinner {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2.5px solid color-mix(in srgb, var(--hint) 30%, transparent);
+  border-top-color: var(--accent);
+  animation: occ-spin .7s linear infinite;
+}
+@keyframes occ-spin { to { transform: rotate(360deg); } }
 /* Date·time line WRAPS rather than clipping — a long programme was cutting
    the time off the end on mobile. Same for the meta line. */
 .sr-when { font-size: .95rem; font-weight: 700; color: var(--text);
