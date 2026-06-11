@@ -115,16 +115,40 @@
 }
 .pf-toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
 
-.pf-save {
+.pf-actions {
   position: fixed;
   bottom: 16px;
   inset-inline: 16px;
   z-index: 50;
+  display: flex;
+  gap: 10px;
+}
+.pf-save {
+  flex: 1;
   background: var(--accent);
   color: var(--accent-t);
   border: none;
   border-radius: 14px;
   padding: 14px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-family: inherit;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: opacity .12s;
+}
+.pf-save:disabled {
+  opacity: .45;
+  cursor: default;
+  box-shadow: none;
+}
+.pf-cancel {
+  flex: 0 0 auto;
+  background: var(--bg2);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent);
+  border-radius: 14px;
+  padding: 14px 18px;
   font-size: 1.05rem;
   font-weight: 600;
   font-family: inherit;

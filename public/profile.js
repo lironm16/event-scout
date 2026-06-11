@@ -10,6 +10,8 @@
   let removedLabels = [];
   let removedSeries = [];
   let removedLocations = [];
+  let pristinePayload = null; // deep clone of the last-loaded payload (for cancel)
+  let baselineSig = "";       // signature of the pristine savable state (for dirty)
 
   // ── init data (same bootstrap as the catalog app) ─────────────────
   function parseInitDataFromLocation() {
@@ -643,6 +645,7 @@
       const updated = await res.json();
       applyPayload(updated);
       render();
+      refreshDirty();
       toast("✅ נשמר");
       tg?.HapticFeedback?.notificationOccurred?.("success");
     } catch (err) {
@@ -652,23 +655,71 @@
   }
 
   function applyPayload(payload) {
+    // Keep a pristine deep clone so "ביטול" can fully revert local edits.
+    pristinePayload = JSON.parse(JSON.stringify(payload));
     STATE = payload.profile;
     OPTIONS = payload.options;
     STATE.interest_tags = STATE.interest_tags || [];
     STATE.add_suppress = []; // session-only "don't want" adds
     removedLabels = []; removedSeries = []; removedLocations = [];
+    baselineSig = savableSig();
+  }
+
+  // ── dirty tracking ────────────────────────────────────────────────
+  // Signature of everything that would be persisted. Transient UI-only
+  // fields (kid row expand state, prefixed with "_") are excluded so
+  // expanding/collapsing a kid doesn't count as a change.
+  function savableSig() {
+    if (!STATE) return "";
+    const kids = (STATE.kids || []).map((k) => {
+      const o = {};
+      for (const key of Object.keys(k)) if (!key.startsWith("_")) o[key] = k[key];
+      return o;
+    });
+    return JSON.stringify({ ...buildPatch(), kids });
+  }
+  function isDirty() { return savableSig() !== baselineSig; }
+  function refreshDirty() {
+    const dirty = isDirty();
+    const save = document.getElementById("pf-save");
+    const cancel = document.getElementById("pf-cancel");
+    if (save) save.disabled = !dirty;
+    if (cancel) cancel.hidden = !dirty;
+    if (tg?.MainButton) { dirty ? tg.MainButton.enable() : tg.MainButton.disable(); }
+  }
+  function cancel() {
+    if (!pristinePayload) return;
+    applyPayload(JSON.parse(JSON.stringify(pristinePayload)));
+    render();
+    refreshDirty();
+    toast("השינויים בוטלו");
   }
 
   function wireSaveButton() {
+    const actions = document.getElementById("pf-actions");
     const btn = document.getElementById("pf-save");
+    const cancelBtn = document.getElementById("pf-cancel");
+    cancelBtn.addEventListener("click", cancel);
     if (tg?.MainButton) {
       tg.MainButton.setText("שמירה");
       tg.MainButton.show();
       tg.MainButton.onClick(save);
+      // The native button can't sit beside an in-page cancel, so still show
+      // the in-page row but hide its duplicate save; cancel lives in-page.
+      actions.hidden = false;
+      btn.hidden = true;
     } else {
-      btn.hidden = false;
+      actions.hidden = false;
       btn.addEventListener("click", save);
     }
+    // Recompute dirtiness after any interaction. Most edits happen via
+    // input/change/click on STATE-bound controls (which bubble to document);
+    // defer to a microtask so the control's own handler mutates STATE first.
+    const onEdit = () => setTimeout(refreshDirty, 0);
+    document.addEventListener("input", onEdit, true);
+    document.addEventListener("change", onEdit, true);
+    document.addEventListener("click", onEdit, true);
+    refreshDirty();
   }
 
   // ── boot ──────────────────────────────────────────────────────────
