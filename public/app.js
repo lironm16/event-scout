@@ -73,6 +73,7 @@
     audiences: [],
     activity_types: [],
     tags: [],
+    communities: [],
     keywords: [],
     proximity: false,
     available_only: false,
@@ -193,6 +194,7 @@
       const body = await res.json();
       if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
       buildTagChips(body.profile?.interests || []);
+      buildCommunityChips(body.communities || []);
       userHome = body.profile?.home || null;
       catalogScope = body.scope || (serverSearch.ignore_profile ? "all" : "me");
       watchedIds.clear();
@@ -248,6 +250,21 @@
     if (!tags.length) { tagsSection.style.display = "none"; return; }
     tags.forEach((t) => tagBar.appendChild(makeChip(t, t, serverSearch.tags.includes(t))));
     tagsSection.style.display = "";
+  }
+  // The user's member communities as a search filter. Selecting one narrows to
+  // events restricted to that community (event.access includes the scope).
+  const communityBar = document.getElementById("communityFilterBar");
+  const communitiesSection = document.getElementById("communitiesSection");
+  function buildCommunityChips(list) {
+    if (!communityBar || !communitiesSection) return;
+    communityBar.innerHTML = "";
+    if (!list.length) { communitiesSection.style.display = "none"; return; }
+    list.forEach((c) => {
+      const b = makeChip(`${c.emoji || ""} ${c.label}`.trim(), c.scope, serverSearch.communities.includes(c.scope));
+      b.dataset.comm = c.scope; // multiToggle uses data-comm
+      communityBar.appendChild(b);
+    });
+    communitiesSection.style.display = "";
   }
   function makeChip(label, val, active) {
     const b = document.createElement("button");
@@ -337,6 +354,11 @@
         const et = e.tags || [];
         if (!serverSearch.tags.some((t) => et.includes(t))) return false;
       }
+      // Community filter: event must be restricted to a selected community.
+      if (serverSearch.communities.length) {
+        const ea = e.access || [];
+        if (!serverSearch.communities.some((c) => ea.includes(c))) return false;
+      }
       // Profile tag chip filter.
       if (activeTag && !(e.tags || []).includes(activeTag)) return false;
       // Tag drill-down.
@@ -396,6 +418,7 @@
     serverSearch.audiences.length = 0;
     serverSearch.activity_types.length = 0;
     serverSearch.tags.length = 0;
+    serverSearch.communities.length = 0;
     serverSearch.keywords.length = 0;
     serverSearch.proximity = false;
     serverSearch.available_only = false;
@@ -424,6 +447,7 @@
     serverSearch.audiences.length = 0;
     serverSearch.activity_types.length = 0;
     serverSearch.tags.length = 0;
+    serverSearch.communities.length = 0;
     serverSearch.keywords.length = 0;
     serverSearch.proximity = false;
     serverSearch.available_only = false;
@@ -520,6 +544,15 @@
         const i = serverSearch.tags.indexOf(val);
         if (i >= 0) serverSearch.tags.splice(i, 1);
         deactivateChip("tagFilterBar", "tag", val);
+        applyFilters();
+      }});
+    }
+    // Communities filtered client-side too.
+    for (const val of [...serverSearch.communities]) {
+      pills.push({ label: chipLabel("communityFilterBar", "comm", val), clear: () => {
+        const i = serverSearch.communities.indexOf(val);
+        if (i >= 0) serverSearch.communities.splice(i, 1);
+        deactivateChip("communityFilterBar", "comm", val);
         applyFilters();
       }});
     }
@@ -1462,6 +1495,7 @@
   multiToggle("audienceFilterBar", "aud", serverSearch.audiences);
   multiToggle("activityFilterBar", "act", serverSearch.activity_types);
   multiToggle("tagFilterBar", "tag", serverSearch.tags); // interest-tag filter (chips built per profile)
+  multiToggle("communityFilterBar", "comm", serverSearch.communities); // my-communities filter
   document.getElementById("optionFilterBar")?.addEventListener("click", (e) => {
     const chip = e.target.closest(".chip[data-opt]");
     if (!chip) return;
