@@ -680,12 +680,8 @@
   }
   function isDirty() { return savableSig() !== baselineSig; }
   function refreshDirty() {
-    const dirty = isDirty();
-    const save = document.getElementById("pf-save");
-    const cancel = document.getElementById("pf-cancel");
-    if (save) save.disabled = !dirty;
-    if (cancel) cancel.hidden = !dirty;
-    if (tg?.MainButton) { dirty ? tg.MainButton.enable() : tg.MainButton.disable(); }
+    const actions = document.getElementById("pf-actions");
+    if (actions) actions.classList.toggle("show", isDirty());
   }
   function cancel() {
     if (!pristinePayload) return;
@@ -696,22 +692,11 @@
   }
 
   function wireSaveButton() {
-    const actions = document.getElementById("pf-actions");
-    const btn = document.getElementById("pf-save");
-    const cancelBtn = document.getElementById("pf-cancel");
-    cancelBtn.addEventListener("click", cancel);
-    if (tg?.MainButton) {
-      tg.MainButton.setText("שמירה");
-      tg.MainButton.show();
-      tg.MainButton.onClick(save);
-      // The native button can't sit beside an in-page cancel, so still show
-      // the in-page row but hide its duplicate save; cancel lives in-page.
-      actions.hidden = false;
-      btn.hidden = true;
-    } else {
-      actions.hidden = false;
-      btn.addEventListener("click", save);
-    }
+    // In-page animated bar (not the native MainButton) so save + cancel share
+    // one row that slides up only when there are unsaved changes.
+    if (tg?.MainButton) { try { tg.MainButton.hide(); } catch (_) {} }
+    document.getElementById("pf-save").addEventListener("click", save);
+    document.getElementById("pf-cancel").addEventListener("click", cancel);
     // Recompute dirtiness after any interaction. Most edits happen via
     // input/change/click on STATE-bound controls (which bubble to document);
     // defer to a microtask so the control's own handler mutates STATE first.
