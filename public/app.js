@@ -637,6 +637,11 @@
       ext.className = "extend-btn";
       ext.textContent = "📅 הרחבת טווח";
       ext.addEventListener("click", () => {
+        // Drop the date preset so the explicit dateTo actually widens the window
+        // (otherwise e.g. preset=today overrides it and nothing changes).
+        serverSearch.date_preset = "";
+        activeDate = "all";
+        dateBar?.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.date === "all"));
         loadEvents({ dateTo: lastExtensionHint.suggested_date_to });
       });
       resultsMeta.appendChild(ext);
@@ -777,7 +782,7 @@
         <div class="card-pillrow">
           ${forMeMark ? `<span class="forme-dot" title="בשבילך">✨</span>` : ""}
           ${audiencePill}
-          ${(ev.totalOccurrences || 1) > 1 ? `<button class="series-pill" onclick="event.stopPropagation();window.openEventModal(${ev.id})">🗓️ ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}</button>` : ""}
+          ${(ev.totalOccurrences || 1) > 1 ? `<button class="series-pill" onclick="event.stopPropagation();window.openEventModal(${ev.id},null,{expandSeries:true})">🗓️ ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}</button>` : ""}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
           ${ev.distanceLabel ? `<span class="dist-pill${ev.requiresCar ? " car" : ""}">${esc(ev.distanceLabel)}</span>` : ""}
         </div>
@@ -1041,6 +1046,12 @@
       const card = buildCard(ev, { hideOccurrences: !!opts.hideOccurrences });
       card.classList.add("open");
       body.appendChild(card);
+      // Opened via the series pill → expand the occurrences immediately
+      // (one tap to see the series, no extra "עוד N מהסדרה" click).
+      if (opts.expandSeries) {
+        const sb = card.querySelector(".series-btn");
+        if (sb) window.showSeries(sb, ev.id);
+      }
     };
     // Card taps pass the already-loaded event (with totalOccurrences) → render instantly.
     if (preloaded) { renderInto(preloaded); return; }
@@ -1333,7 +1344,7 @@
         return `
         <div class="map-popup-ev map-popup-ev-clickable" onclick="window.openEventModal(${ev.id})">
           <div class="map-popup-title">${esc(ev.icon || "📌")} ${esc(ev.name)}</div>
-          <div class="map-popup-meta">📅 ${esc(ev.dateHe || ev.date)}${ev.timeHe ? " · " + esc(ev.timeHe) : ""}${ev.distanceLabel ? " · " + esc(ev.distanceLabel) : ""}</div>
+          <div class="map-popup-meta">📅 ${esc(ev.dateHe || ev.date)}${ev.timeHe ? " · " + esc(ev.timeHe) : ""}${ev.distanceLabel ? " · " + esc(ev.distanceLabel) : ""}${(ev.totalOccurrences || 1) > 1 ? ` · 🗓️ ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}` : ""}</div>
           ${nav ? `<a class="map-popup-nav" href="${esc(nav)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🧭 ניווט</a>` : ""}
         </div>`;
       }).join("");
