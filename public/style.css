@@ -1206,6 +1206,13 @@ body {
   display: inline-flex; align-items: center; max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.series-pill {
+  display: inline-flex; align-items: center;
+  padding: 3px 10px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent); font: inherit; font-size: .8rem; font-weight: 700;
+  border: none; cursor: pointer; white-space: nowrap;
+}
 .card-umbrella {
   display: inline-flex; align-items: center; gap: 5px; margin-top: 9px;
   padding: 5px 12px; border-radius: 999px;

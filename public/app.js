@@ -777,6 +777,7 @@
         <div class="card-pillrow">
           ${forMeMark ? `<span class="forme-dot" title="בשבילך">✨</span>` : ""}
           ${audiencePill}
+          ${(ev.totalOccurrences || 1) > 1 ? `<button class="series-pill" onclick="event.stopPropagation();window.openEventModal(${ev.id})">🗓️ ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}</button>` : ""}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
           ${ev.distanceLabel ? `<span class="dist-pill${ev.requiresCar ? " car" : ""}">${esc(ev.distanceLabel)}</span>` : ""}
         </div>
@@ -1369,6 +1370,8 @@
 
   function setView(view) {
     currentView = view;
+    // Sort is meaningful only for the list — hide its button on the map.
+    if (sortToggleBtn) sortToggleBtn.style.display = view === "map" ? "none" : "";
     if (view === "map") {
       catalog.style.display = "none";
       mapView.style.display = "block";
