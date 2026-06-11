@@ -407,6 +407,8 @@
         "#audienceFilterBar .chip, #activityFilterBar .chip, #optionFilterBar .chip, #tagFilterBar .chip",
       )
       .forEach((c) => c.classList.remove("active"));
+    // Default audience = "הכל" (no filter).
+    document.querySelector('#audienceFilterBar .chip[data-aud="all"]')?.classList.add("active");
     const kw = document.getElementById("keywordInput");
     if (kw) kw.value = "";
     loadEvents();
@@ -1313,9 +1315,19 @@
       const chip = e.target.closest(`.chip[data-${dataAttr}]`);
       if (!chip) return;
       const val = chip.dataset[dataAttr];
+      if (val === "all") {
+        // "הכל" = no audience filter. Clear every selection.
+        arr.length = 0;
+        bar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+        chip.classList.add("active");
+        return;
+      }
       const i = arr.indexOf(val);
       if (i >= 0) { arr.splice(i, 1); chip.classList.remove("active"); }
       else { arr.push(val); chip.classList.add("active"); }
+      // Picking a specific value clears "הכל"; "הכל" re-activates when empty.
+      const allChip = bar.querySelector(`.chip[data-${dataAttr}="all"]`);
+      if (allChip) allChip.classList.toggle("active", arr.length === 0);
     });
   }
   multiToggle("audienceFilterBar", "aud", serverSearch.audiences);
