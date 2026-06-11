@@ -780,7 +780,6 @@
       </div>
       <div class="card-body card-click">
         <div class="card-pillrow">
-          ${forMeMark ? `<span class="forme-dot" title="בשבילך">✨</span>` : ""}
           ${audiencePill}
           ${(ev.totalOccurrences || 1) > 1 ? `<button class="series-pill" onclick="event.stopPropagation();window.openEventModal(${ev.id},null,{expandSeries:true})">🔁 ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}</button>` : ""}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
@@ -1521,6 +1520,13 @@
   searchInput.addEventListener("input", () => {
     clearTimeout(st);
     st = setTimeout(() => { searchQuery = searchInput.value; applyFilters(); }, 250);
+  });
+  // Enter → dismiss the keyboard (iOS), apply immediately.
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); searchInput.blur(); searchQuery = searchInput.value; applyFilters(); }
+  });
+  document.getElementById("keywordInput")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); e.target.blur(); }
   });
 
   // ── Utils ─────────────────────────────────────────────────────────────
