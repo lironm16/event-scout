@@ -845,8 +845,18 @@
       ? `<button class="card-umbrella" onclick="event.stopPropagation();window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 ${esc(ev.umbrella_title)}</button>`
       : "";
 
-    const whenPill = ev.timeHe || ev.dateHe
-      ? `<span class="when-pill">🕒 ${esc(ev.timeHe || ev.dateHe)}</span>` : "";
+    // For a recurring series show a DATE RANGE ("1/7–8/9") instead of the
+    // (misleading) single first-occurrence time. dm() = ISO yyyy-mm-dd → D/M.
+    const dm = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ""); return m ? `${+m[3]}/${+m[2]}` : ""; };
+    let whenPill;
+    if ((ev.totalOccurrences || 1) > 1 && ev.seriesFirstDate) {
+      const a = dm(ev.seriesFirstDate), b = dm(ev.seriesLastDate);
+      const range = a && b && a !== b ? `${a}–${b}` : (a || b);
+      whenPill = range ? `<span class="when-pill">📅 ⁦${range}⁩</span>` : "";
+    } else {
+      whenPill = ev.timeHe || ev.dateHe
+        ? `<span class="when-pill">🕒 ${esc(ev.timeHe || ev.dateHe)}</span>` : "";
+    }
 
     // ── Hero: image (or gradient fallback) with title overlaid ──
     const heroInner = ev.image
