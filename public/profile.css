@@ -5,7 +5,7 @@
   text-align: center;
 }
 .pf-header h1 { font-size: 1.25rem; }
-.pf-sub { color: var(--hint); font-size: .85rem; margin-top: 2px; }
+.pf-sub { color: var(--hint); font-size: 1rem; margin-top: 2px; }
 
 .pf-root {
   padding: 8px 12px 96px;
@@ -35,12 +35,12 @@
 .pf-field:first-of-type { margin-top: 0; }
 .pf-label, .pf-sub-title {
   display: block;
-  font-size: .82rem;
+  font-size: 1rem;
   color: var(--hint);
   margin-bottom: 6px;
 }
 .pf-sub-title { margin-top: 12px; font-weight: 600; color: var(--text); }
-.pf-hint { font-size: .8rem; color: var(--hint); margin-bottom: 8px; }
+.pf-hint { font-size: 1rem; color: var(--hint); margin-bottom: 8px; }
 
 .pf-input {
   width: 100%;
@@ -63,7 +63,7 @@
   color: var(--text);
   border-radius: 999px;
   padding: 7px 13px;
-  font-size: .9rem;
+  font-size: 1rem;
   font-family: inherit;
   cursor: pointer;
   transition: background .12s, border-color .12s, color .12s;
@@ -90,7 +90,7 @@
   display: flex; align-items: center; gap: 6px; padding: 0;
   color: var(--text); font-size: 1rem;
 }
-.pf-kid-caret { color: var(--hint); font-size: .8rem; }
+.pf-kid-caret { color: var(--hint); font-size: 1rem; }
 .pf-kid .pf-input { margin-bottom: 4px; }
 .pf-req { color: #d33; font-weight: 700; }
 
@@ -98,7 +98,7 @@
   border: none;
   background: none;
   color: var(--link);
-  font-size: .88rem;
+  font-size: 1rem;
   cursor: pointer;
   font-family: inherit;
 }
@@ -110,7 +110,7 @@
   align-items: center;
   gap: 10px;
   margin-top: 12px;
-  font-size: .92rem;
+  font-size: 1rem;
   cursor: pointer;
 }
 .pf-toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
@@ -149,7 +149,7 @@
   border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent);
   border-radius: 14px;
   padding: 14px 16px;
-  font-size: .95rem;
+  font-size: 1rem;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
@@ -166,7 +166,7 @@
   color: var(--bg);
   padding: 10px 18px;
   border-radius: 999px;
-  font-size: .92rem;
+  font-size: 1rem;
   z-index: 60;
   box-shadow: var(--shadow);
 }
@@ -203,7 +203,7 @@
   background: var(--card, #1c1c1e);
   border: 1px solid var(--border, #333);
 }
-.pf-conflict-text { font-size: .85rem; line-height: 1.35; }
+.pf-conflict-text { font-size: 1rem; line-height: 1.35; }
 .pf-conflict-row .pf-chips { gap: 8px; }
 
 /* ── Address autocomplete ───────────────────────────────────────────── */
@@ -246,7 +246,7 @@
 }
 /* row header — stage name */
 .pf-devtable-stage {
-  font-size: .82rem;
+  font-size: 1rem;
   font-weight: 600;
   display: flex;
   align-items: center;
