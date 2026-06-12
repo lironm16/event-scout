@@ -55,6 +55,7 @@ body {
   background: color-mix(in srgb, var(--hint) 22%, transparent); color: var(--text);
   font-size: .9rem; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
 }
+.search-clear[hidden] { display: none; } /* class display must not override the hidden attribute */
 /* Suggestions span the FULL screen width (fixed), not just the search field. */
 .search-suggest {
   position: fixed; top: calc(var(--header-h, 56px) + 4px); inset-inline: 8px; z-index: 120;

@@ -370,6 +370,7 @@
         const ok = searchTokens.every((tok) => {
           if (tok.type === "tag") return (e.tags || []).includes(tok.value);
           if (tok.type === "place") return (e.location || "").includes(tok.value);
+          if (tok.type === "program") return (e.umbrella_title || "").includes(tok.value);
           return (e.name || "").includes(tok.value); // name
         });
         if (!ok) return false;
@@ -554,7 +555,7 @@
       }});
     }
     // Chosen search tokens (autocomplete picks) — removable, client-side.
-    const TYPE_ICO = { name: "🎫", tag: "🏷️", place: "📍" };
+    const TYPE_ICO = { name: "🎫", program: "📋", tag: "🏷️", place: "📍" };
     for (const tok of [...searchTokens]) {
       pills.push({ label: `${TYPE_ICO[tok.type] || ""} ${tok.value}`.trim(), clear: () => {
         const i = searchTokens.findIndex((t) => t.type === tok.type && t.value === tok.value);
@@ -1587,8 +1588,8 @@
   // filters on its own.
   const searchSuggest = document.getElementById("searchSuggest");
   const searchClear = document.getElementById("searchClear");
-  const TYPE_ICON = { name: "🎫", tag: "🏷️", place: "📍" };
-  const TYPE_LABEL = { name: "אירוע", tag: "תגית", place: "מיקום" };
+  const TYPE_ICON = { name: "🎫", program: "📋", tag: "🏷️", place: "📍" };
+  const TYPE_LABEL = { name: "אירוע", program: "תוכנית", tag: "תגית", place: "מיקום" };
 
   function buildSuggestions(q) {
     const needle = q.trim().toLowerCase();
@@ -1607,6 +1608,7 @@
     };
     for (const e of allEvents) {
       add("name", e.name);
+      add("program", e.umbrella_title); // parent/umbrella programme title (e.g. "קיץ של בלונים")
       (e.tags || []).forEach((t) => add("tag", t));
       if (e.location && !isCityWide(e.location)) add("place", e.location);
     }
