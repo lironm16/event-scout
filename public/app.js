@@ -55,7 +55,7 @@
   let activeDate   = "all";
   let activeType   = "all";   // all | registration | free | online
   let activeTag    = null;
-  let searchQuery  = "";
+  let searchTokens = []; // [{type:'name'|'tag'|'place', value}] — chosen autocomplete picks
   let currentView  = "list";  // "list" | "map"
   let leafletMap   = null;
   let tagDrilldown = null;
@@ -332,7 +332,6 @@
   function applyFilters() {
     // Date filtering is now done SERVER-side (serverSearch.date_preset);
     // here we only do light client refinement on the returned set.
-    const q = searchQuery.trim().toLowerCase();
     const visible = allEvents.filter((e) => {
       // "מחייב הרשמה" = has a dedicated registration page (external_url)
       // OR is an online event (zoom/meet) OR is a paid Smarticket event.
@@ -365,10 +364,15 @@
       if (tagDrilldown && !(e.tags || []).includes(tagDrilldown)) return false;
       // Umbrella drill-down.
       if (umbrellaDrilldown && e.umbrella_slug !== umbrellaDrilldown.slug) return false;
-      if (q) {
-        const hay = [e.name, e.location, e.category, ...(e.tags || [])]
-          .filter(Boolean).join(" ").toLowerCase();
-        if (!hay.includes(q)) return false;
+      // Token-based search: each chosen suggestion narrows (AND). Plain typed
+      // text does NOT filter on its own — only selected tokens do.
+      if (searchTokens.length) {
+        const ok = searchTokens.every((tok) => {
+          if (tok.type === "tag") return (e.tags || []).includes(tok.value);
+          if (tok.type === "place") return (e.location || "").includes(tok.value);
+          return (e.name || "").includes(tok.value); // name
+        });
+        if (!ok) return false;
       }
       return true;
     });
@@ -419,6 +423,7 @@
     serverSearch.activity_types.length = 0;
     serverSearch.tags.length = 0;
     serverSearch.communities.length = 0;
+    searchTokens.length = 0;
     serverSearch.keywords.length = 0;
     serverSearch.proximity = false;
     serverSearch.available_only = false;
@@ -448,6 +453,7 @@
     serverSearch.activity_types.length = 0;
     serverSearch.tags.length = 0;
     serverSearch.communities.length = 0;
+    searchTokens.length = 0;
     serverSearch.keywords.length = 0;
     serverSearch.proximity = false;
     serverSearch.available_only = false;
@@ -544,6 +550,15 @@
         const i = serverSearch.tags.indexOf(val);
         if (i >= 0) serverSearch.tags.splice(i, 1);
         deactivateChip("tagFilterBar", "tag", val);
+        applyFilters();
+      }});
+    }
+    // Chosen search tokens (autocomplete picks) — removable, client-side.
+    const TYPE_ICO = { name: "🎫", tag: "🏷️", place: "📍" };
+    for (const tok of [...searchTokens]) {
+      pills.push({ label: `${TYPE_ICO[tok.type] || ""} ${tok.value}`.trim(), clear: () => {
+        const i = searchTokens.findIndex((t) => t.type === tok.type && t.value === tok.value);
+        if (i >= 0) searchTokens.splice(i, 1);
         applyFilters();
       }});
     }
@@ -1566,15 +1581,84 @@
     tg?.HapticFeedback?.impactOccurred("light");
   });
 
-  // ── Search ────────────────────────────────────────────────────────────
+  // ── Autocomplete search (token-based) ─────────────────────────────────
+  // Typing shows suggestions drawn ONLY from our loaded events — event names,
+  // tags, and venues. Picking one adds a removable token; plain text never
+  // filters on its own.
+  const searchSuggest = document.getElementById("searchSuggest");
+  const searchClear = document.getElementById("searchClear");
+  const TYPE_ICON = { name: "🎫", tag: "🏷️", place: "📍" };
+  const TYPE_LABEL = { name: "אירוע", tag: "תגית", place: "מיקום" };
+
+  function buildSuggestions(q) {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return [];
+    const seen = new Set();      // dedupe by type+value
+    const out = [];
+    const add = (type, value) => {
+      if (!value) return;
+      const key = type + "|" + value;
+      if (seen.has(key)) return;
+      if (!value.toLowerCase().includes(needle)) return;
+      // already an active token? skip.
+      if (searchTokens.some((t) => t.type === type && t.value === value)) return;
+      seen.add(key);
+      out.push({ type, value });
+    };
+    for (const e of allEvents) {
+      add("name", e.name);
+      (e.tags || []).forEach((t) => add("tag", t));
+      if (e.location && !isCityWide(e.location)) add("place", e.location);
+    }
+    // tags + places first (they group many events), then names; cap the list.
+    out.sort((a, b) => (a.type === "name") - (b.type === "name"));
+    return out.slice(0, 12);
+  }
+  function renderSuggestions(list) {
+    if (!list.length) { searchSuggest.hidden = true; searchSuggest.innerHTML = ""; return; }
+    searchSuggest.innerHTML = list.map((s, i) =>
+      `<button class="suggest-item" data-i="${i}"><span class="suggest-ico">${TYPE_ICON[s.type]}</span><span class="suggest-val">${esc(s.value)}</span><span class="suggest-type">${TYPE_LABEL[s.type]}</span></button>`
+    ).join("");
+    searchSuggest._list = list;
+    searchSuggest.hidden = false;
+  }
+  function addToken(tok) {
+    searchTokens.push(tok);
+    searchInput.value = "";
+    searchSuggest.hidden = true;
+    searchClear.hidden = true;
+    searchInput.focus(); // keep searching for more
+    applyFilters();
+  }
   let st = null;
   searchInput.addEventListener("input", () => {
+    searchClear.hidden = !searchInput.value;
     clearTimeout(st);
-    st = setTimeout(() => { searchQuery = searchInput.value; applyFilters(); }, 250);
+    st = setTimeout(() => renderSuggestions(buildSuggestions(searchInput.value)), 150);
   });
-  // Enter → dismiss the keyboard (iOS), apply immediately.
+  searchSuggest.addEventListener("click", (e) => {
+    const btn = e.target.closest(".suggest-item");
+    if (!btn) return;
+    const tok = searchSuggest._list?.[parseInt(btn.dataset.i, 10)];
+    if (tok) addToken(tok);
+  });
+  // Enter dismisses the keyboard; if there's exactly one suggestion, pick it.
   searchInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); searchInput.blur(); searchQuery = searchInput.value; applyFilters(); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const list = searchSuggest._list || [];
+      if (!searchSuggest.hidden && list.length === 1) addToken(list[0]);
+      else searchInput.blur();
+    }
+  });
+  searchClear.addEventListener("click", () => {
+    searchInput.value = "";
+    searchClear.hidden = true;
+    searchSuggest.hidden = true;
+    searchInput.focus();
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".search-wrap")) searchSuggest.hidden = true;
   });
   document.getElementById("keywordInput")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); e.target.blur(); }

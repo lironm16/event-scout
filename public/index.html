@@ -14,13 +14,17 @@
 
 <header class="app-header">
   <div class="header-top">
-    <input
-      class="search-input"
-      type="search"
-      id="searchInput"
-      placeholder="חיפוש לפי שם, מיקום או תגית..."
-      autocomplete="off"
-    />
+    <div class="search-wrap">
+      <input
+        class="search-input"
+        type="text"
+        id="searchInput"
+        placeholder="חיפוש לפי שם, מיקום או תגית..."
+        autocomplete="off"
+      />
+      <button class="search-clear" id="searchClear" type="button" aria-label="נקה" hidden>✕</button>
+      <div class="search-suggest" id="searchSuggest" hidden></div>
+    </div>
     <button class="filter-toggle-btn" id="sortToggleBtn" title="מיון">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
         <line x1="4" y1="6" x2="20" y2="6"/>
