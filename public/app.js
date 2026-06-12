@@ -181,32 +181,68 @@
     return p;
   }
 
+  // Cache BOTH scopes (בשבילי / כללי) for the current filter set so toggling
+  // is an instant in-memory swap — no refetch. Invalidated when filters change.
+  let scopeCache = { sig: "", me: null, all: null };
+  function filterSig() {
+    return JSON.stringify({
+      d: serverSearch.date_preset, a: serverSearch.audiences, t: serverSearch.activity_types,
+      k: serverSearch.keywords, p: serverSearch.proximity,
+      av: serverSearch.available_only, u: serverSearch.unseen_only,
+    });
+  }
+  function applyBody(body) {
+    buildTagChips(body.profile?.interests || []);
+    buildCommunityChips(body.communities || []);
+    userHome = body.profile?.home || null;
+    catalogScope = body.scope || (serverSearch.ignore_profile ? "all" : "me");
+    watchedIds.clear();
+    (body.watchedIds || []).forEach((id) => watchedIds.add(id));
+    allEvents = body.events || [];
+    lastWindowLabel = body.window?.label_he || null;
+    lastCanExtend = !!body.canExtend;
+    lastExtensionHint = body.extensionHint || null;
+    updateTypeChipAvailability();
+    applyFilters();
+    spinner.style.display = "none";
+    catalog.style.display = "block";
+  }
+  // Fetch a specific scope (ignore_profile on/off) without disturbing state.
+  async function fetchScope(ignoreProfile, extra) {
+    const saved = serverSearch.ignore_profile;
+    serverSearch.ignore_profile = ignoreProfile;
+    const qs = buildSearchQuery(extra);
+    serverSearch.ignore_profile = saved;
+    const res = await fetch(`${API_PREFIX}/events?${qs}`);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `שגיאה ${res.status}`);
+    return body;
+  }
+
   async function loadEvents(extra) {
     INIT_DATA = await ensureInitData();
     if (!INIT_DATA) {
       showError(catalogAuthErrorMessage());
       return;
     }
+    const sig = filterSig();
+    if (scopeCache.sig !== sig) scopeCache = { sig, me: null, all: null };
+    const scopeKey = serverSearch.ignore_profile ? "all" : "me";
+    // Instant swap if we already have this scope for the current filters.
+    if (!extra && scopeCache[scopeKey]) { applyBody(scopeCache[scopeKey]); return; }
     try {
       spinner.style.display = "none";
       showSkeletons();
-      const res  = await fetch(`${API_PREFIX}/events?${buildSearchQuery(extra)}`);
-      const body = await res.json();
-      if (!res.ok) { showError(body.error || `שגיאה ${res.status}`); return; }
-      buildTagChips(body.profile?.interests || []);
-      buildCommunityChips(body.communities || []);
-      userHome = body.profile?.home || null;
-      catalogScope = body.scope || (serverSearch.ignore_profile ? "all" : "me");
-      watchedIds.clear();
-      (body.watchedIds || []).forEach((id) => watchedIds.add(id));
-      allEvents = body.events || [];
-      lastWindowLabel = body.window?.label_he || null;
-      lastCanExtend = !!body.canExtend;
-      lastExtensionHint = body.extensionHint || null;
-      updateTypeChipAvailability();
-      applyFilters();
-      spinner.style.display = "none";
-      catalog.style.display = "block";
+      const body = await fetchScope(serverSearch.ignore_profile, extra);
+      if (!extra) scopeCache[scopeKey] = body;
+      applyBody(body);
+      // Warm the OTHER scope in the background so the first toggle is instant.
+      const otherKey = scopeKey === "me" ? "all" : "me";
+      if (!extra && !scopeCache[otherKey]) {
+        fetchScope(otherKey === "all", null)
+          .then((b) => { if (scopeCache.sig === sig) scopeCache[otherKey] = b; })
+          .catch(() => {});
+      }
     } catch (err) {
       showError("לא ניתן לטעון את האירועים כרגע.");
       console.error(err);
@@ -1629,7 +1665,7 @@
     searchInput.value = "";
     searchSuggest.hidden = true;
     searchClear.hidden = true;
-    searchInput.focus(); // keep searching for more
+    searchInput.blur(); // dismiss the keyboard on selection
     applyFilters();
   }
   let st = null;
