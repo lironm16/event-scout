@@ -1344,18 +1344,24 @@
       const variedDesc = new Set(list.map((o) => (o.description || "").trim())).size > 1;
       if (!list.length) { box.innerHTML = `<div class="occ-empty">אין עוד מופעים.</div>`; }
       else {
-        box.innerHTML = list.map((o) => {
-          // Each meta item on its OWN line (date / time / location) — no " · "
-          // run that wraps mid-value. Time range kept unbreakable.
+        // Group occurrences under a shared date header (like the main list) so
+        // the date is pulled OUT of every individual row.
+        let html = "", lastDate = null;
+        for (const o of list) {
+          if ((o.dateHe || "") !== lastDate) {
+            lastDate = o.dateHe || "";
+            html += `<div class="occ-date-header">🗓️ ${esc(lastDate)}</div>`;
+          }
           const rawTime = (o.timeHe || "").trim();
           const lines = [];
           let top;
           if (varied) { // umbrella program — the event name is primary
             top = `<span class="sr-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>`;
-            if (o.dateHe) lines.push(`🗓️ ${esc(o.dateHe)}`);
             if (rawTime) lines.push(`<span class="sr-nowrap">🕒 ${esc(rawTime)}</span>`);
-          } else {       // same-name series — the date is primary
-            top = `<span class="sr-when">🗓️ ${esc(o.dateHe || "")}</span>${rawTime ? `<span class="sr-time">🕒 ${esc(rawTime)}</span>` : ""}`;
+          } else {       // same-name series — the time (date is in the header)
+            top = rawTime
+              ? `<span class="sr-when">🕒 ${esc(rawTime)}</span>`
+              : `<span class="sr-when">${esc(o.dateHe || "")}</span>`;
           }
           const tk = seriesTicketText(o.ticketsLeft);
           if (tk) lines.push(tk);
@@ -1364,8 +1370,7 @@
             ? `<span class="sr-meta">${lines.map((l) => `<span class="sr-line">${l}</span>`).join("")}</span>` : "";
           const descHtml = (variedDesc && o.description)
             ? `<span class="sr-desc">${esc(o.description)}</span>` : "";
-          // For-me occurrences get a bold accent FRAME (replaces the ✨ dot).
-          return `<button class="series-row${o.forMe ? " forme" : ""}" onclick="window.openEventModal(${o.id},null,{hideOccurrences:true,parentId:${eventId}})"${o.forMe ? ' title="בשבילך"' : ""}>
+          html += `<button class="series-row${o.forMe ? " forme" : ""}" onclick="window.openEventModal(${o.id},null,{hideOccurrences:true,parentId:${eventId}})"${o.forMe ? ' title="בשבילך"' : ""}>
             <span class="sr-body">
               <span class="sr-top">${top}</span>
               ${metaHtml}
@@ -1373,7 +1378,8 @@
             </span>
             <span class="sr-go">›</span>
           </button>`;
-        }).join("");
+        }
+        box.innerHTML = html;
       }
       box.dataset.loaded = "1";
       box.hidden = false;

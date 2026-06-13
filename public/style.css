@@ -747,6 +747,8 @@ body {
 
 /* Inline occurrences list. */
 .occ-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.occ-date-header { font-weight: 700; font-size: .9rem; color: var(--accent); margin: 10px 2px 2px; }
+.occ-date-header:first-child { margin-top: 0; }
 .occ-row {
   font-size: 1rem;
   padding: 7px 10px;
