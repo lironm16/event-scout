@@ -1468,11 +1468,7 @@ body {
 .ss-chip.sel::after { content: " ✓"; }
 .ss-foot { margin-top: 8px; }
 .ss-apply { margin-top: 4px; }
-.ss-report {
-  display: block; width: 100%; margin-top: 12px;
-  background: none; border: none; cursor: pointer;
-  color: var(--hint); font: inherit; font-size: 1rem; padding: 6px; text-align: center;
-}
+.ss-report { margin-top: 8px; } /* now a real button via .btn .btn-secondary .btn-block */
 .ss-profile {
   display: block; width: 100%; margin-top: 10px;
   color: var(--link, #4ea1ff); font-size: 1rem; text-align: center;

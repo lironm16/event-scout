@@ -1200,8 +1200,8 @@
           <div class="ss-body"></div>
           <div class="ss-foot">
             <button class="ss-apply btn btn-primary btn-block">החל סינון</button>
-            <a class="ss-profile" href="profile.html">⚙️ לא מתאים? לכוונון מלא בפרופיל</a>
-            <button class="ss-report">משהו שגוי באירוע? דווחו לנו</button>
+            <button class="ss-report btn btn-secondary btn-block">🚩 דיווח על בעיה באירוע</button>
+            <a class="ss-profile" href="profile.html">⚙️ לכוונון מלא בפרופיל</a>
           </div>
         </div>`;
       document.body.appendChild(ov);
