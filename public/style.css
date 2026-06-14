@@ -545,7 +545,7 @@ body {
   position: fixed;
   /* Sit at the same height as the sticky date-header pill, flush-left (the
      date text is RTL/right-aligned so the left side is empty → hides nothing). */
-  top: calc(var(--header-h, 56px) + var(--drill-h, 0px) + 8px);
+  top: calc(var(--header-h, 56px) + var(--drill-h, 0px) + 14px);
   left: 8px;
   z-index: 60;
   display: inline-flex;
