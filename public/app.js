@@ -817,7 +817,9 @@
     // short venue name (text before the first comma), dropping the street.
     const shortLoc = (s) => String(s || "").split(",")[0].trim();
     let locText = "";
-    if (isOnline(ev)) locText = "📷 אונליין";
+    const isMultiVenueSeries = (ev.totalOccurrences || 1) > 1 && ev.seriesMultiVenue && !opts.hideOccurrences;
+    if (isMultiVenueSeries) locText = "📍 מיקומים שונים";
+    else if (isOnline(ev)) locText = "📷 אונליין";
     else if (ev.location && !isCityWide(ev.location)) locText = `📍 ${esc(shortLoc(ev.location))}`;
     else if (isCityWide(ev.location)) locText = "🗺️ ברחבי העיר";
 
