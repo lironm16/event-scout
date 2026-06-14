@@ -824,11 +824,19 @@
     // ── Visual ticket status (overlay badge, not a body line) ──
     let statusBadge = "";
     let soldOut = false;
-    const t = ev.ticketsLeft;
-    if (t != null) {
-      if (t <= 0) { soldOut = true; statusBadge = `<span class="status-badge soldout">אזל</span>`; }
-      else if (t <= 9) statusBadge = `<span class="status-badge low"><span class="pulse-dot"></span>${t} אחרונים</span>`;
-      else statusBadge = `<span class="status-badge ok">🎟️ ${t} כרטיסים</span>`;
+    const isSeries = (ev.totalOccurrences || 1) > 1;
+    // For a series the representative's status is misleading — show "אזל" only
+    // if EVERY occurrence is sold out (seriesAnyAvailable === false).
+    if (isSeries) {
+      if (ev.seriesAnyAvailable === false) { soldOut = true; statusBadge = `<span class="status-badge soldout">אזל</span>`; }
+      // else: don't surface a single occurrence's ticket count on the parent.
+    } else {
+      const t = ev.ticketsLeft;
+      if (t != null) {
+        if (t <= 0) { soldOut = true; statusBadge = `<span class="status-badge soldout">אזל</span>`; }
+        else if (t <= 9) statusBadge = `<span class="status-badge low"><span class="pulse-dot"></span>${t} אחרונים</span>`;
+        else statusBadge = `<span class="status-badge ok">🎟️ ${t} כרטיסים</span>`;
+      }
     }
 
     const tagsHtml = (ev.tags || []).slice(0, 4)
@@ -979,10 +987,9 @@
     //    same-name series AND an umbrella program (rows show titles when the
     //    items differ). Grouped by the same seriesKey the count uses.
     if (!opts.hideOccurrences && (ev.totalOccurrences || 1) > 1) {
-      const word = ev.umbrella_slug ? "בתוכנית" : "מהסדרה";
-      // "עוד N" = the OTHERS (the list excludes the current occurrence).
-      const more = (ev.totalOccurrences || 1) - 1;
-      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">🔁 עוד ${more} ${word} ▾</button>`);
+      const word = ev.umbrella_slug ? "בתוכנית" : "מופעים";
+      // Show ALL occurrences (the list includes the representative now).
+      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">🔁 כל ה־${ev.totalOccurrences} ${word} ▾</button>`);
       parts.push(`<div class="occ-list"></div>`);
     }
 
