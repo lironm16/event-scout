@@ -707,12 +707,14 @@
 
   // Enter tag drill-down — called from card tag pills.
   window.drillTag = function (tag) {
-    tagReturnScroll = window.scrollY;
-    tagDrilldown = tag;
+    // Unified with the search box: tapping a tag adds it as a search TOKEN
+    // (top filter pill) — same filtering path as picking it in autocomplete.
+    if (!tag) return;
+    if (!searchTokens.some((t) => t.type === "tag" && t.value === tag)) {
+      searchTokens.push({ type: "tag", value: tag });
+    }
     document.querySelectorAll(".event-card.open").forEach((c) => c.classList.remove("open"));
     applyFilters();
-    // A tag drill-down is a fresh "all events under this tag" view → start at
-    // the top. (Back restores the previous scroll via tagReturnScroll.)
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
   };
 
