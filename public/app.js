@@ -1007,9 +1007,12 @@
 
   function buildDetail(ev, isInterested, opts = {}) {
     const parts = [];
+    const isSeriesParent = (ev.totalOccurrences || 1) > 1 && !opts.hideOccurrences;
 
     // 1) Primary CTA + ניווט (+ watch when sold out) on one row.
-    const navUrl = navUrlFor(ev);
+    // No nav button on a multi-venue series parent — there's no single
+    // destination ("מיקומים שונים"); the user picks a venue per occurrence.
+    const navUrl = (isSeriesParent && ev.seriesMultiVenue) ? null : navUrlFor(ev);
     const ctaRow = [];
     if (ev.bookingUrl) {
       ctaRow.push(`<a class="btn btn-primary cta-main" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🔗 לאתר</a>`);
@@ -1023,7 +1026,6 @@
     // so it's clear what "follow" does (availability from the site + 2nd-hand).
     // No "watch tickets" on a series parent — following one occurrence is
     // meaningless. Only on a single event/occurrence that's actually sold out.
-    const isSeriesParent = (ev.totalOccurrences || 1) > 1 && !opts.hideOccurrences;
     const soldOut = !isSeriesParent && ev.ticketsLeft != null && ev.ticketsLeft <= 0;
     if (soldOut) {
       const watching = watchedIds.has(ev.id);
