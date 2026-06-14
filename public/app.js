@@ -918,15 +918,17 @@
     }
 
     // ── Hero: image (or gradient fallback) with title overlaid ──
-    const heroInner = ev.image
-      ? `<img class="card-image" src="${esc(ev.image)}" alt="${esc(ev.name)}" loading="lazy"
+    // Umbrella parent → use the programme's own image, not the first child's.
+    const heroImg = (useUmbrellaTitle && ev.umbrellaImage) ? ev.umbrellaImage : ev.image;
+    const heroInner = heroImg
+      ? `<img class="card-image" src="${esc(heroImg)}" alt="${esc(cardTitle)}" loading="lazy"
             onerror="this.closest('.card-hero').classList.add('no-img')" />`
       : `<span class="hero-emoji">${esc(ev.icon || "📌")}</span>`;
 
     const isInterested = interestedIds.has(ev.id);
 
     card.innerHTML = `
-      <div class="card-hero${ev.image ? "" : " no-img"}${soldOut ? " soldout" : ""}">
+      <div class="card-hero${heroImg ? "" : " no-img"}${soldOut ? " soldout" : ""}">
         ${heroInner}
         <div class="hero-grad"></div>
         <div class="hero-top">
@@ -934,7 +936,7 @@
           ${whenPill}
         </div>
         <div class="hero-foot">
-          <h3 class="card-title">${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(cardTitle)}</h3>
+          <h3 class="card-title">${heroImg ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(cardTitle)}</h3>
         </div>
       </div>
       <div class="card-body card-click">
@@ -1033,10 +1035,14 @@
     // On a series parent whose occurrences have DIFFERENT descriptions, the
     // representative's blurb is misleading → omit it (each occurrence shows
     // its own inside).
-    const hideParentDesc = isSeriesParent && ev.seriesMultiDesc;
-    if (ev.description && !hideParentDesc) {
-      const descHtml = linkifyPhones(esc(ev.description).replace(/\n/g, "<br>"));
-      const isLong = ev.description.length > 140;
+    // Umbrella parent → prefer the programme's own description; else for a
+    // multi-description series omit it (each occurrence shows its own inside).
+    const parentDesc = (isSeriesParent && ev.umbrellaDescription) ? ev.umbrellaDescription : null;
+    const descText = parentDesc || ev.description;
+    const hideParentDesc = isSeriesParent && !parentDesc && ev.seriesMultiDesc;
+    if (descText && !hideParentDesc) {
+      const descHtml = linkifyPhones(esc(descText).replace(/\n/g, "<br>"));
+      const isLong = descText.length > 140;
       parts.push(`<div class="desc-wrap">
         <div class="card-description${isLong ? " clamped" : ""}">${descHtml}</div>
         ${isLong ? `<button class="desc-readmore" onclick="event.stopPropagation();window.toggleDesc(this)">קרא עוד</button>` : ""}
