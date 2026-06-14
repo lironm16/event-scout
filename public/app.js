@@ -1001,9 +1001,14 @@
     //    that ARE for you (so you can refine your feed). NOT shown for
     //    non-matching events in כללי mode — those are already filtered out of
     //    בשבילי, so there's nothing to suppress.
+    // Quiet actions row: hide (refine feed) + report (data-quality). Report is
+    // shown for every event; hide only for matching ones.
+    const quiet = [];
     if (ev.forMe !== false) {
-      parts.push(`<button class="hide-link" onclick="window.openSuppressSheet(${ev.id})">🙈 אל תראה לי אירועים כאלה</button>`);
+      quiet.push(`<button class="hide-link" onclick="event.stopPropagation();window.openSuppressSheet(${ev.id})">🙈 אל תראה לי אירועים כאלה</button>`);
     }
+    quiet.push(`<button class="report-link" onclick="event.stopPropagation();window.openReportSheet(${ev.id})">🚩 דיווח על בעיה</button>`);
+    parts.push(`<div class="card-quiet-row">${quiet.join("")}</div>`);
 
     return parts.join("") || "<div class='card-description'>אין פרטים נוספים.</div>";
   }
@@ -1211,7 +1216,6 @@
           <div class="ss-body"></div>
           <div class="ss-foot">
             <button class="ss-apply btn btn-primary btn-block">החל סינון</button>
-            <button class="ss-report btn btn-secondary btn-block">🚩 דיווח על בעיה באירוע</button>
             <a class="ss-profile" href="profile.html">⚙️ לכוונון מלא בפרופיל</a>
           </div>
         </div>`;
@@ -1262,7 +1266,8 @@
     }
     body.innerHTML = groups.join("");
 
-    ov.querySelector(".ss-report").onclick = () => { close(); window.openReportSheet(eventId); };
+    const ssReport = ov.querySelector(".ss-report");
+    if (ssReport) ssReport.onclick = () => { close(); window.openReportSheet(eventId); };
     ov.querySelector(".ss-apply").onclick = async () => {
       const sel = [...body.querySelectorAll(".ss-chip.sel")];
       const applyBtn = ov.querySelector(".ss-apply");

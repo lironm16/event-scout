@@ -1424,6 +1424,14 @@ body {
   padding: 8px; text-align: center; opacity: .8;
 }
 .hide-link:active { opacity: 1; }
+.card-quiet-row { display: flex; gap: 8px; margin-top: 12px; }
+.card-quiet-row .hide-link, .card-quiet-row .report-link { margin-top: 0; flex: 1; }
+.report-link {
+  display: block; background: none; border: none; cursor: pointer;
+  color: var(--hint); font: inherit; font-size: 1rem; font-weight: 600;
+  padding: 8px; text-align: center; opacity: .8;
+}
+.report-link:active { opacity: 1; }
 
 /* Suppression bottom-sheet */
 .ss-backdrop {
