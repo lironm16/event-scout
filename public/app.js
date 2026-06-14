@@ -1321,7 +1321,10 @@
         tags.map((t) => `<button class="ss-chip" data-kind="tag" data-val="${esc(t)}">🏷️ ${esc(t)}</button>`).join("")
       }</div></div>`);
     }
-    if (ev.location && !isCityWide(ev.location)) {
+    // A multi-venue series parent has no single venue — suppressing "by place"
+    // or "by drive time" is meaningless (the occurrences span several places).
+    const isMultiVenueParent = (ev.totalOccurrences || 1) > 1 && ev.seriesMultiVenue;
+    if (!isMultiVenueParent && ev.location && !isCityWide(ev.location)) {
       groups.push(`<div class="ss-group"><div class="ss-glabel">לפי מקום</div><div class="ss-chips">
         <button class="ss-chip" data-kind="place">📍 ${esc(ev.location)}</button></div></div>`);
     }
@@ -1335,7 +1338,7 @@
     // profile's max drive distance just under this event's (e.g. 12 → 11 דק').
     const cachedEv = eventsById.get(eventId) || eventsById.get(Number(eventId)) || {};
     const driveMin = Number(cachedEv.driveMinutes);
-    if (Number.isFinite(driveMin) && driveMin > 1) {
+    if (!isMultiVenueParent && Number.isFinite(driveMin) && driveMin > 1) {
       groups.push(`<div class="ss-group"><div class="ss-glabel">לפי זמן נסיעה</div><div class="ss-chips">
         <button class="ss-chip" data-kind="toofar" data-min="${driveMin}">🚗 רחוק מדי (${driveMin} דק' נסיעה)</button></div></div>`);
     }
@@ -1760,21 +1763,26 @@
     if (!needle) return [];
     const seen = new Set();      // dedupe by type+value
     const out = [];
-    const add = (type, value) => {
+    const add = (type, value, openId) => {
       if (!value) return;
-      const key = type + "|" + value;
+      // When a suggestion maps to a specific event, dedupe by its id so two
+      // siblings sharing a generic prefix don't collapse together.
+      const key = type + "|" + (openId != null ? "#" + openId : value);
       if (seen.has(key)) return;
       if (!value.toLowerCase().includes(needle)) return;
       // already an active token? skip.
       if (searchTokens.some((t) => t.type === type && t.value === value)) return;
       seen.add(key);
-      out.push({ type, value });
+      out.push(openId != null ? { type, value, openId } : { type, value });
     };
     for (const e of allEvents) {
       add("name", e.name);
       add("program", e.umbrella_title); // parent/umbrella programme title (e.g. "קיץ של בלונים")
       (e.tags || []).forEach((t) => add("tag", t));
       if (e.location && !isCityWide(e.location)) add("place", e.location);
+      // Collapsed series/umbrella parent — also suggest each individual
+      // occurrence by name so it's reachable (and opens THAT event directly).
+      (e.occurrenceList || []).forEach((o) => { if (o.name && o.id) add("name", o.name, o.id); });
     }
     // tags + places first (they group many events), then names; cap the list.
     out.sort((a, b) => (a.type === "name") - (b.type === "name"));
@@ -1789,6 +1797,16 @@
     searchSuggest.hidden = false;
   }
   function addToken(tok) {
+    // A suggestion tied to a specific event (a collapsed series/umbrella sibling)
+    // opens THAT event directly rather than filtering the grid to the parent.
+    if (tok && tok.openId != null) {
+      searchInput.value = "";
+      searchSuggest.hidden = true;
+      searchClear.hidden = true;
+      searchInput.blur();
+      window.openEventModal(tok.openId, null, { hideOccurrences: true });
+      return;
+    }
     searchTokens.push(tok);
     searchInput.value = "";
     searchSuggest.hidden = true;
