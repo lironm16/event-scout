@@ -1768,6 +1768,28 @@ bot.action("prof:kids", async (ctx) => {
   await openOnboardingAtStep(ctx, "kids", { editReturn: "profile" });
 });
 
+// Admin taps "✅ תוקן — שלח תודה" on an event-report notification → DM the
+// reporter a thank-you (with the event name). callback_data: rthx:<uid>:<eventId>.
+bot.action(/^rthx:(\d+):(\d+)$/, async (ctx) => {
+  const reporterId = ctx.match[1];
+  const eventId = ctx.match[2];
+  try {
+    const supabase = require("../lib/supabase");
+    const { data: ev } = await supabase.from("events").select("name").eq("id", Number(eventId)).maybeSingle();
+    const evName = ev?.name ? `"${ev.name}"` : `#${eventId}`;
+    await ctx.telegram.sendMessage(
+      reporterId,
+      `תיקנו את האירוע ${evName} שדיווחת עליו 🙏\nתודה רבה על העזרה — דיווחים כמוך עוזרים לנו לשפר!`,
+    );
+    await ctx.answerCbQuery("נשלחה תודה למשתמש ✅").catch(() => {});
+    // Mark the admin message as handled so it isn't tapped twice.
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [[{ text: "✅ נשלחה תודה למשתמש", callback_data: "noop" }]] }).catch(() => {});
+  } catch (err) {
+    await ctx.answerCbQuery("שליחת התודה נכשלה — ייתכן שהמשתמש חסם את הבוט").catch(() => {});
+  }
+});
+bot.action("noop", (ctx) => ctx.answerCbQuery().catch(() => {}));
+
 bot.action("ip:start_from_welcome", async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
