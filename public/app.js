@@ -206,6 +206,11 @@
     applyFilters();
     spinner.style.display = "none";
     catalog.style.display = "block";
+    // Restore scroll position when returning from the profile.
+    if (_pendingScrollY != null) {
+      const y = _pendingScrollY; _pendingScrollY = null;
+      requestAnimationFrame(() => window.scrollTo({ top: y, behavior: "instant" }));
+    }
   }
   // Fetch a specific scope (ignore_profile on/off) without disturbing state.
   async function fetchScope(ignoreProfile, extra) {
@@ -218,6 +223,43 @@
     if (!res.ok) throw new Error(body.error || `שגיאה ${res.status}`);
     return body;
   }
+
+  // ── Persist catalog state across navigation to the profile and back ──
+  const CATALOG_STATE_KEY = "catalogState_v1";
+  let _pendingScrollY = null;
+  function saveCatalogState() {
+    try {
+      sessionStorage.setItem(CATALOG_STATE_KEY, JSON.stringify({
+        ss: serverSearch, activeDate, activeType, tokens: searchTokens, y: window.scrollY,
+      }));
+    } catch (_) {}
+  }
+  function setArr(target, src) { target.length = 0; (src || []).forEach((x) => target.push(x)); }
+  function restoreCatalogState() {
+    let st = null;
+    try { st = JSON.parse(sessionStorage.getItem(CATALOG_STATE_KEY) || "null"); } catch (_) {}
+    if (!st) return false;
+    sessionStorage.removeItem(CATALOG_STATE_KEY);
+    const r = st.ss || {};
+    serverSearch.date_preset = r.date_preset || "upcoming";
+    serverSearch.proximity = !!r.proximity;
+    serverSearch.available_only = !!r.available_only;
+    serverSearch.unseen_only = !!r.unseen_only;
+    serverSearch.ignore_profile = !!r.ignore_profile;
+    setArr(serverSearch.audiences, r.audiences);
+    setArr(serverSearch.activity_types, r.activity_types);
+    setArr(serverSearch.tags, r.tags);
+    setArr(serverSearch.communities, r.communities);
+    setArr(serverSearch.keywords, r.keywords);
+    activeDate = st.activeDate || "all";
+    activeType = st.activeType || "all";
+    searchTokens = Array.isArray(st.tokens) ? st.tokens : [];
+    _pendingScrollY = typeof st.y === "number" ? st.y : null;
+    syncScopeChips();
+    return true;
+  }
+  // Save when the page is hidden/navigated away (→ profile) and right before unload.
+  window.addEventListener("pagehide", saveCatalogState);
 
   async function loadEvents(extra) {
     INIT_DATA = await ensureInitData();
@@ -1881,6 +1923,7 @@
     // Catalog. If an event was requested, open it as an in-app modal OVER the
     // catalog (single, reusable "← חזרה" popup) — NOT a separate window. A new
     // event just swaps the same popup.
+    restoreCatalogState(); // returning from profile → restore filters + scroll
     loadEvents();
     const _evId = requestedEventId();
     if (_evId) window.openEventModal(_evId);
