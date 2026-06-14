@@ -1322,9 +1322,9 @@
   // Light inline ticket text for the compact series rows (not a big pill).
   function seriesTicketText(t) {
     if (t == null) return "";
-    if (t <= 0) return `<span class="sr-tk sold">אזל</span>`;
+    if (t <= 0) return `<span class="sr-tk sold">🎫 אזל</span>`;
     if (t <= 9) return `<span class="sr-tk low">🔥 ${t} אחרונים</span>`;
-    return `<span class="sr-tk ok">🎟️ ${t} כרטיסים</span>`;
+    return `<span class="sr-tk ok">🎫 ${t} כרטיסים</span>`;
   }
 
   // 📅 "עוד X מהסדרה" → a compact date list. Each row opens that date as a
