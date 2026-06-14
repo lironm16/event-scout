@@ -1231,12 +1231,17 @@
     const close = () => { ov.classList.remove("open"); document.body.style.overflow = ""; };
     const body = ov.querySelector(".ss-body");
     body.innerHTML = `<div class="ss-loading">טוען…</div>`;
+    // Prefer the already-loaded event (tags/location/audience are all we need) —
+    // avoids a slow /event round-trip that recomputes the whole series size.
+    const cached = eventsById.get(eventId) || eventsById.get(Number(eventId));
     ov.classList.add("open");
     document.body.style.overflow = "hidden";
 
-    let ev;
-    try { ev = (await (await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`)).json()).event; }
-    catch (_) { ev = null; }
+    let ev = cached || null;
+    if (!ev) {
+      try { ev = (await (await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`)).json()).event; }
+      catch (_) { ev = null; }
+    }
     if (!ev) { body.innerHTML = `<div class="ss-loading">שגיאה בטעינה.</div>`; return; }
 
     const groups = [];
