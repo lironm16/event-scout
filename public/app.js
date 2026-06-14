@@ -871,12 +871,10 @@
     // Series-aggregate display applies ONLY to the collapsed representative in
     // the list — NOT when viewing a single occurrence (opts.hideOccurrences).
     const isSeries = (ev.totalOccurrences || 1) > 1 && !opts.hideOccurrences;
-    // For a series the representative's status is misleading — show "אזל" only
-    // if EVERY occurrence is sold out (seriesAnyAvailable === false).
-    if (isSeries) {
-      if (ev.seriesAnyAvailable === false) { soldOut = true; statusBadge = `<span class="status-badge soldout">אזל</span>`; }
-      // else: don't surface a single occurrence's ticket count on the parent.
-    } else {
+    // Parent (series) card: NO ticket status at all — a single occurrence's
+    // "אזל"/count is misleading across many occurrences, and following one is
+    // meaningless. Per-occurrence status shows inside, on each occurrence.
+    if (!isSeries) {
       const t = ev.ticketsLeft;
       if (t != null) {
         if (t <= 0) { soldOut = true; statusBadge = `<span class="status-badge soldout">אזל</span>`; }
@@ -1012,7 +1010,10 @@
 
     // Sold-out → a dedicated watch block on its own row, with a short prompt
     // so it's clear what "follow" does (availability from the site + 2nd-hand).
-    const soldOut = ev.ticketsLeft != null && ev.ticketsLeft <= 0;
+    // No "watch tickets" on a series parent — following one occurrence is
+    // meaningless. Only on a single event/occurrence that's actually sold out.
+    const isSeriesParent = (ev.totalOccurrences || 1) > 1 && !opts.hideOccurrences;
+    const soldOut = !isSeriesParent && ev.ticketsLeft != null && ev.ticketsLeft <= 0;
     if (soldOut) {
       const watching = watchedIds.has(ev.id);
       parts.push(`<div class="watch-block">
