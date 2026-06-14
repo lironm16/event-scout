@@ -4014,24 +4014,30 @@ async function renderNewsletterEventCards(botInstance, tg, events) {
     cards.length === 1
       ? "🆕 אירוע חדש שיכול לעניין אותך"
       : "🆕 אירועים שיכולים לעניין אותך";
-  try {
-    await botInstance.telegram.sendMessage(tg, rtlLine(intro));
-  } catch (err) {
-    if (isUserBlockedError(err)) return;
-    console.warn(`[Newsletter] intro failed for ${tg}: ${err.message}`);
-  }
 
   const ctx = makeNewsletterCtx(botInstance, tg);
+  let introSent = false;
+  let anySent = false;
   for (const event of cards) {
     try {
       const seriesOpts = await cardSendOptsForEvent(tg, event);
+      // Send the lead-in ONLY once we know a card will actually follow — never
+      // leave an orphan "🆕 אירוע חדש" with no event (the card send may fail).
+      if (!introSent) {
+        try { await botInstance.telegram.sendMessage(tg, rtlLine(intro)); introSent = true; }
+        catch (e) { if (isUserBlockedError(e)) return; }
+      }
       await sendEventCard(ctx, event, seriesOpts);
+      anySent = true;
     } catch (err) {
       if (isUserBlockedError(err)) return;
       console.error(
         `[Newsletter] card failed event=${event?.id} user=${tg}: ${err.message}`,
       );
     }
+  }
+  if (!anySent) {
+    console.error(`[Newsletter] all ${cards.length} card(s) failed for user=${tg} — no intro sent`);
   }
 }
 
