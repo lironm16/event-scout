@@ -1240,7 +1240,11 @@
       // ensureInitData() — so INIT_DATA may still be "" here → ensure it first,
       // otherwise the /event fetch 401s and shows "לא נמצא".
       if (!INIT_DATA) INIT_DATA = await ensureInitData();
-      const res = await fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
+      // Opening a single occurrence (hideOccurrences) doesn't need the series
+      // count → skip the slow server-side getAllEvents scan with noseries=1.
+      const qp = { initData: INIT_DATA, id: eventId };
+      if (opts.hideOccurrences) qp.noseries = "1";
+      const res = await fetch(`${API_PREFIX}/event?${new URLSearchParams(qp)}`);
       renderInto((await res.json()).event);
     } catch (_) {
       body.innerHTML = `<div class="card-description" style="padding:16px">שגיאה בטעינה.</div>`;
