@@ -543,16 +543,19 @@ body {
 /* Floating "בשבילי / כולל" scope switch — top-left, separate from filters. */
 .formee-toggle {
   position: fixed;
-  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-  right: 16px;
+  /* Sit at the same height as the sticky date-header pill, flush-left (the
+     date text is RTL/right-aligned so the left side is empty → hides nothing). */
+  top: calc(var(--header-h, 56px) + var(--drill-h, 0px) + 8px);
+  left: 8px;
   z-index: 60;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 16px;
-  border: 1px solid color-mix(in srgb, var(--hint) 24%, transparent);
+  gap: 7px;
+  padding: 6px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 999px;
-  background: var(--card, #1c1c1e);
+  background: color-mix(in srgb, var(--bg2) 80%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   color: var(--text);
   font: inherit;
   font-size: 1rem;
