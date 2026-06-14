@@ -871,10 +871,12 @@
     // Series-aggregate display applies ONLY to the collapsed representative in
     // the list — NOT when viewing a single occurrence (opts.hideOccurrences).
     const isSeries = (ev.totalOccurrences || 1) > 1 && !opts.hideOccurrences;
-    // Parent (series) card: NO ticket status at all — a single occurrence's
-    // "אזל"/count is misleading across many occurrences, and following one is
-    // meaningless. Per-occurrence status shows inside, on each occurrence.
-    if (!isSeries) {
+    if (isSeries) {
+      // Parent card: show "אזל" + dimmed image ONLY when EVERY occurrence is
+      // sold out. Never a ticket count (misleading across occurrences). No
+      // watch block (handled in buildDetail). Otherwise no status badge.
+      if (ev.seriesAnyAvailable === false) { soldOut = true; statusBadge = `<span class="status-badge soldout">אזל</span>`; }
+    } else {
       const t = ev.ticketsLeft;
       if (t != null) {
         if (t <= 0) { soldOut = true; statusBadge = `<span class="status-badge soldout">אזל</span>`; }
