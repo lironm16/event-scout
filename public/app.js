@@ -824,7 +824,9 @@
     // ── Visual ticket status (overlay badge, not a body line) ──
     let statusBadge = "";
     let soldOut = false;
-    const isSeries = (ev.totalOccurrences || 1) > 1;
+    // Series-aggregate display applies ONLY to the collapsed representative in
+    // the list — NOT when viewing a single occurrence (opts.hideOccurrences).
+    const isSeries = (ev.totalOccurrences || 1) > 1 && !opts.hideOccurrences;
     // For a series the representative's status is misleading — show "אזל" only
     // if EVERY occurrence is sold out (seriesAnyAvailable === false).
     if (isSeries) {
@@ -857,7 +859,7 @@
     // (misleading) single first-occurrence time. dm() = ISO yyyy-mm-dd → D/M.
     const dm = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ""); return m ? `${+m[3]}/${+m[2]}` : ""; };
     let whenPill;
-    if ((ev.totalOccurrences || 1) > 1 && ev.seriesFirstDate) {
+    if ((ev.totalOccurrences || 1) > 1 && !opts.hideOccurrences && ev.seriesFirstDate) {
       const a = dm(ev.seriesFirstDate), b = dm(ev.seriesLastDate);
       const range = a && b && a !== b ? `${a}–${b}` : (a || b);
       whenPill = range ? `<span class="when-pill">📅 ⁦${range}⁩</span>` : "";
