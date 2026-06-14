@@ -1023,7 +1023,11 @@
     }
 
     // 2) Description — clamped to 3 lines, with a קרא עוד ↔ סגור toggle.
-    if (ev.description) {
+    // On a series parent whose occurrences have DIFFERENT descriptions, the
+    // representative's blurb is misleading → omit it (each occurrence shows
+    // its own inside).
+    const hideParentDesc = isSeriesParent && ev.seriesMultiDesc;
+    if (ev.description && !hideParentDesc) {
       const descHtml = linkifyPhones(esc(ev.description).replace(/\n/g, "<br>"));
       const isLong = ev.description.length > 140;
       parts.push(`<div class="desc-wrap">
