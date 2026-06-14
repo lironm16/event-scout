@@ -947,7 +947,7 @@
           ${ev.accessLine ? `<span class="access-pill">${esc(ev.accessLine.replace(/^👥\s*קהל ייעודי:\s*/, ""))}</span>` : ""}
           ${(ev.totalOccurrences || 1) > 1 ? `<button class="series-pill" onclick="event.stopPropagation();window.openEventModal(${ev.id},null,{expandSeries:true})">🔁 ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}</button>` : ""}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
-          ${ev.distanceLabel ? `<span class="dist-pill${ev.requiresCar ? " car" : ""}">${esc(ev.distanceLabel)}</span>` : ""}
+          ${ev.distanceLabel && !isMultiVenueSeries ? `<span class="dist-pill${ev.requiresCar ? " car" : ""}">${esc(ev.distanceLabel)}</span>` : ""}
         </div>
         ${umbrellaHtml}
         ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ""}
