@@ -489,7 +489,7 @@
   }
 
   // ── Active-filters strip ──────────────────────────────────────────────
-  const DATE_LABELS = { today: "היום", tomorrow: "מחר", weekend: "סוף שבוע", week: "השבוע", month: "החודש" };
+  const DATE_LABELS = { today: "היום", tomorrow: "מחר", weekend: "סוף שבוע", week: "השבוע", nextweek: "שבוע הבא", "2weeks": "שבועיים", next30: "30 יום" };
   const TYPE_LABELS = { registration: "📋 מחייב הרשמה", free: "🎁 כניסה חופשית", online: "💻 אונליין", low_stock: "🎫 נשארו מעט כרטיסים" };
 
   function clearFilters() {
@@ -895,7 +895,12 @@
     const accessHtml = ev.accessLine
       ? `<div class="card-access">${esc(ev.accessLine)}</div>` : "";
 
-    const umbrellaHtml = ev.umbrella_title
+    // Series parent under an umbrella: use the umbrella programme title as the
+    // card title (the representative child's name is just one of many). The
+    // separate umbrella button is then redundant → hide it.
+    const useUmbrellaTitle = isSeries && !!ev.umbrella_title;
+    const cardTitle = useUmbrellaTitle ? ev.umbrella_title : ev.name;
+    const umbrellaHtml = (ev.umbrella_title && !useUmbrellaTitle)
       ? `<button class="card-umbrella" onclick="event.stopPropagation();window.filterUmbrella('${esc(ev.umbrella_slug)}','${esc(ev.umbrella_title)}')">📋 ${esc(ev.umbrella_title)}</button>`
       : "";
 
@@ -929,7 +934,7 @@
           ${whenPill}
         </div>
         <div class="hero-foot">
-          <h3 class="card-title">${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(ev.name)}</h3>
+          <h3 class="card-title">${ev.image ? "" : `<span class="title-emoji">${esc(ev.icon || "📌")}</span> `}${esc(cardTitle)}</h3>
         </div>
       </div>
       <div class="card-body card-click">
@@ -1355,12 +1360,19 @@
       }
       // Always log a hide for this event (covers "just this one" + any choice).
       jobs.push(fetch(`${API_PREFIX}/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventId, reason: "not_interested" }) }));
-      try { await Promise.allSettled(jobs); } catch (_) {}
+      try {
+        await Promise.allSettled(jobs);
+      } finally {
+        // Always restore the button, even if close()/fade throws — otherwise it
+        // sticks on "מחיל…".
+        applyBtn.disabled = false; applyBtn.textContent = "החל סינון";
+      }
       tg?.HapticFeedback?.notificationOccurred?.("success");
       close();
       fadeOutCard(eventId);
-      applyBtn.disabled = false; applyBtn.textContent = "החל סינון";
-      // Refresh so the new filters take effect across the list.
+      // Refresh so the new filters take effect across the list. Suppress
+      // changed the profile → invalidate the scope cache so it refetches.
+      scopeCache = { sig: "", me: null, all: null };
       setTimeout(() => loadEvents(), 400);
     };
   };
@@ -1610,8 +1622,22 @@
     dateBar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
     activeDate = chip.dataset.date;
-    serverSearch.date_preset = DATE_PRESET_MAP[chip.dataset.date] || "upcoming";
-    loadEvents(); // date is a server-side window now
+    // Range chips (next week / two weeks / 30 days) use an EXPLICIT date window
+    // rather than a server preset → clear the preset so dateTo/dateFrom apply.
+    const isoOffset = (days) => { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+    const RANGES = {
+      nextweek: [isoOffset(7), isoOffset(14)],
+      "2weeks": [isoOffset(0), isoOffset(14)],
+      next30: [isoOffset(0), isoOffset(30)],
+    };
+    if (RANGES[chip.dataset.date]) {
+      const [from, to] = RANGES[chip.dataset.date];
+      serverSearch.date_preset = "";
+      loadEvents({ dateFrom: from, dateTo: to });
+    } else {
+      serverSearch.date_preset = DATE_PRESET_MAP[chip.dataset.date] || "upcoming";
+      loadEvents();
+    }
   });
 
   // ── New search-hub chips (audience / activity / options / scope) ──────
