@@ -957,7 +957,9 @@
     // controls (buttons/links/tags) and the description text itself (so reading
     // / using "קרא עוד" doesn't close it).
     card.querySelector(".card-detail")?.addEventListener("click", (e) => {
-      if (e.target.closest("button, a, input, .tag-pill, .card-description, .desc-wrap")) return;
+      // Any tap on the expanded area collapses the card (like tapping the
+      // collapsed card) — except interactive controls (buttons/links/tags).
+      if (e.target.closest("button, a, input, .tag-pill")) return;
       card.classList.remove("open");
     });
     const heroEl = card.querySelector(".card-hero");
