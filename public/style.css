@@ -1447,7 +1447,7 @@ body {
   padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
   box-shadow: 0 -10px 40px rgba(0,0,0,.3);
   animation: ss-rise .28s cubic-bezier(.2,.8,.2,1);
-  max-height: 82vh; overflow-y: auto;
+  max-height: 92vh; max-height: 92dvh; overflow-y: auto;
 }
 @keyframes ss-rise { from { transform: translateY(100%); } to { transform: none; } }
 .ss-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 2px 4px; }
