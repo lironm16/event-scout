@@ -1936,3 +1936,7 @@ body { padding-bottom: env(safe-area-inset-bottom); } /* tabbar removed — prof
   background: transparent; border: 1px dashed color-mix(in srgb, var(--link) 45%, transparent);
   border-radius: 10px; cursor: pointer;
 }
+
+/* Full-screen "all occurrences" view title (next to ← חזרה). */
+.series-modal-title { font-weight: 600; font-size: 1rem; margin-inline-start: 10px; color: var(--text); }
+#seriesModal .event-modal-body { padding: 12px; }
