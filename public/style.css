@@ -1943,3 +1943,14 @@ body { padding-bottom: env(safe-area-inset-bottom); } /* tabbar removed — prof
 /* Full-screen "all occurrences" view title (next to ← חזרה). */
 .series-modal-title { font-weight: 600; font-size: 1rem; margin-inline-start: 10px; color: var(--text); }
 #seriesModal .event-modal-body { padding: 12px; }
+
+/* ⭐ save + 📅 calendar — compact icon buttons in the card CTA row. */
+.btn-icon {
+  flex: 0 0 auto; width: 44px; padding: 0; font-size: 1.15rem; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cta-save { background: var(--bg2); border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent); }
+.cta-save.on { background: color-mix(in srgb, #f6c945 22%, transparent); border-color: #f6c945; }
+.cta-cal  { background: var(--bg2); border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent); }
+/* Header ⭐ saved-only toggle active state. */
+#savedToggleBtn.active { background: color-mix(in srgb, #f6c945 25%, transparent); border-color: #f6c945; }

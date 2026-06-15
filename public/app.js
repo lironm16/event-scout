@@ -61,6 +61,44 @@
   let tagDrilldown = null;
   const interestedIds = new Set();
   const watchedIds = new Set();
+  // ── Saved (favorites) — persisted client-side in localStorage ──────────
+  const SAVED_KEY = "savedEventIds_v1";
+  let savedIds = new Set();
+  try { savedIds = new Set(JSON.parse(localStorage.getItem(SAVED_KEY) || "[]").map(Number)); } catch (_) {}
+  const isSaved = (id) => savedIds.has(Number(id));
+  function persistSaved() {
+    try { localStorage.setItem(SAVED_KEY, JSON.stringify([...savedIds])); } catch (_) {}
+  }
+  window.toggleSaved = function (id, btn) {
+    id = Number(id);
+    if (savedIds.has(id)) { savedIds.delete(id); if (btn) { btn.classList.remove("on"); btn.textContent = "☆"; } }
+    else { savedIds.add(id); if (btn) { btn.classList.add("on"); btn.textContent = "⭐"; } }
+    persistSaved();
+    tg?.HapticFeedback?.impactOccurred?.("light");
+    // If we're in the saved-only view, a removed event should disappear now.
+    if (savedOnly) applyFilters();
+  };
+  let savedOnly = false; // saved-only view toggle
+  // Build a Google Calendar "add event" link from an event's date/time.
+  function gcalUrl(ev) {
+    const pad = (n) => String(n).padStart(2, "0");
+    const d = (ev.date || "").replace(/-/g, ""); // YYYYMMDD
+    const st = (ev.startTime || "09:00").slice(0, 5).replace(":", ""); // HHMM
+    let et = (ev.endTime || "").slice(0, 5).replace(":", "");
+    if (!et) { // no end → +2h from start
+      const h = (parseInt(st.slice(0, 2), 10) + 2) % 24;
+      et = pad(h) + st.slice(2);
+    }
+    const dates = `${d}T${st}00/${d}T${et}00`;
+    const p = new URLSearchParams({
+      action: "TEMPLATE",
+      text: ev.name || "אירוע",
+      dates,
+      details: ev.bookingUrl || ev.onlineUrl || "",
+      location: ev.location || "",
+    });
+    return `https://calendar.google.com/calendar/render?${p}`;
+  }
   let userHome = null; // { lat, lng, address } from the profile — distance/nav
   const eventsById = new Map(); // id → serialized event (for related lookups)
   let catalogScope = "me";      // "me" (בשבילי) | "all" (כללי)
@@ -480,6 +518,8 @@
       placeCoordSets.set(tok.value, set);
     }
     const visible = allEvents.filter((e) => {
+      // Saved-only view: show just the bookmarked events.
+      if (savedOnly && !isSaved(e.id)) return false;
       // "מחייב הרשמה" = has a dedicated registration page (external_url)
       // OR is an online event (zoom/meet) OR is a paid Smarticket event.
       // City page URLs (bookingUrl for rg-muni without external_url) are
@@ -1106,6 +1146,13 @@
       ctaRow.push(`<a class="btn btn-primary cta-main" href="${esc(ev.bookingUrl)}" target="_blank" rel="noopener">🔗 לאתר</a>`);
     } else if (ev.onlineUrl) {
       ctaRow.push(`<a class="btn btn-primary cta-main" href="${esc(ev.onlineUrl)}" target="_blank" rel="noopener">📹 הצטרפו למפגש</a>`);
+    }
+    // ⭐ save (favorite) — between the booking CTA and nav. Icon toggles filled.
+    const savedNow = isSaved(ev.id);
+    ctaRow.push(`<button class="btn btn-icon cta-save${savedNow ? " on" : ""}" title="שמירה" aria-label="שמירה" onclick="event.stopPropagation();window.toggleSaved(${ev.id},this)">${savedNow ? "⭐" : "☆"}</button>`);
+    // 📅 add to calendar — only when there's a concrete date (not a multi-date parent).
+    if (!isSeriesParent && ev.date) {
+      ctaRow.push(`<a class="btn btn-icon cta-cal" title="הוספה ליומן" aria-label="הוספה ליומן" href="${esc(gcalUrl(ev))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">📅</a>`);
     }
     if (navUrl) ctaRow.push(`<a class="btn btn-secondary cta-nav" href="${esc(navUrl)}" target="_blank" rel="noopener">🧭 ניווט</a>`);
     if (ctaRow.length) parts.push(`<div class="cta-row">${ctaRow.join("")}</div>`);
@@ -1979,6 +2026,32 @@
   filterToggleBtn?.addEventListener("click", openFilterSheet);
   filterSheetClose?.addEventListener("click", closeFilterSheet);
   filterSheetApply?.addEventListener("click", () => { closeFilterSheet(); loadEvents(); });
+
+  // ── Saved-only view toggle (⭐ in the header) ─────────────────────────
+  const savedToggleBtn = document.getElementById("savedToggleBtn");
+  savedToggleBtn?.addEventListener("click", async () => {
+    savedOnly = !savedOnly;
+    savedToggleBtn.classList.toggle("active", savedOnly);
+    resultsMeta && (resultsMeta.dataset.savedOnly = savedOnly ? "1" : "");
+    if (savedOnly) {
+      // Pull any saved events that aren't in the currently-loaded set (outside
+      // the active window/scope) so the saved view is COMPLETE, not just what's
+      // on screen.
+      const have = new Set(allEvents.map((e) => e.id));
+      const missing = [...savedIds].filter((id) => !have.has(id));
+      if (missing.length) {
+        try {
+          const fetched = await Promise.all(missing.map((id) =>
+            fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id, noseries: "1" })}`)
+              .then((r) => r.json()).then((j) => j.event).catch(() => null)));
+          const add = fetched.filter(Boolean).filter((e) => !have.has(e.id));
+          if (add.length) { allEvents = allEvents.concat(add); add.forEach((e) => eventsById.set(e.id, e)); }
+        } catch (_) { /* show whatever is loaded */ }
+      }
+    }
+    applyFilters();
+    window.scrollTo({ top: 0, behavior: "instant" });
+  });
   filterBackdrop?.addEventListener("click", closeFilterSheet);
   // "נקה הכל" — reset every filter; keep the sheet open so the user sees
   // the cleared state (results refresh underneath).
