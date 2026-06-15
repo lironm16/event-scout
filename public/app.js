@@ -378,7 +378,7 @@
   }
 
   // ── Sort ──────────────────────────────────────────────────────────────
-  let activeSort = "date-asc"; // date-asc | date-desc | name-asc
+  let activeSort = "date-asc"; // date-asc | date-desc | stock-asc | dist-asc
 
   const sortToggleBtn = document.getElementById("sortToggleBtn");
   const sortPanel     = document.getElementById("sortPanel");
@@ -415,8 +415,12 @@
     const arr = [...events];
     if (activeSort === "date-desc") {
       arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.startTime || "").localeCompare(a.startTime || ""));
-    } else if (activeSort === "name-asc") {
-      arr.sort((a, b) => (a.name || "").localeCompare(b.name || "", "he"));
+    } else if (activeSort === "stock-asc") {
+      // "אוזל בקרוב" — fewest tickets left first. Sold-out (≤0) and
+      // unknown/unlimited (null, e.g. free city events) sink to the bottom;
+      // ties break by soonest date.
+      const rank = (t) => (t == null || t <= 0) ? Infinity : t;
+      arr.sort((a, b) => rank(a.ticketsLeft) - rank(b.ticketsLeft) || (a.date || "").localeCompare(b.date || ""));
     } else if (activeSort === "dist-asc") {
       // Closest first; events with no known distance sink to the bottom.
       arr.sort((a, b) => {
