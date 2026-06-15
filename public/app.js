@@ -1507,6 +1507,9 @@
           const tk = seriesTicketText(o.ticketsLeft);
           if (tk) lines.push(tk);
           if (variedLoc && o.location) lines.push(`📍 ${esc(o.location)}`);
+          // When the series spans different venues, show each row's distance
+          // from home so the user can pick the closest session.
+          if (variedLoc && o.distanceLabel) lines.push(esc(o.distanceLabel));
           const metaHtml = lines.length
             ? `<span class="sr-meta">${lines.map((l) => `<span class="sr-line">${l}</span>`).join("")}</span>` : "";
           const descHtml = (variedDesc && o.description)
