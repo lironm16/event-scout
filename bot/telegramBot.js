@@ -4016,15 +4016,16 @@ async function renderNewsletterEventCards(botInstance, tg, events) {
       : "🆕 אירועים שיכולים לעניין אותך";
 
   const ctx = makeNewsletterCtx(botInstance, tg);
-  let introSent = false;
+  let introMsg = null;   // the sent lead-in message (so we can delete it if orphaned)
   let anySent = false;
   for (const event of cards) {
     try {
       const seriesOpts = await cardSendOptsForEvent(tg, event);
-      // Send the lead-in ONLY once we know a card will actually follow — never
-      // leave an orphan "🆕 אירוע חדש" with no event (the card send may fail).
-      if (!introSent) {
-        try { await botInstance.telegram.sendMessage(tg, rtlLine(intro)); introSent = true; }
+      // Send the lead-in just before the first card. If it turns out NO card
+      // ever sends (every send throws — e.g. a broken image), we DELETE the
+      // lead-in below so the user never sees an orphan "🆕 אירוע חדש".
+      if (!introMsg) {
+        try { introMsg = await botInstance.telegram.sendMessage(tg, rtlLine(intro)); }
         catch (e) { if (isUserBlockedError(e)) return; }
       }
       await sendEventCard(ctx, event, seriesOpts);
@@ -4036,8 +4037,13 @@ async function renderNewsletterEventCards(botInstance, tg, events) {
       );
     }
   }
+  // Orphan guard: a lead-in was sent but every card failed → remove the lead-in.
   if (!anySent) {
-    console.error(`[Newsletter] all ${cards.length} card(s) failed for user=${tg} — no intro sent`);
+    console.error(`[Newsletter] all ${cards.length} card(s) failed for user=${tg} — removing orphan lead-in`);
+    if (introMsg?.message_id) {
+      try { await botInstance.telegram.deleteMessage(tg, introMsg.message_id); }
+      catch (_) { /* best-effort: message too old / already gone */ }
+    }
   }
 }
 
