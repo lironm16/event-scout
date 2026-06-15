@@ -1532,9 +1532,31 @@
       btn.classList.toggle("open", !box.hidden); // caret reflects open/closed
       return;
     }
-    btn.disabled = true;
     btn.classList.add("open"); // list is opening → flip caret
     box.hidden = false;
+    // INSTANT: render from the occurrenceList already shipped with the catalog
+    // payload (windowed, capped) — no per-tap server scan. Only the full-series
+    // screen ("📅 כל המופעים בסדרה") fetches, and only on demand.
+    const ev = eventsById.get(eventId) || eventsById.get(Number(eventId)) || {};
+    const preloaded = Array.isArray(ev.occurrenceList) ? ev.occurrenceList : null;
+    if (preloaded) {
+      if (!preloaded.length) { box.innerHTML = `<div class="occ-empty">אין מופעים בטווח שבחרת.</div>`; }
+      else {
+        let html = occRowsHtml(preloaded, eventId);
+        const inWin = ev.totalOccurrences || preloaded.length;   // windowed count
+        const all = ev.seriesTotalAll || inWin;                   // whole series
+        if (inWin > preloaded.length) {
+          html += `<button class="occ-showall" onclick="window.openSeriesScreen(${eventId},'window')">📅 כל התוצאות בטווח (${inWin})</button>`;
+        } else if (all > inWin) {
+          html += `<button class="occ-showall" onclick="window.openSeriesScreen(${eventId},'all')">📅 כל המופעים בסדרה (${all})</button>`;
+        }
+        box.innerHTML = html;
+      }
+      box.dataset.loaded = "1";
+      return;
+    }
+    // Fallback (no preloaded list, e.g. deep-link) — fetch as before.
+    btn.disabled = true;
     box.innerHTML = `<div class="occ-loading"><span class="occ-spinner"></span></div>`;
     try {
       const data = await fetchOccurrences(eventId, { limit: String(INLINE_OCC_CAP) });
@@ -1544,15 +1566,8 @@
         let html = occRowsHtml(list, eventId);
         const inWin = data.totalInWindow || list.length;
         const all = data.totalAll || inWin;
-        if (inWin > list.length) {
-          // More results match the SEARCH than fit inline → open the full
-          // windowed set (what the user actually searched) in a screen.
-          html += `<button class="occ-showall" onclick="window.openSeriesScreen(${eventId},'window')">📅 כל התוצאות בטווח (${inWin})</button>`;
-        } else if (all > inWin) {
-          // Everything in the window already shown inline, but the series
-          // continues beyond it → offer the whole series.
-          html += `<button class="occ-showall" onclick="window.openSeriesScreen(${eventId},'all')">📅 כל המופעים בסדרה (${all})</button>`;
-        }
+        if (inWin > list.length) html += `<button class="occ-showall" onclick="window.openSeriesScreen(${eventId},'window')">📅 כל התוצאות בטווח (${inWin})</button>`;
+        else if (all > inWin) html += `<button class="occ-showall" onclick="window.openSeriesScreen(${eventId},'all')">📅 כל המופעים בסדרה (${all})</button>`;
         box.innerHTML = html;
       }
       box.dataset.loaded = "1";
