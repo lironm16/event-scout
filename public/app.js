@@ -1988,6 +1988,14 @@
       window.openEventModal(tok.openId, null, { hideOccurrences: true });
       return;
     }
+    // "name" tokens (a specific event) are mutually exclusive — two different
+    // event names AND-ed together can never match one event (→ zero results).
+    // So picking a new event name REPLACES the previous one instead of stacking.
+    if (tok.type === "name") {
+      for (let i = searchTokens.length - 1; i >= 0; i--) {
+        if (searchTokens[i].type === "name") searchTokens.splice(i, 1);
+      }
+    }
     searchTokens.push(tok);
     searchInput.value = "";
     searchSuggest.hidden = true;
