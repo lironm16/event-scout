@@ -74,17 +74,23 @@
   async function syncSavedFromServer() {
     try {
       if (!INIT_DATA) INIT_DATA = await ensureInitData();
-      const localOnly = [...savedIds];
       const res = await fetch(`${API_PREFIX}/saved?${new URLSearchParams({ initData: INIT_DATA })}`);
       const serverIds = (await res.json()).ids || [];
-      const merged = new Set(serverIds.map(Number));
-      const toPush = localOnly.filter((id) => !merged.has(id));
-      localOnly.forEach((id) => merged.add(id));
-      savedIds = merged;
-      persistSaved();
-      if (toPush.length) {
-        fetch(`${API_PREFIX}/saved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventIds: toPush }) }).catch(() => {});
+      const migrated = (() => { try { return localStorage.getItem("saved_migrated_v1") === "1"; } catch { return false; } })();
+      if (!migrated) {
+        // FIRST run only: push any local-only bookmarks up, then mark migrated.
+        const localOnly = [...savedIds].filter((id) => !serverIds.includes(id));
+        if (localOnly.length) {
+          await fetch(`${API_PREFIX}/saved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventIds: localOnly }) }).catch(() => {});
+        }
+        savedIds = new Set([...serverIds.map(Number), ...localOnly.map(Number)]);
+        try { localStorage.setItem("saved_migrated_v1", "1"); } catch (_) {}
+      } else {
+        // After migration the SERVER is authoritative — REPLACE (don't union),
+        // so an un-save sticks instead of being re-added by a merge every load.
+        savedIds = new Set(serverIds.map(Number));
       }
+      persistSaved();
       // Reflect any newly-known saved state on already-rendered cards.
       document.querySelectorAll(".cta-save").forEach((b) => {
         const card = b.closest(".event-card"); const id = card && Number(card.dataset.id);
