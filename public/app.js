@@ -139,11 +139,14 @@
       et = pad(h) + st.slice(2);
     }
     const dates = `${d}T${st}00/${d}T${et}00`;
+    // details = the event description + a link (booking/online) underneath.
+    const link = ev.bookingUrl || ev.onlineUrl || "";
+    const details = [ev.description, link].filter(Boolean).join("\n\n");
     const p = new URLSearchParams({
       action: "TEMPLATE",
       text: ev.name || "אירוע",
       dates,
-      details: ev.bookingUrl || ev.onlineUrl || "",
+      details,
       location: ev.location || "",
     });
     return `https://calendar.google.com/calendar/render?${p}`;
