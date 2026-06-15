@@ -477,7 +477,7 @@
         const ok = searchTokens.every((tok) => {
           if (tok.type === "tag") return (e.tags || []).includes(tok.value);
           if (tok.type === "place") return (e.location || "").includes(tok.value);
-          if (tok.type === "program") return (e.umbrella_title || "").includes(tok.value);
+          if (tok.type === "program") return tok.slug ? (e.umbrella_slug === tok.slug) : (e.umbrella_title || "").includes(tok.value);
           return (e.name || "").includes(tok.value); // name
         });
         if (!ok) return false;
@@ -1542,18 +1542,26 @@
   // server (incl. ones not in the current results) and merges them in, so
   // "opening the parent" shows everything, not just what was already loaded.
   window.filterUmbrella = async function (slug, title) {
-    umbrellaReturnScroll = window.scrollY;
-    umbrellaDrilldown = { slug, title };
+    // Unified with tags & the search box: tapping the umbrella ("📋 …") adds it
+    // as a removable PROGRAM token in the top filter bar (carrying the slug for
+    // precise matching) — no separate drill-down view / back bar.
+    if (!slug) return;
+    if (!searchTokens.some((t) => t.type === "program" && t.slug === slug)) {
+      searchTokens.push({ type: "program", value: title, slug });
+    }
     document.querySelectorAll(".event-card.open").forEach((c) => c.classList.remove("open"));
     applyFilters(); // show whatever we already have immediately
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
     try {
+      // Pull the FULL programme (incl. children not in the current results) so
+      // the filter shows everything, not just what was already loaded.
       const res = await fetch(`${API_PREFIX}/umbrella?${new URLSearchParams({ initData: INIT_DATA, slug })}`);
       const fetched = (await res.json()).events || [];
       const known = new Set(allEvents.map((e) => e.id));
       const added = fetched.filter((e) => !known.has(e.id));
       if (added.length) {
         allEvents = allEvents.concat(added);
-        if (umbrellaDrilldown && umbrellaDrilldown.slug === slug) applyFilters();
+        if (searchTokens.some((t) => t.type === "program" && t.slug === slug)) applyFilters();
       }
     } catch (_) { /* keep client-side subset */ }
   };
