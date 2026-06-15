@@ -4035,6 +4035,15 @@ async function renderNewsletterEventCards(botInstance, tg, events) {
       console.error(
         `[Newsletter] card failed event=${event?.id} user=${tg}: ${err.message}`,
       );
+      // Alert the operator so a failed delivery is never silent — the user
+      // would otherwise just not receive an event they should have.
+      alertAdmin({
+        severity: "error",
+        code: "newsletter_card_failed",
+        message: err?.message || String(err),
+        error: err instanceof Error ? err : null,
+        context: { eventId: event?.id, eventName: event?.name, user: tg },
+      }).catch(() => {});
     }
   }
   // Orphan guard: a lead-in was sent but every card failed → remove the lead-in.
@@ -4044,6 +4053,12 @@ async function renderNewsletterEventCards(botInstance, tg, events) {
       try { await botInstance.telegram.deleteMessage(tg, introMsg.message_id); }
       catch (_) { /* best-effort: message too old / already gone */ }
     }
+    alertAdmin({
+      severity: "error",
+      code: "newsletter_all_cards_failed",
+      message: `כל ${cards.length} הכרטיסים נכשלו — לא נשלח אירוע`,
+      context: { user: tg, eventIds: cards.map((c) => c?.id).join(",") },
+    }).catch(() => {});
   }
 }
 
