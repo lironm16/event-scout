@@ -236,6 +236,26 @@
       const y = _pendingScrollY; _pendingScrollY = null;
       requestAnimationFrame(() => window.scrollTo({ top: y, behavior: "instant" }));
     }
+    // Stash the payload so returning from the (separate-page) profile WITHOUT
+    // any change can re-render instantly — no needless refetch. Size-guarded;
+    // the profile sets `catalog_dirty` when something actually changed.
+    try {
+      const snap = JSON.stringify({ sig: filterSig(), scope: !!serverSearch.ignore_profile, body });
+      if (snap.length < 3_000_000) sessionStorage.setItem(CATALOG_EVENTS_KEY, snap);
+    } catch (_) { /* quota / serialization — just refetch next time */ }
+  }
+  const CATALOG_EVENTS_KEY = "catalogEvents_v1";
+  // Re-render from the cached payload if it matches the (restored) filters +
+  // scope — used on profile-return when nothing changed. Returns true on hit.
+  function tryRestoreCachedEvents() {
+    try {
+      const raw = sessionStorage.getItem(CATALOG_EVENTS_KEY);
+      if (!raw) return false;
+      const snap = JSON.parse(raw);
+      if (snap.sig !== filterSig() || snap.scope !== !!serverSearch.ignore_profile) return false;
+      applyBody(snap.body);
+      return true;
+    } catch (_) { return false; }
   }
   // Fetch a specific scope (ignore_profile on/off) without disturbing state.
   async function fetchScope(ignoreProfile, extra) {
@@ -1087,7 +1107,15 @@
     const parentDesc = (isSeriesParent && ev.umbrellaDescription) ? ev.umbrellaDescription : null;
     const descText = parentDesc || ev.description;
     const hideParentDesc = isSeriesParent && !parentDesc && ev.seriesMultiDesc;
-    if (descText && !hideParentDesc) {
+    // Opened a specific occurrence from a series? If its description is the SAME
+    // as the parent card we came from, don't repeat it — the user just read it.
+    let hideDupOfParent = false;
+    if (opts.hideOccurrences && opts.parentId != null && descText) {
+      const parent = eventsById.get(opts.parentId) || eventsById.get(Number(opts.parentId));
+      const parentEff = parent ? (parent.umbrellaDescription || parent.description) : null;
+      if (parentEff && parentEff.trim() === descText.trim()) hideDupOfParent = true;
+    }
+    if (descText && !hideParentDesc && !hideDupOfParent) {
       const descHtml = linkifyPhones(esc(descText).replace(/\n/g, "<br>"));
       const isLong = descText.length > 140;
       parts.push(`<div class="desc-wrap">
@@ -1430,6 +1458,7 @@
       // Refresh so the new filters take effect across the list. Suppress
       // changed the profile → invalidate the scope cache so it refetches.
       scopeCache = { sig: "", me: null, all: null };
+      try { sessionStorage.setItem("catalog_dirty", "1"); } catch (_) {} // a later reload must refetch too
       setTimeout(() => loadEvents(), 400);
     };
   };
@@ -2195,7 +2224,17 @@
     // catalog (single, reusable "← חזרה" popup) — NOT a separate window. A new
     // event just swaps the same popup.
     restoreCatalogState(); // returning from profile → restore filters + scroll
-    loadEvents();
+    // Returning from the profile: refetch ONLY if the profile actually changed
+    // (it sets `catalog_dirty`); otherwise re-render the cached payload instantly
+    // so an aimless profile visit doesn't pointlessly reload the whole list.
+    let _dirty = false;
+    try { _dirty = sessionStorage.getItem("catalog_dirty") === "1"; } catch (_) {}
+    if (_dirty) {
+      try { sessionStorage.removeItem("catalog_dirty"); } catch (_) {}
+      loadEvents();
+    } else if (!tryRestoreCachedEvents()) {
+      loadEvents();
+    }
     const _evId = requestedEventId();
     if (_evId) window.openEventModal(_evId);
     // Telegram reuses the open Mini App when a new event deep-link is tapped;

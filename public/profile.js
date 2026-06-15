@@ -608,6 +608,9 @@
       applyPayload(updated);
       render();
       refreshDirty();
+      // Tell the catalog its results are now stale (profile changed) so it
+      // refetches on return instead of re-rendering its cached payload.
+      try { sessionStorage.setItem("catalog_dirty", "1"); } catch (_) {}
       toast("✅ נשמר");
       tg?.HapticFeedback?.notificationOccurred?.("success");
     } catch (err) {
