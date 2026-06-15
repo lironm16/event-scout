@@ -1927,3 +1927,12 @@ body { padding-bottom: env(safe-area-inset-bottom); } /* tabbar removed — prof
    collapsed (RTL → left), rotates DOWN when the list is open. */
 .series-caret { display: inline-block; transition: transform .18s ease; transform: rotate(90deg); }
 .series-btn.open .series-caret { transform: rotate(0deg); }
+
+/* "כל המופעים בסדרה" — footer escape hatch when the occurrence list was
+   scoped to the search date window. */
+.occ-showall {
+  display: block; width: 100%; margin-top: 8px; padding: 10px;
+  font: inherit; font-size: .9rem; color: var(--link);
+  background: transparent; border: 1px dashed color-mix(in srgb, var(--link) 45%, transparent);
+  border-radius: 10px; cursor: pointer;
+}

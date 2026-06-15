@@ -1463,6 +1463,63 @@
 
   // 📅 "עוד X מהסדרה" → a compact date list. Each row opens that date as a
   // popup (no nested inline expansion).
+  // The date window the occurrence list should mirror — the SAME one the
+  // search used, so the series list matches the card's range + count.
+  function occWindowParams() {
+    if (customRange) return { dateFrom: customRange.from, dateTo: customRange.to };
+    if (serverSearch.date_preset && serverSearch.date_preset !== "upcoming") {
+      return { date_preset: serverSearch.date_preset };
+    }
+    return {}; // default browse → whole upcoming series
+  }
+  // Render the occurrence rows (+ optional "show all" footer) into `box`.
+  function paintOccList(box, eventId, data) {
+    const list = data.occurrences || [];
+    const varied = new Set(list.map((o) => o.name)).size > 1;
+    const variedLoc = new Set(list.map((o) => o.location || "")).size > 1;
+    const variedDesc = new Set(list.map((o) => (o.description || "").trim())).size > 1;
+    if (!list.length) { box.innerHTML = `<div class="occ-empty">אין מופעים בטווח שבחרת.</div>`; }
+    else {
+      let html = "", lastDate = null;
+      for (const o of list) {
+        if ((o.dateHe || "") !== lastDate) {
+          lastDate = o.dateHe || "";
+          html += `<div class="occ-date-header">🗓️ ${esc(lastDate)}</div>`;
+        }
+        const rawTime = (o.timeHe || "").trim();
+        const lines = [];
+        let top;
+        if (varied) {
+          top = `<span class="sr-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>`;
+          if (rawTime) lines.push(`<span class="sr-nowrap">🕒 ${esc(rawTime)}</span>`);
+        } else {
+          top = rawTime ? `<span class="sr-when">🕒 ${esc(rawTime)}</span>` : `<span class="sr-when">${esc(o.dateHe || "")}</span>`;
+        }
+        const tk = seriesTicketText(o.ticketsLeft);
+        if (tk) lines.push(tk);
+        if (variedLoc && o.location) lines.push(`📍 ${esc(o.location)}`);
+        if (variedLoc && o.distanceLabel) lines.push(esc(o.distanceLabel));
+        const metaHtml = lines.length ? `<span class="sr-meta">${lines.map((l) => `<span class="sr-line">${l}</span>`).join("")}</span>` : "";
+        const descHtml = (variedDesc && o.description) ? `<span class="sr-desc">${esc(o.description)}</span>` : "";
+        html += `<button class="series-row${o.forMe ? " forme" : ""}" onclick="window.openEventModal(${o.id},null,{hideOccurrences:true,parentId:${eventId}})"${o.forMe ? ' title="בשבילך"' : ""}>
+          <span class="sr-body"><span class="sr-top">${top}</span>${metaHtml}${descHtml}</span>
+          <span class="sr-go">›</span>
+        </button>`;
+      }
+      // The list was scoped to the search window → offer the full series.
+      if (data.windowed && data.totalAll) {
+        html += `<button class="occ-showall" onclick="window.showAllSeries(this,${eventId})">📅 כל המופעים בסדרה (${data.totalAll})</button>`;
+      }
+      box.innerHTML = html;
+    }
+    box.dataset.loaded = "1";
+    box.hidden = false;
+  }
+  async function fetchOccurrences(eventId, extra) {
+    const qs = new URLSearchParams({ initData: INIT_DATA, id: eventId, ...occWindowParams(), ...(extra || {}) });
+    const res = await fetch(`${API_PREFIX}/occurrences?${qs}`);
+    return res.json();
+  }
   window.showSeries = async function (btn, eventId) {
     const box = btn.closest(".card-detail")?.querySelector(".occ-list");
     if (!box) return;
@@ -1473,69 +1530,24 @@
     }
     btn.disabled = true;
     btn.classList.add("open"); // list is opening → flip caret
-    // Show a spinner until the occurrences arrive.
     box.hidden = false;
     box.innerHTML = `<div class="occ-loading"><span class="occ-spinner"></span></div>`;
     try {
-      const res = await fetch(`${API_PREFIX}/occurrences?${new URLSearchParams({ initData: INIT_DATA, id: eventId })}`);
-      const list = (await res.json()).occurrences || [];
-      // Show titles only when the items are DIFFERENT events (umbrella program);
-      // for a same-name series the title is redundant → keep rows minimal.
-      const varied = new Set(list.map((o) => o.name)).size > 1;
-      // Show the venue per row only when occurrences span DIFFERENT places.
-      const variedLoc = new Set(list.map((o) => o.location || "")).size > 1;
-      // Show a short description per row only when the children's descriptions
-      // actually DIFFER (an umbrella of distinct events) — for a same-name
-      // series the description is identical, so it'd be noise.
-      const variedDesc = new Set(list.map((o) => (o.description || "").trim())).size > 1;
-      if (!list.length) { box.innerHTML = `<div class="occ-empty">אין עוד מופעים.</div>`; }
-      else {
-        // Group occurrences under a shared date header (like the main list) so
-        // the date is pulled OUT of every individual row.
-        let html = "", lastDate = null;
-        for (const o of list) {
-          if ((o.dateHe || "") !== lastDate) {
-            lastDate = o.dateHe || "";
-            html += `<div class="occ-date-header">🗓️ ${esc(lastDate)}</div>`;
-          }
-          const rawTime = (o.timeHe || "").trim();
-          const lines = [];
-          let top;
-          if (varied) { // umbrella program — the event name is primary
-            top = `<span class="sr-title">${esc(o.icon || "📌")} ${esc(o.name || "")}</span>`;
-            if (rawTime) lines.push(`<span class="sr-nowrap">🕒 ${esc(rawTime)}</span>`);
-          } else {       // same-name series — the time (date is in the header)
-            top = rawTime
-              ? `<span class="sr-when">🕒 ${esc(rawTime)}</span>`
-              : `<span class="sr-when">${esc(o.dateHe || "")}</span>`;
-          }
-          const tk = seriesTicketText(o.ticketsLeft);
-          if (tk) lines.push(tk);
-          if (variedLoc && o.location) lines.push(`📍 ${esc(o.location)}`);
-          // When the series spans different venues, show each row's distance
-          // from home so the user can pick the closest session.
-          if (variedLoc && o.distanceLabel) lines.push(esc(o.distanceLabel));
-          const metaHtml = lines.length
-            ? `<span class="sr-meta">${lines.map((l) => `<span class="sr-line">${l}</span>`).join("")}</span>` : "";
-          const descHtml = (variedDesc && o.description)
-            ? `<span class="sr-desc">${esc(o.description)}</span>` : "";
-          html += `<button class="series-row${o.forMe ? " forme" : ""}" onclick="window.openEventModal(${o.id},null,{hideOccurrences:true,parentId:${eventId}})"${o.forMe ? ' title="בשבילך"' : ""}>
-            <span class="sr-body">
-              <span class="sr-top">${top}</span>
-              ${metaHtml}
-              ${descHtml}
-            </span>
-            <span class="sr-go">›</span>
-          </button>`;
-        }
-        box.innerHTML = html;
-      }
-      box.dataset.loaded = "1";
-      box.hidden = false;
+      paintOccList(box, eventId, await fetchOccurrences(eventId));
     } catch (_) {
       box.innerHTML = `<div class="occ-empty">שגיאה בטעינת התאריכים.</div>`;
       box.hidden = false;
     } finally { btn.disabled = false; }
+  };
+  // "📅 כל המופעים בסדרה" — re-fetch the WHOLE series (bypass the window).
+  window.showAllSeries = async function (btn, eventId) {
+    const box = btn.closest(".occ-list");
+    if (!box) return;
+    btn.disabled = true;
+    btn.textContent = "טוען…";
+    try {
+      paintOccList(box, eventId, await fetchOccurrences(eventId, { all: "1" }));
+    } catch (_) { btn.textContent = "📅 כל המופעים בסדרה"; btn.disabled = false; }
   };
 
   // umbrella / tag drill-down state.
