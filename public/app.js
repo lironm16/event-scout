@@ -1097,9 +1097,10 @@
     //    same-name series AND an umbrella program (rows show titles when the
     //    items differ). Grouped by the same seriesKey the count uses.
     if (!opts.hideOccurrences && (ev.totalOccurrences || 1) > 1) {
-      const word = ev.umbrella_slug ? "בתוכנית" : "מופעים";
-      // Show ALL occurrences (the list includes the representative now).
-      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">🔁 כל ה־${ev.totalOccurrences} ${word} <span class="series-caret">▾</span></button>`);
+      // Generic label — no number, since the inline peek caps at INLINE_OCC_CAP
+      // and the full series opens in its own screen. "כל ה־N" was misleading.
+      const label = ev.umbrella_slug ? "האירועים בתוכנית" : "מופעי הסדרה";
+      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">🔁 ${label} <span class="series-caret">▾</span></button>`);
       parts.push(`<div class="occ-list"></div>`);
     }
 
