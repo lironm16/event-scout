@@ -1418,10 +1418,8 @@
 
     const ssReport = ov.querySelector(".ss-report");
     if (ssReport) ssReport.onclick = () => { close(); window.openReportSheet(eventId); };
-    ov.querySelector(".ss-apply").onclick = async () => {
+    ov.querySelector(".ss-apply").onclick = () => {
       const sel = [...body.querySelectorAll(".ss-chip.sel")];
-      const applyBtn = ov.querySelector(".ss-apply");
-      applyBtn.disabled = true; applyBtn.textContent = "מחיל…";
       const tagsToHide = sel.filter((c) => c.dataset.kind === "tag").map((c) => c.dataset.val);
       const patch = {};
       if (tagsToHide.length) patch.add_suppressed_labels = tagsToHide;
@@ -1445,21 +1443,15 @@
       }
       // Always log a hide for this event (covers "just this one" + any choice).
       jobs.push(fetch(`${API_PREFIX}/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventId, reason: "not_interested" }) }));
-      try {
-        await Promise.allSettled(jobs);
-      } finally {
-        // Always restore the button, even if close()/fade throws — otherwise it
-        // sticks on "מחיל…".
-        applyBtn.disabled = false; applyBtn.textContent = "החל סינון";
-      }
+      // Close IMMEDIATELY (optimistic) — don't wait for the network, or a slow
+      // request leaves the sheet stuck open on "מחיל…". The writes run in the
+      // background; the list refreshes once they settle.
       tg?.HapticFeedback?.notificationOccurred?.("success");
       close();
       fadeOutCard(eventId);
-      // Refresh so the new filters take effect across the list. Suppress
-      // changed the profile → invalidate the scope cache so it refetches.
       scopeCache = { sig: "", me: null, all: null };
       try { sessionStorage.setItem("catalog_dirty", "1"); } catch (_) {} // a later reload must refetch too
-      setTimeout(() => loadEvents(), 400);
+      Promise.allSettled(jobs).then(() => setTimeout(() => loadEvents(), 200));
     };
   };
 
