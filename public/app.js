@@ -1959,7 +1959,11 @@
       if (e.location && !isCityWide(e.location)) add("place", e.location);
       // Collapsed series/umbrella parent — also suggest each individual
       // occurrence by name so it's reachable (and opens THAT event directly).
-      (e.occurrenceList || []).forEach((o) => { if (o.name && o.id) add("name", o.name, o.id); });
+      // Suggest an individual occurrence by name ONLY when its name DIFFERS
+      // from the parent rep — i.e. an umbrella of distinct events (each garden
+      // of "קיץ של בלונים"). For a same-name recurring series the rep's own
+      // name token already covers it, so we'd otherwise show N identical rows.
+      (e.occurrenceList || []).forEach((o) => { if (o.name && o.id && o.name !== e.name) add("name", o.name, o.id); });
     }
     // tags + places first (they group many events), then names; cap the list.
     out.sort((a, b) => (a.type === "name") - (b.type === "name"));
