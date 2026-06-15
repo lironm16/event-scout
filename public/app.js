@@ -66,15 +66,41 @@
   let savedIds = new Set();
   try { savedIds = new Set(JSON.parse(localStorage.getItem(SAVED_KEY) || "[]").map(Number)); } catch (_) {}
   const isSaved = (id) => savedIds.has(Number(id));
-  function persistSaved() {
+  function persistSaved() { // localStorage = offline cache; server is the source of truth
     try { localStorage.setItem(SAVED_KEY, JSON.stringify([...savedIds])); } catch (_) {}
+  }
+  // Pull the server's saved set (sql/087) and one-time merge anything that was
+  // only in localStorage, so existing local bookmarks aren't lost.
+  async function syncSavedFromServer() {
+    try {
+      if (!INIT_DATA) INIT_DATA = await ensureInitData();
+      const localOnly = [...savedIds];
+      const res = await fetch(`${API_PREFIX}/saved?${new URLSearchParams({ initData: INIT_DATA })}`);
+      const serverIds = (await res.json()).ids || [];
+      const merged = new Set(serverIds.map(Number));
+      const toPush = localOnly.filter((id) => !merged.has(id));
+      localOnly.forEach((id) => merged.add(id));
+      savedIds = merged;
+      persistSaved();
+      if (toPush.length) {
+        fetch(`${API_PREFIX}/saved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventIds: toPush }) }).catch(() => {});
+      }
+      // Reflect any newly-known saved state on already-rendered cards.
+      document.querySelectorAll(".cta-save").forEach((b) => {
+        const card = b.closest(".event-card"); const id = card && Number(card.dataset.id);
+        if (id != null) { const on = savedIds.has(id); b.classList.toggle("on", on); b.textContent = on ? "⭐" : "☆"; }
+      });
+    } catch (_) { /* offline → keep the localStorage set */ }
   }
   window.toggleSaved = function (id, btn) {
     id = Number(id);
-    if (savedIds.has(id)) { savedIds.delete(id); if (btn) { btn.classList.remove("on"); btn.textContent = "☆"; } }
-    else { savedIds.add(id); if (btn) { btn.classList.add("on"); btn.textContent = "⭐"; } }
+    const nowSaved = !savedIds.has(id);
+    if (nowSaved) savedIds.add(id); else savedIds.delete(id);
+    if (btn) { btn.classList.toggle("on", nowSaved); btn.textContent = nowSaved ? "⭐" : "☆"; }
     persistSaved();
     tg?.HapticFeedback?.impactOccurred?.("light");
+    // Persist to the server (sync across devices); localStorage already updated.
+    fetch(`${API_PREFIX}/saved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventId: id, saved: nowSaved }) }).catch(() => {});
     // If we're in the saved-only view, a removed event should disappear now.
     if (savedOnly) applyFilters();
   };
@@ -2335,6 +2361,7 @@
     } else if (!tryRestoreCachedEvents()) {
       loadEvents();
     }
+    syncSavedFromServer(); // pull server bookmarks + merge any local-only ones
     const _evId = requestedEventId();
     if (_evId) window.openEventModal(_evId);
     // Telegram reuses the open Mini App when a new event deep-link is tapped;
