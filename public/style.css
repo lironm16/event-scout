@@ -1944,16 +1944,16 @@ body { padding-bottom: env(safe-area-inset-bottom); } /* tabbar removed — prof
 .series-modal-title { font-weight: 600; font-size: 1rem; margin-inline-start: 10px; color: var(--text); }
 #seriesModal .event-modal-body { padding: 12px; }
 
-/* ⭐ save + 📅 calendar — compact icon buttons in the card CTA row. */
-.btn-icon {
-  flex: 0 0 auto; width: 44px; padding: 0; font-size: 1.15rem; line-height: 1;
+/* ⭐ save + 📅 calendar — compact icon buttons in the card CTA row. Match the
+   ניווט (.btn-secondary) pill so the whole row reads as one set. */
+.cta-row .btn-icon {
+  flex: 0 0 auto; width: 46px; padding: 0; margin-top: 0; font-size: 1.15rem; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--hint) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hint) 22%, transparent);
 }
-.cta-save { background: var(--bg2); border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent); }
-.cta-save.on { background: color-mix(in srgb, #f6c945 22%, transparent); border-color: #f6c945; }
-.cta-cal  { background: var(--bg2); border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent); }
-/* Header ⭐ saved-only toggle active state. */
-#savedToggleBtn.active { background: color-mix(in srgb, #f6c945 25%, transparent); border-color: #f6c945; }
+/* Saved "on" = subtle gold ring, not a heavy gold fill (the ⭐ glyph reads gold). */
+.cta-save.on { border-color: #f6c945; background: color-mix(in srgb, #f6c945 12%, transparent); }
 
 /* Saved page header title. */
 .saved-title { font-weight: 700; font-size: .95rem; white-space: nowrap; align-self: center; margin-inline: 4px; color: var(--text); }
