@@ -2000,6 +2000,7 @@
     const needle = q.trim().toLowerCase();
     if (!needle) return [];
     const seen = new Set();      // dedupe by type+value
+    const seenPlaceCoords = new Set(); // dedupe places by REAL venue (coords)
     const out = [];
     const add = (type, value, openId) => {
       if (!value) return;
@@ -2017,7 +2018,16 @@
       add("name", e.name);
       add("program", e.umbrella_title); // parent/umbrella programme title (e.g. "קיץ של בלונים")
       (e.tags || []).forEach((t) => add("tag", t));
-      if (e.location && !isCityWide(e.location)) add("place", e.location);
+      // One physical venue has several address-text variants — suggest each
+      // REAL place once (dedupe by rounded coords among places matching the
+      // query) so the user isn't offered 3 near-identical rows for one building.
+      if (e.location && !isCityWide(e.location) && e.location.toLowerCase().includes(needle)) {
+        const ck = venueCoordKey(e);
+        if (!ck || !seenPlaceCoords.has(ck)) {
+          if (ck) seenPlaceCoords.add(ck);
+          add("place", e.location);
+        }
+      }
       // Collapsed series/umbrella parent — also suggest each individual
       // occurrence by name so it's reachable (and opens THAT event directly).
       // Suggest an individual occurrence by name ONLY when its name DIFFERS
