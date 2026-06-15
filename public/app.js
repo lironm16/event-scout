@@ -406,6 +406,9 @@
   window.addEventListener("pagehide", saveCatalogState);
 
   async function loadEvents(extra) {
+    // On the saved page every "refresh" (filter apply, suppress, clear, chip
+    // toggle) must re-render the SAVED set — not run a catalog search.
+    if (SAVED_MODE) return loadSavedPage();
     INIT_DATA = await ensureInitData();
     if (!INIT_DATA) {
       showError(catalogAuthErrorMessage());
