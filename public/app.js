@@ -459,9 +459,26 @@
   }
 
   // ── Filter ────────────────────────────────────────────────────────────
+  // Rounded-coords identity of an event's venue (~1m) — used to group all
+  // address-text variants of the same physical place.
+  function venueCoordKey(e) {
+    const lat = e._lat, lng = e._lng;
+    return (lat != null && lng != null) ? `${(+lat).toFixed(5)},${(+lng).toFixed(5)}` : null;
+  }
   function applyFilters() {
     // Date filtering is now done SERVER-side (serverSearch.date_preset);
     // here we only do light client refinement on the returned set.
+    // Precompute, per active PLACE token, the set of venue coord-keys that
+    // share its address text — so the filter matches the whole real venue.
+    const placeCoordSets = new Map();
+    for (const tok of searchTokens) {
+      if (tok.type !== "place" || placeCoordSets.has(tok.value)) continue;
+      const set = new Set();
+      for (const x of allEvents) {
+        if ((x.location || "") === tok.value) { const k = venueCoordKey(x); if (k) set.add(k); }
+      }
+      placeCoordSets.set(tok.value, set);
+    }
     const visible = allEvents.filter((e) => {
       // "מחייב הרשמה" = has a dedicated registration page (external_url)
       // OR is an online event (zoom/meet) OR is a paid Smarticket event.
@@ -499,7 +516,15 @@
       if (searchTokens.length) {
         const ok = searchTokens.every((tok) => {
           if (tok.type === "tag") return (e.tags || []).includes(tok.value);
-          if (tok.type === "place") return (e.location || "").includes(tok.value);
+          if (tok.type === "place") {
+            // Match by REAL venue (rounded coords), not exact address text —
+            // so all address variants of the same place are included (one venue
+            // often has 3-5 slightly different location_key strings).
+            const set = placeCoordSets.get(tok.value);
+            const ec = venueCoordKey(e);
+            if (set && set.size && ec) return set.has(ec);
+            return (e.location || "").includes(tok.value); // fallback (no coords)
+          }
           if (tok.type === "program") return tok.slug ? (e.umbrella_slug === tok.slug) : (e.umbrella_title || "").includes(tok.value);
           return (e.name || "").includes(tok.value); // name
         });
