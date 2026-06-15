@@ -83,7 +83,9 @@
   let lastWindowLabel = null;
   let lastCanExtend = false;
   let lastExtensionHint = null;
-  const DATE_PRESET_MAP = { all: "upcoming", today: "today", tomorrow: "tomorrow", weekend: "this_week", week: "this_week", month: "this_month" };
+  const DATE_PRESET_MAP = { all: "upcoming", today: "today", tomorrow: "tomorrow", week: "this_week", month: "this_month" };
+  // Custom date range chosen via the "📅 טווח" popover — { from, to } ISO, or null.
+  let customRange = null;
 
   // ── DOM ──────────────────────────────────────────────────────────────
   const spinner     = document.getElementById("spinner");
@@ -177,6 +179,13 @@
     if (serverSearch.available_only) p.set("available_only", "1");
     if (serverSearch.unseen_only) p.set("unseen_only", "1");
     if (serverSearch.ignore_profile) p.set("ignore_profile", "1");
+    // Custom date window (weekend / "📅 טווח") — applied when no server preset is
+    // active. Baked into the query (not passed ad-hoc) so it survives the
+    // scope-toggle cache and profile-navigation restore.
+    if (!serverSearch.date_preset && customRange) {
+      p.set("dateFrom", customRange.from);
+      p.set("dateTo", customRange.to);
+    }
     if (extra) for (const [k, v] of Object.entries(extra)) p.set(k, v);
     return p;
   }
@@ -189,6 +198,7 @@
       d: serverSearch.date_preset, a: serverSearch.audiences, t: serverSearch.activity_types,
       k: serverSearch.keywords, p: serverSearch.proximity,
       av: serverSearch.available_only, u: serverSearch.unseen_only,
+      cr: serverSearch.date_preset ? null : customRange,
     });
   }
   function applyBody(body) {
@@ -242,7 +252,7 @@
   function saveCatalogState() {
     try {
       sessionStorage.setItem(CATALOG_STATE_KEY, JSON.stringify({
-        ss: serverSearch, activeDate, activeType, tokens: searchTokens, y: window.scrollY,
+        ss: serverSearch, activeDate, activeType, tokens: searchTokens, customRange, y: window.scrollY,
       }));
     } catch (_) {}
   }
@@ -265,8 +275,11 @@
     setArr(serverSearch.keywords, r.keywords);
     activeDate = st.activeDate || "all";
     activeType = st.activeType || "all";
+    customRange = st.customRange || null;
     searchTokens = Array.isArray(st.tokens) ? st.tokens : [];
     _pendingScrollY = typeof st.y === "number" ? st.y : null;
+    // Reflect the restored date selection in the chip row.
+    dateBar?.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.date === activeDate));
     syncScopeChips();
     return true;
   }
@@ -501,13 +514,22 @@
   }
 
   // ── Active-filters strip ──────────────────────────────────────────────
-  const DATE_LABELS = { today: "היום", tomorrow: "מחר", weekend: "סוף שבוע", week: "השבוע", nextweek: "שבוע הבא", "2weeks": "שבועיים", next30: "30 יום" };
+  const DATE_LABELS = { today: "היום", tomorrow: "מחר", weekend: "סופ״ש", week: "השבוע", month: "החודש" };
+  // Pretty "D/M" for the active-filters pill when a custom range / weekend is set.
+  const dm = (iso) => { const [y, m, d] = (iso || "").split("-"); return d && m ? `${+d}/${+m}` : iso; };
+  function datePillLabel() {
+    if (activeDate === "range" && customRange) {
+      return customRange.from === customRange.to ? `📅 ${dm(customRange.from)}` : `📅 ${dm(customRange.from)}–${dm(customRange.to)}`;
+    }
+    return DATE_LABELS[activeDate] || activeDate;
+  }
   const TYPE_LABELS = { registration: "📋 מחייב הרשמה", free: "🎁 כניסה חופשית", online: "💻 אונליין", low_stock: "🎫 נשארו מעט כרטיסים" };
 
   function clearFilters() {
     activeDate = "all";
     activeType = "all";
     activeTag  = null;
+    customRange = null;
     // Also clear the server-side search-hub filters.
     serverSearch.date_preset = "upcoming";
     serverSearch.audiences.length = 0;
@@ -539,6 +561,7 @@
     activeDate = "all";
     activeType = "all";
     activeTag = null;
+    customRange = null;
     serverSearch.date_preset = "upcoming";
     serverSearch.audiences.length = 0;
     serverSearch.activity_types.length = 0;
@@ -587,8 +610,9 @@
     const pills = [];
 
     if (activeDate !== "all") {
-      pills.push({ label: DATE_LABELS[activeDate] || activeDate, clear: () => {
+      pills.push({ label: datePillLabel(), clear: () => {
         activeDate = "all";
+        customRange = null;
         serverSearch.date_preset = "upcoming"; // date is a server filter → reset + refetch
         dateBar.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.date === "all"));
         loadEvents();
@@ -1641,27 +1665,72 @@
   });
 
   // ── Date filter chips ─────────────────────────────────────────────────
+  const isoOffset = (days) => { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+  // Upcoming weekend = the nearest Friday + Saturday (today if already the weekend).
+  function weekendRange() {
+    const dow = new Date().getDay(); // 0 Sun … 5 Fri, 6 Sat
+    if (dow === 6) return [isoOffset(0), isoOffset(0)];      // Saturday
+    if (dow === 5) return [isoOffset(0), isoOffset(1)];      // Friday → Fri+Sat
+    const toFri = (5 - dow + 7) % 7;
+    return [isoOffset(toFri), isoOffset(toFri + 1)];
+  }
+  const dateRangePop = document.getElementById("dateRangePop");
+  function markDateChip(val) {
+    dateBar.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c.dataset.date === val));
+  }
   dateBar.addEventListener("click", (e) => {
     const chip = e.target.closest(".chip[data-date]");
     if (!chip) return;
-    dateBar.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
-    chip.classList.add("active");
-    activeDate = chip.dataset.date;
-    // Range chips (next week / two weeks / 30 days) use an EXPLICIT date window
-    // rather than a server preset → clear the preset so dateTo/dateFrom apply.
-    const isoOffset = (days) => { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
-    const RANGES = {
-      nextweek: [isoOffset(7), isoOffset(14)],
-      "2weeks": [isoOffset(0), isoOffset(14)],
-      next30: [isoOffset(0), isoOffset(30)],
-    };
-    if (RANGES[chip.dataset.date]) {
-      const [from, to] = RANGES[chip.dataset.date];
+    const val = chip.dataset.date;
+    // "📅 טווח" just toggles the popover — selection happens on "החל".
+    if (val === "range") {
+      dateRangePop.hidden = !dateRangePop.hidden;
+      return;
+    }
+    if (dateRangePop) dateRangePop.hidden = true;
+    customRange = null;
+    markDateChip(val);
+    activeDate = val;
+    if (val === "weekend") {
+      // Explicit window (no server preset for "weekend") — baked via customRange.
+      const [from, to] = weekendRange();
+      customRange = { from, to };
       serverSearch.date_preset = "";
-      loadEvents({ dateFrom: from, dateTo: to });
     } else {
-      serverSearch.date_preset = DATE_PRESET_MAP[chip.dataset.date] || "upcoming";
-      loadEvents();
+      serverSearch.date_preset = DATE_PRESET_MAP[val] || "upcoming";
+    }
+    loadEvents();
+  });
+  // Custom range — apply / clear.
+  document.getElementById("dateRangeApply")?.addEventListener("click", () => {
+    const from = document.getElementById("dateRangeFrom")?.value || "";
+    const to = document.getElementById("dateRangeTo")?.value || "";
+    if (!from && !to) return;
+    // Tolerate a single bound or reversed order.
+    const lo = from && to ? (from <= to ? from : to) : (from || to);
+    const hi = from && to ? (from <= to ? to : from) : (from || to);
+    customRange = { from: lo, to: hi };
+    activeDate = "range";
+    markDateChip("range");
+    serverSearch.date_preset = "";
+    dateRangePop.hidden = true;
+    loadEvents({ dateFrom: lo, dateTo: hi });
+  });
+  document.getElementById("dateRangeClear")?.addEventListener("click", () => {
+    const f = document.getElementById("dateRangeFrom"); const t = document.getElementById("dateRangeTo");
+    if (f) f.value = ""; if (t) t.value = "";
+    customRange = null;
+    activeDate = "all";
+    markDateChip("all");
+    serverSearch.date_preset = "upcoming";
+    dateRangePop.hidden = true;
+    loadEvents();
+  });
+  // Tap outside the popover closes it.
+  document.addEventListener("click", (e) => {
+    if (dateRangePop && !dateRangePop.hidden &&
+        !e.target.closest("#dateRangePop") && !e.target.closest('.chip[data-date="range"]')) {
+      dateRangePop.hidden = true;
     }
   });
 

@@ -8,7 +8,7 @@
   <!-- Leaflet for map view -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="style.css?v=20260615a" />
+  <link rel="stylesheet" href="style.css?v=20260615b" />
 </head>
 <body>
 
@@ -117,11 +117,19 @@
         <button class="chip active" data-date="all">הכל</button>
         <button class="chip" data-date="today">היום</button>
         <button class="chip" data-date="tomorrow">מחר</button>
-        <button class="chip" data-date="weekend">סוף שבוע</button>
+        <button class="chip" data-date="weekend">סופ״ש</button>
         <button class="chip" data-date="week">השבוע</button>
-        <button class="chip" data-date="nextweek">שבוע הבא</button>
-        <button class="chip" data-date="2weeks">שבועיים</button>
-        <button class="chip" data-date="next30">30 יום</button>
+        <button class="chip" data-date="month">החודש</button>
+        <button class="chip" data-date="range">📅 טווח</button>
+      </div>
+      <!-- Custom date-range popover (opened by the "📅 טווח" chip) -->
+      <div class="date-range-pop" id="dateRangePop" hidden>
+        <label class="date-range-field">מ־<input type="date" id="dateRangeFrom" /></label>
+        <label class="date-range-field">עד<input type="date" id="dateRangeTo" /></label>
+        <div class="date-range-actions">
+          <button class="date-range-clear" id="dateRangeClear" type="button">נקה</button>
+          <button class="date-range-apply" id="dateRangeApply" type="button">החל</button>
+        </div>
       </div>
     </div>
 
@@ -277,6 +285,6 @@
   })();
 </script>
 
-<script src="app.js?v=20260615a"></script>
+<script src="app.js?v=20260615b"></script>
 </body>
 </html>

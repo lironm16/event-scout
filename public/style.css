@@ -1879,3 +1879,46 @@ body { padding-bottom: env(safe-area-inset-bottom); } /* tabbar removed — prof
   border: 2px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
+
+/* ── Custom date-range popover ("📅 טווח") ──────────────────────────── */
+.date-range-pop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--bg2);
+  border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+.date-range-pop[hidden] { display: none; }
+.date-range-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .82rem;
+  color: var(--hint);
+}
+.date-range-field input[type="date"] {
+  font: inherit;
+  font-size: .9rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent);
+  border-radius: 8px;
+  padding: 6px 8px;
+  min-width: 0;
+}
+.date-range-actions { display: inline-flex; gap: 8px; margin-inline-start: auto; }
+.date-range-apply, .date-range-clear {
+  font: inherit;
+  font-size: .85rem;
+  border-radius: 999px;
+  padding: 7px 16px;
+  border: none;
+  cursor: pointer;
+}
+.date-range-apply { background: var(--accent); color: var(--accent-t); font-weight: 600; }
+.date-range-clear { background: transparent; color: var(--hint); border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent); }
