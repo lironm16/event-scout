@@ -1472,8 +1472,9 @@
     }
     return {}; // default browse → whole upcoming series
   }
-  // Render the occurrence rows (+ optional "show all" footer) into `box`.
-  function paintOccList(box, eventId, data) {
+  // Render the occurrence rows (+ a reversible window/all toggle) into `box`.
+  // mode: "window" (scoped to the search dates) | "all" (whole series).
+  function paintOccList(box, eventId, data, mode) {
     const list = data.occurrences || [];
     const varied = new Set(list.map((o) => o.name)).size > 1;
     const variedLoc = new Set(list.map((o) => o.location || "")).size > 1;
@@ -1506,14 +1507,30 @@
           <span class="sr-go">›</span>
         </button>`;
       }
-      // The list was scoped to the search window → offer the full series.
-      if (data.windowed && data.totalAll) {
+      // Reversible toggle between the windowed list and the whole series.
+      if (mode === "all") {
+        // Only offer "back" when a window is actually active (else all == window).
+        if (Object.keys(occWindowParams()).length) {
+          html += `<button class="occ-showall" onclick="window.showWindowSeries(this,${eventId})">↩︎ חזרה למופעים בטווח</button>`;
+        }
+      } else if (data.windowed && data.totalAll) {
         html += `<button class="occ-showall" onclick="window.showAllSeries(this,${eventId})">📅 כל המופעים בסדרה (${data.totalAll})</button>`;
       }
       box.innerHTML = html;
     }
     box.dataset.loaded = "1";
     box.hidden = false;
+    // Keep the header button's count in sync with what's actually shown, so a
+    // "7" header never sits above a 109-row list. window → shown count;
+    // all → full series size.
+    const header = box.closest(".card-detail")?.querySelector(".series-btn");
+    if (header) {
+      const m = header.textContent.match(/כל ה־\d+\s+(\S+)/);
+      const word = m ? m[1] : "מופעים";
+      const count = mode === "all" ? (data.totalAll || list.length) : list.length;
+      header.innerHTML = `🔁 כל ה־${count} ${word} <span class="series-caret">▾</span>`;
+      header.classList.add("open");
+    }
   }
   async function fetchOccurrences(eventId, extra) {
     const qs = new URLSearchParams({ initData: INIT_DATA, id: eventId, ...occWindowParams(), ...(extra || {}) });
@@ -1533,22 +1550,32 @@
     box.hidden = false;
     box.innerHTML = `<div class="occ-loading"><span class="occ-spinner"></span></div>`;
     try {
-      paintOccList(box, eventId, await fetchOccurrences(eventId));
+      paintOccList(box, eventId, await fetchOccurrences(eventId), "window");
     } catch (_) {
       box.innerHTML = `<div class="occ-empty">שגיאה בטעינת התאריכים.</div>`;
       box.hidden = false;
     } finally { btn.disabled = false; }
   };
-  // "📅 כל המופעים בסדרה" — re-fetch the WHOLE series (bypass the window).
-  window.showAllSeries = async function (btn, eventId) {
+  // Toggle the list scope in place. Keeps the box anchored so it's not
+  // disorienting, and the footer button flips label so it's always reversible.
+  async function reloadOccList(btn, eventId, mode) {
     const box = btn.closest(".occ-list");
     if (!box) return;
+    const anchor = box.getBoundingClientRect().top;
     btn.disabled = true;
     btn.textContent = "טוען…";
     try {
-      paintOccList(box, eventId, await fetchOccurrences(eventId, { all: "1" }));
-    } catch (_) { btn.textContent = "📅 כל המופעים בסדרה"; btn.disabled = false; }
-  };
+      const data = await fetchOccurrences(eventId, mode === "all" ? { all: "1" } : {});
+      paintOccList(box, eventId, data, mode);
+      // Keep the list's top roughly where it was so the view doesn't jump.
+      requestAnimationFrame(() => {
+        const delta = box.getBoundingClientRect().top - anchor;
+        if (Math.abs(delta) > 1) window.scrollBy({ top: delta, behavior: "instant" });
+      });
+    } catch (_) { btn.disabled = false; }
+  }
+  window.showAllSeries = (btn, eventId) => reloadOccList(btn, eventId, "all");
+  window.showWindowSeries = (btn, eventId) => reloadOccList(btn, eventId, "window");
 
   // umbrella / tag drill-down state.
   let umbrellaDrilldown = null; // { slug, title }
