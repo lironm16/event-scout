@@ -1534,9 +1534,16 @@
       if (!list.length) { box.innerHTML = `<div class="occ-empty">אין מופעים בטווח שבחרת.</div>`; }
       else {
         let html = occRowsHtml(list, eventId);
-        const total = data.totalInWindow || list.length;
-        if (total > list.length || (data.totalAll || 0) > total) {
-          html += `<button class="occ-showall" onclick="window.openSeriesScreen(${eventId})">📅 כל המופעים בסדרה (${data.totalAll})</button>`;
+        const inWin = data.totalInWindow || list.length;
+        const all = data.totalAll || inWin;
+        if (inWin > list.length) {
+          // More results match the SEARCH than fit inline → open the full
+          // windowed set (what the user actually searched) in a screen.
+          html += `<button class="occ-showall" onclick="window.openSeriesScreen(${eventId},'window')">📅 כל התוצאות בטווח (${inWin})</button>`;
+        } else if (all > inWin) {
+          // Everything in the window already shown inline, but the series
+          // continues beyond it → offer the whole series.
+          html += `<button class="occ-showall" onclick="window.openSeriesScreen(${eventId},'all')">📅 כל המופעים בסדרה (${all})</button>`;
         }
         box.innerHTML = html;
       }
@@ -1550,7 +1557,8 @@
   // Full-screen list of the ENTIRE series — its own overlay with "← חזרה", so
   // the catalog underneath is untouched and the user returns exactly where they
   // were. Fetches all occurrences only now (on demand).
-  window.openSeriesScreen = async function (eventId) {
+  // mode: "window" (all results matching the search) | "all" (entire series).
+  window.openSeriesScreen = async function (eventId, mode) {
     const title = (eventsById.get(eventId) || eventsById.get(Number(eventId)) || {}).name || "כל המופעים";
     let ov = document.getElementById("seriesModal");
     if (!ov) {
@@ -1567,16 +1575,31 @@
     body.innerHTML = `<div class="occ-loading"><span class="occ-spinner"></span></div>`;
     ov.classList.add("open");
     document.body.style.overflow = "hidden";
+    await paintSeriesScreen(eventId, mode || "window");
+  };
+  async function paintSeriesScreen(eventId, mode) {
+    const body = document.querySelector("#seriesModal .event-modal-body");
+    if (!body) return;
     try {
-      const data = await fetchOccurrences(eventId, { all: "1" });
+      const data = await fetchOccurrences(eventId, mode === "all" ? { all: "1" } : {});
       const list = data.occurrences || [];
-      body.innerHTML = list.length
-        ? `<div class="occ-list" style="display:block">${occRowsHtml(list, eventId)}</div>`
-        : `<div class="occ-empty">אין מופעים.</div>`;
+      if (!list.length) { body.innerHTML = `<div class="occ-empty">אין מופעים.</div>`; return; }
+      let html = `<div class="occ-list" style="display:block">${occRowsHtml(list, eventId)}`;
+      const all = data.totalAll || list.length;
+      const inWin = data.totalInWindow || list.length;
+      // Let the user widen to the whole series, or narrow back to their search.
+      if (mode === "window" && all > inWin) {
+        html += `<button class="occ-showall" onclick="window.paintSeriesScreen(${eventId},'all')">📅 כל המופעים בסדרה (${all})</button>`;
+      } else if (mode === "all" && Object.keys(occWindowParams()).length) {
+        html += `<button class="occ-showall" onclick="window.paintSeriesScreen(${eventId},'window')">↩︎ רק התוצאות שחיפשתי</button>`;
+      }
+      body.innerHTML = html + `</div>`;
+      body.scrollTop = 0;
     } catch (_) {
       body.innerHTML = `<div class="occ-empty">שגיאה בטעינת המופעים.</div>`;
     }
-  };
+  }
+  window.paintSeriesScreen = paintSeriesScreen;
   function closeSeriesScreen() {
     const ov = document.getElementById("seriesModal");
     if (ov) ov.classList.remove("open");
