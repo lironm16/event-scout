@@ -230,13 +230,20 @@ async function getAvailableExtraCols() {
 // without it, getBookingUrl throws ("requires event.external_slug") and
 // every render of a city event card fails.
 const BASE_COLS =
-  "id, source, external_slug, external_url, online_url, umbrella_slug, umbrella_title, name, date, start_time, end_time, image, tickets_left, location_key";
+  "id, source, external_slug, external_url, online_url, umbrella_slug, umbrella_title, umbrella_id, name, date, start_time, end_time, image, tickets_left, location_key";
 const LOCATION_JOIN =
   "locations:location_key(raw_address, lat, lng, found, kind)";
+// Series-parent umbrella (sql/086): recurring same-name series store their
+// shared description ONCE on the umbrella row; children carry umbrella_id
+// (but NOT umbrella_slug — see sql/086 UI-safety note) and inherit the prose
+// when their own `description` is NULL. Embedded so flattenEvent can resolve
+// the fallback without a second round-trip. NULL for non-series rows.
+const UMBRELLA_JOIN =
+  "umbrella_parent:umbrella_id(description, title, image_url)";
 
 async function buildSelect() {
   const extras = await getAvailableExtraCols();
-  return [BASE_COLS, ...extras, LOCATION_JOIN].join(", ");
+  return [BASE_COLS, ...extras, LOCATION_JOIN, UMBRELLA_JOIN].join(", ");
 }
 
 function flattenEvent(row) {
@@ -266,10 +273,13 @@ function flattenEvent(row) {
     // umbrella, not occurrences of the same recurring show.
     umbrella_slug: row.umbrella_slug || null,
     umbrella_title: row.umbrella_title || null,
+    umbrella_id: row.umbrella_id ?? null,
     // Per-event blurb (sql/053). Optional column — pass it through
     // when populated so the consolidated newsletter and umb: handler
     // can surface a one-line context tail without re-fetching.
-    description: row.description || null,
+    // Series-parent fallback (sql/086): a recurring occurrence whose own
+    // description was NULLed inherits the shared prose from its umbrella.
+    description: row.description || row.umbrella_parent?.description || null,
     name: row.name,
     date: row.date,
     start_time: row.start_time,
