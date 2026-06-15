@@ -865,6 +865,7 @@
 
     if (!pills.length) {
       activeFiltersBar.style.display = "none";
+      document.documentElement.style.setProperty("--af-h", "0px");
       return;
     }
 
@@ -889,6 +890,11 @@
       clearBtn.addEventListener("click", clearFilters);
       activeFiltersBar.appendChild(clearBtn);
     }
+    // Tell the floating "בשבילי" toggle how tall the filters bar is so it sits
+    // BELOW it instead of covering the pills.
+    requestAnimationFrame(() => {
+      document.documentElement.style.setProperty("--af-h", (activeFiltersBar.offsetHeight || 0) + "px");
+    });
   }
 
   // Enter tag drill-down — called from card tag pills.
@@ -2201,6 +2207,19 @@
       searchInput.blur();
       window.openEventModal(tok.openId, null, { hideOccurrences: true });
       return;
+    }
+    // A place token: show the SHORTEST address variant of that real venue (all
+    // variants share coords), so the pill reads cleanly. Matching is by coords,
+    // and the short text is itself one of the venue's variants, so it still works.
+    if (tok.type === "place") {
+      const ck = venueCoordKey(allEvents.find((e) => (e.location || "") === tok.value) || {});
+      if (ck) {
+        let shortest = tok.value;
+        for (const e of allEvents) {
+          if (venueCoordKey(e) === ck && e.location && e.location.length < shortest.length) shortest = e.location;
+        }
+        tok = { ...tok, value: shortest };
+      }
     }
     // "name" tokens (a specific event) are mutually exclusive — two different
     // event names AND-ed together can never match one event (→ zero results).
