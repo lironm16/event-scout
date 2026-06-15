@@ -1922,3 +1922,7 @@ body { padding-bottom: env(safe-area-inset-bottom); } /* tabbar removed — prof
 }
 .date-range-apply { background: var(--accent); color: var(--accent-t); font-weight: 600; }
 .date-range-clear { background: transparent; color: var(--hint); border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent); }
+
+/* Series "כל ה־N מופעים" caret — points down when collapsed, flips up when open. */
+.series-caret { display: inline-block; transition: transform .18s ease; }
+.series-btn.open .series-caret { transform: rotate(180deg); }

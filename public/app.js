@@ -1099,7 +1099,7 @@
     if (!opts.hideOccurrences && (ev.totalOccurrences || 1) > 1) {
       const word = ev.umbrella_slug ? "בתוכנית" : "מופעים";
       // Show ALL occurrences (the list includes the representative now).
-      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">🔁 כל ה־${ev.totalOccurrences} ${word} ▾</button>`);
+      parts.push(`<button class="series-btn" onclick="window.showSeries(this,${ev.id})">🔁 כל ה־${ev.totalOccurrences} ${word} <span class="series-caret">▾</span></button>`);
       parts.push(`<div class="occ-list"></div>`);
     }
 
@@ -1466,8 +1466,13 @@
   window.showSeries = async function (btn, eventId) {
     const box = btn.closest(".card-detail")?.querySelector(".occ-list");
     if (!box) return;
-    if (box.dataset.loaded === "1") { box.hidden = !box.hidden; return; }
+    if (box.dataset.loaded === "1") {
+      box.hidden = !box.hidden;
+      btn.classList.toggle("open", !box.hidden); // caret reflects open/closed
+      return;
+    }
     btn.disabled = true;
+    btn.classList.add("open"); // list is opening → flip caret
     // Show a spinner until the occurrences arrive.
     box.hidden = false;
     box.innerHTML = `<div class="occ-loading"><span class="occ-spinner"></span></div>`;
