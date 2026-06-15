@@ -193,6 +193,9 @@
   // Cache BOTH scopes (בשבילי / כללי) for the current filter set so toggling
   // is an instant in-memory swap — no refetch. Invalidated when filters change.
   let scopeCache = { sig: "", me: null, all: null };
+  // Cache occurrence fetches (per id + window + all/limit) so toggling
+  // window↔all or reopening the series screen is instant. Reset on reload.
+  let occCache = new Map();
   function filterSig() {
     return JSON.stringify({
       d: serverSearch.date_preset, a: serverSearch.audiences, t: serverSearch.activity_types,
@@ -293,7 +296,7 @@
       return;
     }
     const sig = filterSig();
-    if (scopeCache.sig !== sig) scopeCache = { sig, me: null, all: null };
+    if (scopeCache.sig !== sig) { scopeCache = { sig, me: null, all: null }; occCache = new Map(); }
     const scopeKey = serverSearch.ignore_profile ? "all" : "me";
     // Instant swap if we already have this scope for the current filters.
     if (!extra && scopeCache[scopeKey]) { applyBody(scopeCache[scopeKey]); return; }
@@ -1509,9 +1512,14 @@
     return html;
   }
   async function fetchOccurrences(eventId, extra) {
-    const qs = new URLSearchParams({ initData: INIT_DATA, id: eventId, ...occWindowParams(), ...(extra || {}) });
+    const params = { ...occWindowParams(), ...(extra || {}) };
+    const key = `${eventId}|${JSON.stringify(params)}`;
+    if (occCache.has(key)) return occCache.get(key);
+    const qs = new URLSearchParams({ initData: INIT_DATA, id: eventId, ...params });
     const res = await fetch(`${API_PREFIX}/occurrences?${qs}`);
-    return res.json();
+    const data = await res.json();
+    occCache.set(key, data);
+    return data;
   }
   // Inline card peek — shows up to INLINE_OCC_CAP occurrences; if the series
   // has more, a footer button opens the full list in a dedicated screen
