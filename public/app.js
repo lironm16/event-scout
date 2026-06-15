@@ -895,6 +895,18 @@
   function renderGrid(events) {
     cardGrid.innerHTML = "";
     noResults.style.display = events.length ? "none" : "block";
+    if (!events.length) {
+      // Context-aware empty state — the saved view needs its own message.
+      const icon = document.getElementById("noResultsIcon");
+      const text = document.getElementById("noResultsText");
+      if (savedOnly) {
+        if (icon) icon.textContent = "⭐";
+        if (text) text.textContent = "עדיין לא שמרת אירועים — לחצי על ⭐ באירוע כדי לשמור אותו כאן";
+      } else {
+        if (icon) icon.textContent = "🔍";
+        if (text) text.textContent = "לא נמצאו אירועים תואמים";
+      }
+    }
     if (_scrollObserver) { _scrollObserver.disconnect(); _scrollObserver = null; }
     if (!events.length) { resultsMeta.textContent = ""; return; }
 

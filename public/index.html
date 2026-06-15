@@ -8,7 +8,7 @@
   <!-- Leaflet for map view -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="style.css?v=20260616f" />
+  <link rel="stylesheet" href="style.css?v=20260616g" />
 </head>
 <body>
 
@@ -231,8 +231,8 @@
     <div class="results-meta" id="resultsMeta"></div>
     <div class="card-grid" id="cardGrid"></div>
     <div id="noResults" style="display:none" class="empty-state">
-      <div style="font-size:2.5rem">🔍</div>
-      <p>לא נמצאו אירועים תואמים</p>
+      <div id="noResultsIcon" style="font-size:2.5rem">🔍</div>
+      <p id="noResultsText">לא נמצאו אירועים תואמים</p>
     </div>
   </div>
 
@@ -286,6 +286,6 @@
   })();
 </script>
 
-<script src="app.js?v=20260616f"></script>
+<script src="app.js?v=20260616g"></script>
 </body>
 </html>
