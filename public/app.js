@@ -206,6 +206,18 @@
     applyFilters();
     spinner.style.display = "none";
     catalog.style.display = "block";
+    // Tiny build stamp so a stale deploy / cached WebView is diagnosable
+    // on-device (read the corner; compare to the expected server build).
+    if (body._build) {
+      let bs = document.getElementById("buildStamp");
+      if (!bs) {
+        bs = document.createElement("div");
+        bs.id = "buildStamp";
+        bs.style.cssText = "position:fixed;bottom:2px;left:4px;z-index:9999;font-size:9px;opacity:.45;color:var(--muted,#888);pointer-events:none";
+        document.body.appendChild(bs);
+      }
+      bs.textContent = body._build;
+    }
     // Restore scroll position when returning from the profile.
     if (_pendingScrollY != null) {
       const y = _pendingScrollY; _pendingScrollY = null;
