@@ -1952,6 +1952,9 @@ body { padding-bottom: env(safe-area-inset-bottom); } /* tabbar removed — prof
   background: color-mix(in srgb, var(--hint) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--hint) 22%, transparent);
 }
+/* The empty star (☆) is a text glyph — colour it gold so the outline shows on
+   dark backgrounds instead of rendering near-black. */
+.cta-save { color: #f6c945; }
 /* Saved "on" = subtle gold ring, not a heavy gold fill (the ⭐ glyph reads gold). */
 .cta-save.on { border-color: #f6c945; background: color-mix(in srgb, #f6c945 12%, transparent); }
 
