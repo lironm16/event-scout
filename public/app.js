@@ -104,7 +104,30 @@
     // If we're in the saved-only view, a removed event should disappear now.
     if (savedOnly) applyFilters();
   };
-  let savedOnly = false; // saved-only view toggle
+  // SAVED_MODE = the dedicated saved.html page (savedOnly always on, no בשבילי).
+  const SAVED_MODE = !!window.SAVED_MODE;
+  let savedOnly = SAVED_MODE; // saved-only view toggle (forced on the saved page)
+  // Load the saved page: fetch the user's saved ids, then the events themselves
+  // (the saved set ignores the catalog window/scope — it's the user's bookmarks).
+  async function loadSavedPage() {
+    try {
+      if (!INIT_DATA) INIT_DATA = await ensureInitData();
+      if (!INIT_DATA) { showError(catalogAuthErrorMessage()); return; }
+      const res = await fetch(`${API_PREFIX}/saved?${new URLSearchParams({ initData: INIT_DATA })}`);
+      const ids = (await res.json()).ids || [];
+      savedIds = new Set(ids.map(Number)); persistSaved();
+      const evs = await Promise.all([...savedIds].map((id) =>
+        fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id, noseries: "1" })}`)
+          .then((r) => r.json()).then((j) => j.event).catch(() => null)));
+      allEvents = evs.filter(Boolean);
+      allEvents.forEach((e) => eventsById.set(e.id, e));
+      applyFilters();
+      spinner.style.display = "none";
+      catalog.style.display = "block";
+    } catch (_) {
+      showError("שגיאה בטעינת השמורים.");
+    }
+  }
   // Build a Google Calendar "add event" link from an event's date/time.
   function gcalUrl(ev) {
     const pad = (n) => String(n).padStart(2, "0");
@@ -2344,7 +2367,11 @@
     const m = /^ev[_-]?(.+)$/.exec(startParam() || "");
     return m ? m[1] : null;
   }
-  if (_sp === "profile") {
+  if (SAVED_MODE) {
+    // Dedicated saved.html page — hide the בשבילי toggle and load bookmarks.
+    document.getElementById("forMeToggle")?.style.setProperty("display", "none");
+    loadSavedPage();
+  } else if (_sp === "profile") {
     // Opened via t.me/<bot>?startapp=profile. start_param stays "profile" for
     // the whole session, so redirect ONLY on the first load — otherwise tapping
     // "← אירועים" back from the profile lands on the catalog, which would see

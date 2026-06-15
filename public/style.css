@@ -1954,3 +1954,6 @@ body { padding-bottom: env(safe-area-inset-bottom); } /* tabbar removed — prof
 .cta-cal  { background: var(--bg2); border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent); }
 /* Header ⭐ saved-only toggle active state. */
 #savedToggleBtn.active { background: color-mix(in srgb, #f6c945 25%, transparent); border-color: #f6c945; }
+
+/* Saved page header title. */
+.saved-title { font-weight: 700; font-size: .95rem; white-space: nowrap; align-self: center; margin-inline: 4px; color: var(--text); }

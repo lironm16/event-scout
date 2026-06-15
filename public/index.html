@@ -40,7 +40,7 @@
         <circle cx="15" cy="17" r="2.2" fill="currentColor" stroke="none"/>
       </svg>
     </button>
-    <button class="filter-toggle-btn" id="savedToggleBtn" title="השמורים שלי">⭐</button>
+    <a class="filter-toggle-btn" id="savedLink" href="saved.html" title="השמורים שלי">⭐</a>
     <a class="filter-toggle-btn" id="profileBtn" href="profile.html" title="הפרופיל שלי">👤</a>
   </div>
 </header>
@@ -281,8 +281,10 @@
   // link so profile.html opens authenticated (initData preserved).
   (function () {
     var q = location.search + location.hash;
-    var p = document.getElementById("profileBtn");
-    if (p) p.href = p.getAttribute("href") + q;
+    ["profileBtn", "savedLink"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.href = el.getAttribute("href") + q;
+    });
   })();
 </script>
 

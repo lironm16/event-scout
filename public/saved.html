@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>השמורים שלי</title>
+  <script>window.SAVED_MODE = true;</script>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="style.css?v=20260616g" />
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-top">
+    <a class="filter-toggle-btn" id="backBtn" href="index.html" title="חזרה לאירועים">←</a>
+    <span class="saved-title">⭐ השמורים שלי</span>
+    <div class="search-wrap">
+      <input class="search-input" type="text" id="searchInput" placeholder="חיפוש בשמורים..." autocomplete="off" />
+      <button class="search-clear" id="searchClear" type="button" aria-label="נקה" hidden>✕</button>
+      <div class="search-suggest" id="searchSuggest" hidden></div>
+    </div>
+    <button class="filter-toggle-btn" id="sortToggleBtn" title="מיון">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="18" x2="9" y2="18"/>
+      </svg>
+    </button>
+    <button class="filter-toggle-btn" id="filterToggleBtn" title="סינון">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2.2" fill="currentColor" stroke="none"/>
+        <line x1="4" y1="17" x2="20" y2="17"/><circle cx="15" cy="17" r="2.2" fill="currentColor" stroke="none"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<!-- Sort backdrop + sheet -->
+<div class="filter-backdrop" id="sortBackdrop"></div>
+<div class="filter-sheet sort-sheet" id="sortPanel">
+  <div class="filter-sheet-handle"></div>
+  <div class="filter-sheet-header"><span class="filter-sheet-title">מיון</span><button class="filter-sheet-close" id="sortSheetClose" aria-label="סגור">✕</button></div>
+  <div class="filter-sheet-body">
+    <div class="sort-options">
+      <label class="sort-option"><input type="radio" name="sort" value="date-asc" checked /><span class="sort-option-ic">⏱️</span><span class="sort-option-label"><span class="sort-option-title">תאריך קרוב ראשון</span><span class="sort-option-sub">ברירת מחדל</span></span><span class="sort-option-check"></span></label>
+      <label class="sort-option"><input type="radio" name="sort" value="date-desc" /><span class="sort-option-ic">📆</span><span class="sort-option-label"><span class="sort-option-title">תאריך רחוק ראשון</span><span class="sort-option-sub">מהאחרון לקרוב</span></span><span class="sort-option-check"></span></label>
+      <label class="sort-option"><input type="radio" name="sort" value="stock-asc" /><span class="sort-option-ic">🔥</span><span class="sort-option-label"><span class="sort-option-title">אוזל בקרוב</span><span class="sort-option-sub">הכי מעט כרטיסים שנותרו</span></span><span class="sort-option-check"></span></label>
+      <label class="sort-option"><input type="radio" name="sort" value="dist-asc" /><span class="sort-option-ic">📍</span><span class="sort-option-label"><span class="sort-option-title">הכי קרוב אליי</span><span class="sort-option-sub">לפי מרחק מהבית</span></span><span class="sort-option-check"></span></label>
+    </div>
+  </div>
+</div>
+
+<!-- Filter backdrop + sheet -->
+<div class="filter-backdrop" id="filterBackdrop"></div>
+<div class="filter-sheet" id="filterPanel">
+  <div class="filter-sheet-handle"></div>
+  <div class="filter-sheet-header"><span class="filter-sheet-title">סינון</span><div class="filter-header-actions"><button class="filter-sheet-clear" id="filterSheetClear" type="button">נקה הכל</button><button class="filter-sheet-close" id="filterSheetClose" aria-label="סגור">✕</button></div></div>
+  <div class="filter-sheet-body">
+    <div class="filter-section"><div class="filter-label">📅 תאריך</div><div class="filter-bar wrap" id="dateFilterBar">
+      <button class="chip active" data-date="all">הכל</button><button class="chip" data-date="today">היום</button><button class="chip" data-date="tomorrow">מחר</button><button class="chip" data-date="weekend">סופ״ש</button><button class="chip" data-date="week">השבוע</button><button class="chip" data-date="month">החודש</button><button class="chip" data-date="range">📅 טווח</button>
+    </div>
+      <div class="date-range-pop" id="dateRangePop" hidden><label class="date-range-field">מ־<input type="date" id="dateRangeFrom" /></label><label class="date-range-field">עד<input type="date" id="dateRangeTo" /></label><div class="date-range-actions"><button class="date-range-clear" id="dateRangeClear" type="button">נקה</button><button class="date-range-apply" id="dateRangeApply" type="button">החל</button></div></div>
+    </div>
+    <div class="filter-section"><div class="filter-label">🎟️ סוג</div><div class="filter-bar wrap" id="typeFilterBar">
+      <button class="chip active" data-type="all">הכל</button><button class="chip" data-type="registration">📋 מחייב הרשמה</button><button class="chip" data-type="free">🎁 כניסה חופשית</button><button class="chip" data-type="online">💻 אונליין</button><button class="chip" data-type="low_stock">🎫 נשארו מעט כרטיסים</button>
+    </div></div>
+    <div class="filter-section"><div class="filter-label">👥 קהל יעד</div><div class="filter-bar wrap" id="audienceFilterBar">
+      <button class="chip active" data-aud="all">הכל</button><button class="chip" data-aud="toddlers">👶 תינוקות</button><button class="chip" data-aud="kids">🧒 ילדים</button><button class="chip" data-aud="teens">🎒 נוער</button><button class="chip" data-aud="family">👨‍👩‍👧 לכל המשפחה</button><button class="chip" data-aud="parents">👪 הורים</button><button class="chip" data-aud="adults">🧑 מבוגרים</button><button class="chip" data-aud="seniors">🌷 ותיקים</button>
+    </div></div>
+    <div class="filter-section"><div class="filter-label">🎨 סוג פעילות</div><div class="filter-bar wrap" id="activityFilterBar">
+      <button class="chip" data-act="workshop">🔧 סדנה</button><button class="chip" data-act="tour">🚶 סיור</button><button class="chip" data-act="show">🎭 הצגה/הופעה</button><button class="chip" data-act="lecture">🎤 הרצאה</button><button class="chip" data-act="party">🎉 מסיבה</button><button class="chip" data-act="playspace">🧸 משחקייה</button><button class="chip" data-act="gathering">🤝 מפגש</button><button class="chip" data-act="sport">⚽ ספורט</button>
+    </div></div>
+    <div class="filter-section"><div class="filter-label">⚙️ אפשרויות</div><div class="filter-bar wrap" id="optionFilterBar">
+      <button class="chip" data-opt="proximity">🚶 קרוב אליי</button><button class="chip" data-opt="available_only">🎫 עם כרטיסים</button><button class="chip" data-opt="unseen_only">👀 שלא ראיתי</button>
+    </div></div>
+    <div class="filter-section"><div class="filter-label">🔎 מילת חיפוש</div><input class="pf-input" id="keywordInput" type="text" placeholder="למשל: עששיות, גיטרה…" /></div>
+    <div class="filter-section" id="tagsSection" style="display:none"><div class="filter-label">⭐ תחומי עניין שלי</div><div class="filter-bar wrap" id="tagFilterBar"></div></div>
+    <div class="filter-section" id="communitiesSection" style="display:none"><div class="filter-label">🏳️ הקהילות שלי</div><div class="filter-bar wrap" id="communityFilterBar"></div></div>
+  </div>
+  <div class="filter-sheet-footer"><button class="filter-sheet-apply" id="filterSheetApply">הצג תוצאות</button></div>
+</div>
+
+<div class="active-filters-bar" id="activeFiltersBar" style="display:none"></div>
+<div class="drill-bar" id="drillBar" style="display:none"></div>
+
+<main class="content">
+  <div class="spinner-wrap" id="spinner"><div class="spinner"></div></div>
+  <div id="error" style="display:none"></div>
+  <div id="catalog" style="display:none">
+    <div class="results-meta" id="resultsMeta"></div>
+    <div class="card-grid" id="cardGrid"></div>
+    <div id="noResults" style="display:none" class="empty-state">
+      <div id="noResultsIcon" style="font-size:2.5rem">⭐</div>
+      <p id="noResultsText">עדיין לא שמרת אירועים — לחצי על ⭐ באירוע כדי לשמור אותו כאן</p>
+    </div>
+  </div>
+  <div id="mapView" style="display:none"><div id="mapContainer"></div></div>
+</main>
+
+<!-- Map/list view-toggle (the "מפה" icon) -->
+<button class="view-fab" id="viewFab" title="תצוגת מפה">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5" fill="currentColor" stroke="none"/></svg>
+</button>
+
+<!-- Image lightbox -->
+<div class="img-lightbox" id="imgLightbox"><button class="lightbox-close" id="lightboxClose" aria-label="סגור">✕</button><img class="lightbox-img" id="lightboxImg" src="" alt="" /></div>
+
+<!-- Report sheet -->
+<div class="filter-backdrop" id="reportBackdrop"></div>
+<div class="filter-sheet report-sheet" id="reportPanel" role="dialog" aria-modal="true" aria-label="דיווח על בעיה">
+  <div class="filter-sheet-handle"></div>
+  <div class="filter-sheet-header"><span class="filter-sheet-title">🚩 דיווח על בעיה</span><button class="filter-sheet-close" id="reportSheetClose" aria-label="סגור">✕</button></div>
+  <div class="filter-sheet-body">
+    <p class="report-subtitle">מה הבעיה באירוע?</p>
+    <div class="report-chips" id="reportChips">
+      <button class="chip report-chip" data-type="wrong_audience">קהל יעד שגוי</button>
+      <button class="chip report-chip" data-type="wrong_category">סיווג / תגיות שגויים</button>
+      <button class="chip report-chip" data-type="bad_description">תיאור חסר או שגוי</button>
+      <button class="chip report-chip" data-type="wrong_time">שעה / תאריך שגויים</button>
+      <button class="chip report-chip" data-type="duplicate">אירוע כפול</button>
+      <button class="chip report-chip" data-type="other">אחר</button>
+    </div>
+    <textarea class="report-note" id="reportNote" placeholder="פרטים נוספים (רשותי)..." rows="3" maxlength="500"></textarea>
+    <button class="btn btn-primary report-submit" id="reportSubmit" disabled>שלח דיווח</button>
+  </div>
+</div>
+
+<script>
+  // Preserve Telegram launch params on the back link so index.html re-auths.
+  (function () {
+    var q = location.search + location.hash;
+    var b = document.getElementById("backBtn");
+    if (b) b.href = b.getAttribute("href") + q;
+  })();
+</script>
+<script src="app.js?v=20260616g"></script>
+</body>
+</html>
