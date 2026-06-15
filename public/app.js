@@ -985,7 +985,7 @@
         <div class="card-pillrow">
           ${audiencePill}
           ${ev.accessLine ? `<span class="access-pill">${esc(ev.accessLine.replace(/^👥\s*קהל ייעודי:\s*/, ""))}</span>` : ""}
-          ${(ev.totalOccurrences || 1) > 1 ? `<button class="series-pill" onclick="event.stopPropagation();window.openEventModal(${ev.id},null,{expandSeries:true})">🔁 ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}</button>` : ""}
+          ${(ev.totalOccurrences || 1) > 1 ? `<span class="series-pill">🔁 ${ev.totalOccurrences} ${ev.umbrella_slug ? "בתוכנית" : "מופעים"}</span>` : ""}
           ${locText ? `<span class="loc-pill">${locText}</span>` : ""}
           ${ev.distanceLabel && !isMultiVenueSeries ? `<span class="dist-pill${ev.requiresCar ? " car" : ""}">${esc(ev.distanceLabel)}</span>` : ""}
         </div>
