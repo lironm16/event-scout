@@ -128,8 +128,9 @@ body {
   flex-shrink: 0;
 }
 .filter-toggle-btn svg { display: block; }
+.filter-toggle-btn { text-decoration: none; } /* the <a> ones (profile/saved/back) — kill the underline */
 /* Emoji buttons (⭐ saved, 👤 profile, ← back) read better without the frame. */
-#savedLink, #profileBtn, #backBtn { border: none; background: transparent; font-size: 1.35rem; }
+#savedLink, #profileBtn, #backBtn { border: none; background: transparent; font-size: 1.35rem; text-decoration: none; }
 .filter-toggle-btn.active {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-color: var(--accent);
