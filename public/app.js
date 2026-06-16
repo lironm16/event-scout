@@ -106,7 +106,19 @@
     persistSaved();
     tg?.HapticFeedback?.impactOccurred?.("light");
     // Persist to the server (sync across devices); localStorage already updated.
-    fetch(`${API_PREFIX}/saved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventId: id, saved: nowSaved }) }).catch(() => {});
+    // Ensure auth first so an early tap (before INIT_DATA resolved) still saves.
+    (async () => {
+      try {
+        if (!INIT_DATA) INIT_DATA = await ensureInitData();
+        const r = await fetch(`${API_PREFIX}/saved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventId: id, saved: nowSaved }) });
+        if (!r.ok) throw new Error("save " + r.status);
+      } catch (_) {
+        // Revert the optimistic UI so the user sees it didn't stick.
+        if (nowSaved) savedIds.delete(id); else savedIds.add(id);
+        persistSaved();
+        if (btn) { const on = savedIds.has(id); btn.classList.toggle("on", on); btn.textContent = on ? "⭐" : "☆"; }
+      }
+    })();
     // If we're in the saved-only view, a removed event should disappear now.
     if (savedOnly) applyFilters();
   };
