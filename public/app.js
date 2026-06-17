@@ -1795,7 +1795,7 @@
       const data = await fetchOccurrences(eventId, mode === "all" ? { all: "1" } : {});
       const list = data.occurrences || [];
       if (!list.length) { body.innerHTML = `<div class="occ-empty">אין מופעים.</div>`; return; }
-      let html = `<div class="occ-list" style="display:block">${occRowsHtml(list, eventId)}`;
+      let html = `<div class="occ-list">${occRowsHtml(list, eventId)}`;
       const all = data.totalAll || list.length;
       const inWin = data.totalInWindow || list.length;
       // Let the user widen to the whole series, or narrow back to their search.
