@@ -1666,7 +1666,11 @@
   function occRowsHtml(list, eventId) {
     const varied = new Set(list.map((o) => o.name)).size > 1;
     const variedLoc = new Set(list.map((o) => o.location || "")).size > 1;
-    const variedDesc = new Set(list.map((o) => (o.description || "").trim())).size > 1;
+    // Show per-row descriptions ONLY when occurrences genuinely have DIFFERENT
+    // descriptions (an umbrella of distinct events). For a same-name series —
+    // even when some rows have the text and some are empty — it's one shared
+    // description → noise, so omit (same logic as the in-window peek).
+    const variedDesc = new Set(list.map((o) => (o.description || "").trim()).filter(Boolean)).size > 1;
     let html = "", lastDate = null;
     for (const o of list) {
       if ((o.dateHe || "") !== lastDate) {
