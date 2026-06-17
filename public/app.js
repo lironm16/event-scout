@@ -1660,7 +1660,7 @@
     }
     return {}; // default browse → whole upcoming series
   }
-  const INLINE_OCC_CAP = 25; // never render more than this inside a card
+  const INLINE_OCC_CAP = 10; // never render more than this inside a card
   // Build the grouped occurrence rows HTML (shared by the inline card peek and
   // the full-screen "all occurrences" view).
   function occRowsHtml(list, eventId) {
