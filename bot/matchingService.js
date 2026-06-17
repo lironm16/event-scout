@@ -771,16 +771,15 @@ async function runMatchingForAllUsers(telegram) {
 }
 
 /** Load one event row with the same shape as search/matching cards. */
-async function getEventById(id) {
+async function getEventById(id, { includeArchived = false } = {}) {
   const eventId = parseInt(id, 10);
   if (!Number.isFinite(eventId)) return null;
   const select = await buildSelect();
-  const { data, error } = await supabase
-    .from("events")
-    .select(select)
-    .eq("id", eventId)
-    .eq("archived", false)
-    .maybeSingle();
+  let q = supabase.from("events").select(select).eq("id", eventId);
+  // The saved (⭐) view must still show events the user bookmarked even after
+  // they're archived (a passed occurrence) — otherwise they silently vanish.
+  if (!includeArchived) q = q.eq("archived", false);
+  const { data, error } = await q.maybeSingle();
   if (error || !data) return null;
   const flat = flattenEvent(data);
   await expandLabels([flat]);

@@ -135,7 +135,7 @@
       const ids = (await res.json()).ids || [];
       savedIds = new Set(ids.map(Number)); persistSaved();
       const evs = await Promise.all([...savedIds].map((id) =>
-        fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id, noseries: "1" })}`)
+        fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id, noseries: "1", includeArchived: "1" })}`)
           .then((r) => r.json()).then((j) => j.event).catch(() => null)));
       allEvents = evs.filter(Boolean);
       allEvents.forEach((e) => eventsById.set(e.id, e));
