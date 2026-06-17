@@ -381,6 +381,9 @@
   const CATALOG_STATE_KEY = "catalogState_v1";
   let _pendingScrollY = null;
   function saveCatalogState() {
+    // The saved page reuses app.js but must NOT overwrite the CATALOG's saved
+    // scroll/filters — else returning events→saved→events forgets your place.
+    if (SAVED_MODE) return;
     try {
       sessionStorage.setItem(CATALOG_STATE_KEY, JSON.stringify({
         ss: serverSearch, activeDate, activeType, tokens: searchTokens, customRange, y: window.scrollY,
