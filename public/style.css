@@ -885,6 +885,17 @@ body {
   border-radius: 50%;
   animation: spin .65s linear infinite;
 }
+/* Bottom-of-list "loading more" indicator for catalog infinite scroll. */
+.load-more-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px 0 8px;
+  color: var(--hint);
+  font-size: .95rem;
+}
+.load-more-spinner .spinner { width: 22px; height: 22px; border-width: 2.5px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .error-banner {

@@ -66,6 +66,7 @@
   let savedIds = new Set();
   try { savedIds = new Set(JSON.parse(localStorage.getItem(SAVED_KEY) || "[]").map(Number)); } catch (_) {}
   const isSaved = (id) => savedIds.has(Number(id));
+  let _savePending = Promise.resolve(); // in-flight save POST (awaited before a saved GET)
   function persistSaved() { // localStorage = offline cache; server is the source of truth
     try { localStorage.setItem(SAVED_KEY, JSON.stringify([...savedIds])); } catch (_) {}
   }
@@ -104,46 +105,128 @@
     if (nowSaved) savedIds.add(id); else savedIds.delete(id);
     if (btn) { btn.classList.toggle("on", nowSaved); btn.textContent = nowSaved ? "⭐" : "☆"; }
     persistSaved();
-    tg?.HapticFeedback?.impactOccurred?.("light");
+    updateSavedEventsCache(id, nowSaved); // keep the saved-page cache instant-fresh
+    // Haptics throw synchronously on clients that don't support them (Telegram
+    // Desktop) — must be guarded, or the save POST below never fires.
+    try { tg?.HapticFeedback?.impactOccurred?.("light"); } catch (_) {}
     // Persist to the server (sync across devices); localStorage already updated.
     // Ensure auth first so an early tap (before INIT_DATA resolved) still saves.
-    (async () => {
+    // Track the in-flight POST so loadSavedPage can await it before its GET —
+    // otherwise opening saved right after a tap races the write and the
+    // server-authoritative GET drops the just-added event.
+    _savePending = (async () => {
       try {
         if (!INIT_DATA) INIT_DATA = await ensureInitData();
         const r = await fetch(`${API_PREFIX}/saved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: INIT_DATA, eventId: id, saved: nowSaved }) });
-        if (!r.ok) throw new Error("save " + r.status);
-      } catch (_) {
+        if (!r.ok) throw new Error("save " + r.status, { cause: r.status });
+      } catch (err) {
         // Revert the optimistic UI so the user sees it didn't stick.
         if (nowSaved) savedIds.delete(id); else savedIds.add(id);
         persistSaved();
+        updateSavedEventsCache(id, !nowSaved); // undo the optimistic cache change too
         if (btn) { const on = savedIds.has(id); btn.classList.toggle("on", on); btn.textContent = on ? "⭐" : "☆"; }
+        // 401 = the launch session expired → tell the user to reopen (silent
+        // failures here looked like "saving is broken").
+        const msg = /401/.test(String(err && err.message)) ? "פג תוקף החיבור — סגרי ופתחי מחדש את האפליקציה ונסי שוב." : "השמירה נכשלה — נסי שוב.";
+        try { tg?.showAlert?.(msg); } catch (_) {}
       }
     })();
     // If we're in the saved-only view, a removed event should disappear now.
     if (savedOnly) applyFilters();
   };
-  // SAVED_MODE = the dedicated saved.html page (savedOnly always on, no בשבילי).
+  // SAVED_MODE = the legacy dedicated saved.html page (savedOnly always on).
+  // inSavedView = the in-page "⭐ saved" view inside index.html (no reload —
+  // we just swap the data buffer and the header chrome). savedView() = either.
   const SAVED_MODE = !!window.SAVED_MODE;
+  let inSavedView = false;
+  function savedView() { return SAVED_MODE || inSavedView; }
   let savedOnly = SAVED_MODE; // saved-only view toggle (forced on the saved page)
+  let _catalogEventsBuffer = null; // catalog's allEvents, stashed while in saved view
+  let _catalogSavedScrollY = 0;    // catalog scroll position, to restore on exit
   // Load the saved page: fetch the user's saved ids, then the events themselves
   // (the saved set ignores the catalog window/scope — it's the user's bookmarks).
+  // Full saved-event objects cached in sessionStorage so returning to the saved
+  // page (or toggling a star) renders INSTANTLY — no spinner, no N+1 refetch.
+  const SAVED_EVENTS_KEY = "savedEvents_v1";
+  function readSavedEventsCache() {
+    try { return JSON.parse(sessionStorage.getItem(SAVED_EVENTS_KEY) || "null"); } catch (_) { return null; }
+  }
+  function writeSavedEventsCache(arr) {
+    try {
+      const snap = JSON.stringify(arr);
+      if (snap.length < 3_000_000) sessionStorage.setItem(SAVED_EVENTS_KEY, snap);
+    } catch (_) {}
+  }
+  // Keep the cache in step with a star toggle, using the full event we already
+  // hold in eventsById — so the saved page never has to refetch what we know.
+  function updateSavedEventsCache(id, added) {
+    const cur = readSavedEventsCache() || [];
+    const next = cur.filter((e) => Number(e.id) !== Number(id));
+    if (added) { const ev = eventsById.get(Number(id)) || eventsById.get(id); if (ev) next.push(ev); }
+    writeSavedEventsCache(next);
+  }
   async function loadSavedPage() {
+    // 1) Paint instantly from the cache (saved ids in localStorage + cached
+    //    event objects in sessionStorage) — no spinner.
+    // Saved shows only upcoming bookmarks — drop events whose date has passed
+    // (also guards against stale cache entries saved while archived were shown).
+    const notPast = (e) => !e.date || e.date >= todayISO();
+    const sigOf = (arr) => arr.map((e) => Number(e.id)).sort((a, b) => a - b).join(",");
+    // Saved ids that resolved to nothing (archived/past) — remembered so we don't
+    // re-fetch them on every entry (which forced a re-render → flicker).
+    let deadIds = new Set();
+    try { deadIds = new Set(JSON.parse(sessionStorage.getItem("savedDeadIds_v1") || "[]").map(Number)); } catch (_) {}
+    const cached = readSavedEventsCache();
+    let painted = false;
+    let paintedSig = "";
+    if (cached && cached.length) {
+      allEvents = cached.filter((e) => savedIds.has(Number(e.id)) && notPast(e));
+      allEvents.forEach((e) => eventsById.set(e.id, e));
+      paintedSig = sigOf(allEvents);
+      spinner.style.display = "none";
+      catalog.style.display = "block";
+      applyFilters();
+      painted = true;
+    }
+    // 2) Revalidate against the server in the background; only re-render if the
+    //    set actually changed (so a return visit shows no visible refresh).
     try {
       if (!INIT_DATA) INIT_DATA = await ensureInitData();
-      if (!INIT_DATA) { showError(catalogAuthErrorMessage()); return; }
+      if (!INIT_DATA) { if (!painted) showError(catalogAuthErrorMessage()); return; }
+      // Wait for any in-flight star toggle to land first, so the GET reflects it
+      // (otherwise the server-authoritative set drops a just-added event).
+      try { await _savePending; } catch (_) {}
       const res = await fetch(`${API_PREFIX}/saved?${new URLSearchParams({ initData: INIT_DATA })}`);
       const ids = (await res.json()).ids || [];
       savedIds = new Set(ids.map(Number)); persistSaved();
-      const evs = await Promise.all([...savedIds].map((id) =>
-        fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id, noseries: "1", includeArchived: "1" })}`)
+      // Reuse already-cached/known event objects; only fetch the truly missing —
+      // and skip ids we already know are dead (archived/past) to avoid pointless
+      // refetches that triggered a re-render every entry.
+      const have = new Map((cached || []).map((e) => [Number(e.id), e]));
+      eventsById.forEach((e, k) => have.set(Number(k), e));
+      const missing = [...savedIds].filter((id) => !have.has(id) && !deadIds.has(id));
+      // No includeArchived → archived (passed) events return null and drop out.
+      const fetched = await Promise.all(missing.map((id) =>
+        fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id, noseries: "1" })}`)
           .then((r) => r.json()).then((j) => j.event).catch(() => null)));
-      allEvents = evs.filter(Boolean);
-      allEvents.forEach((e) => eventsById.set(e.id, e));
-      applyFilters();
-      spinner.style.display = "none";
-      catalog.style.display = "block";
+      missing.forEach((id, i) => { const ev = fetched[i]; if (ev) have.set(Number(ev.id), ev); else deadIds.add(Number(id)); });
+      try { sessionStorage.setItem("savedDeadIds_v1", JSON.stringify([...deadIds])); } catch (_) {}
+      const resolved = [...savedIds].map((id) => have.get(id)).filter((e) => e && notPast(e));
+      resolved.forEach((e) => eventsById.set(e.id, e));
+      writeSavedEventsCache(resolved);
+      // The user may have hit "back" while we were fetching — don't clobber the
+      // restored catalog buffer (saved.html has no buffer, so it always applies).
+      if (!savedView()) return;
+      allEvents = resolved;
+      // Re-render ONLY if the VISIBLE set actually changed vs what we painted —
+      // so an unchanged return shows no flicker.
+      if (!painted || paintedSig !== sigOf(resolved)) {
+        spinner.style.display = "none";
+        catalog.style.display = "block";
+        applyFilters();
+      }
     } catch (_) {
-      showError("שגיאה בטעינת השמורים.");
+      if (!painted) showError("שגיאה בטעינת השמורים.");
     }
   }
   // Build a Google Calendar "add event" link from an event's date/time.
@@ -210,6 +293,8 @@
   const viewFab          = document.getElementById("viewFab");
   const mapView          = document.getElementById("mapView");
   const drillBar         = document.getElementById("drillBar");
+  const savedLink        = document.getElementById("savedLink");
+  const backBtn          = document.getElementById("backBtn");
   const activeFiltersBar = document.getElementById("activeFiltersBar");
   const appHeader        = document.querySelector(".app-header");
   const imgLightbox  = document.getElementById("imgLightbox");
@@ -287,6 +372,17 @@
     if (serverSearch.available_only) p.set("available_only", "1");
     if (serverSearch.unseen_only) p.set("unseen_only", "1");
     if (serverSearch.ignore_profile) p.set("ignore_profile", "1");
+    // Refinements that used to be client-only — now sent so the SERVER filters
+    // before paginating (else a page would be filtered incorrectly).
+    p.set("pageSize", String(CATALOG_PAGE));
+    p.set("sort", activeSort);
+    if (activeType && activeType !== "all") p.set("type", activeType);
+    if (searchTokens.length) p.set("tokens", JSON.stringify(searchTokens));
+    if (serverSearch.tags.length) p.set("tags", serverSearch.tags.join(","));
+    if (serverSearch.communities.length) p.set("communities", serverSearch.communities.join(","));
+    if (activeTag) p.set("tag", activeTag);
+    if (tagDrilldown) p.set("drillTag", tagDrilldown);
+    if (umbrellaDrilldown?.slug) p.set("umbrella", umbrellaDrilldown.slug);
     // Custom date window (weekend / "📅 טווח") — applied when no server preset is
     // active. Baked into the query (not passed ad-hoc) so it survives the
     // scope-toggle cache and profile-navigation restore.
@@ -301,6 +397,11 @@
   // Cache BOTH scopes (בשבילי / כללי) for the current filter set so toggling
   // is an instant in-memory swap — no refetch. Invalidated when filters change.
   let scopeCache = { sig: "", me: null, all: null };
+  // Server-side pagination state (catalog infinite scroll).
+  const CATALOG_PAGE = 24;
+  let _catalogTotal = 0;        // full filtered count (for the "N אירועים" header)
+  let _catalogHasMore = false;  // server has more pages beyond what's loaded
+  let _catalogLoadingMore = false;
   // Cache occurrence fetches (per id + window + all/limit) so toggling
   // window↔all or reopening the series screen is instant. Reset on reload.
   let occCache = new Map();
@@ -310,6 +411,11 @@
       k: serverSearch.keywords, p: serverSearch.proximity,
       av: serverSearch.available_only, u: serverSearch.unseen_only,
       cr: serverSearch.date_preset ? null : customRange,
+      // Now SERVER-side (paginated) → must be part of the cache key, else a
+      // type/sort/token/tag change would reuse a stale page set.
+      ty: activeType, so: activeSort, tk: searchTokens,
+      tg: serverSearch.tags, cm: serverSearch.communities,
+      at: activeTag, dt: tagDrilldown, um: umbrellaDrilldown?.slug || null,
     });
   }
   function applyBody(body) {
@@ -320,11 +426,13 @@
     watchedIds.clear();
     (body.watchedIds || []).forEach((id) => watchedIds.add(id));
     allEvents = body.events || [];
+    _catalogTotal = body.total != null ? body.total : allEvents.length;
+    _catalogHasMore = !!body.hasMore;
     lastWindowLabel = body.window?.label_he || null;
     lastCanExtend = !!body.canExtend;
     lastExtensionHint = body.extensionHint || null;
     updateTypeChipAvailability();
-    applyFilters();
+    renderLoadedCatalog();
     spinner.style.display = "none";
     catalog.style.display = "block";
     // Tiny build stamp so a stale deploy / cached WebView is diagnosable
@@ -381,9 +489,9 @@
   const CATALOG_STATE_KEY = "catalogState_v1";
   let _pendingScrollY = null;
   function saveCatalogState() {
-    // The saved page reuses app.js but must NOT overwrite the CATALOG's saved
-    // scroll/filters — else returning events→saved→events forgets your place.
-    if (SAVED_MODE) return;
+    // The saved page/view reuses app.js but must NOT overwrite the CATALOG's
+    // saved scroll/filters — else returning events→saved→events forgets place.
+    if (savedView()) return;
     try {
       sessionStorage.setItem(CATALOG_STATE_KEY, JSON.stringify({
         ss: serverSearch, activeDate, activeType, tokens: searchTokens, customRange, y: window.scrollY,
@@ -421,9 +529,10 @@
   window.addEventListener("pagehide", saveCatalogState);
 
   async function loadEvents(extra) {
-    // On the saved page every "refresh" (filter apply, suppress, clear, chip
-    // toggle) must re-render the SAVED set — not run a catalog search.
-    if (SAVED_MODE) return loadSavedPage();
+    // On the saved page the whole bookmarked set is already in memory, so a
+    // filter/sort/chip change is pure client-side refinement — no refetch, no
+    // flash. Only the very first load (allEvents empty) hits the server.
+    if (savedView()) return allEvents.length ? applyFilters() : loadSavedPage();
     INIT_DATA = await ensureInitData();
     if (!INIT_DATA) {
       showError(catalogAuthErrorMessage());
@@ -579,80 +688,49 @@
     const lat = e._lat, lng = e._lng;
     return (lat != null && lng != null) ? `${(+lat).toFixed(5)},${(+lng).toFixed(5)}` : null;
   }
-  function applyFilters() {
-    // Date filtering is now done SERVER-side (serverSearch.date_preset);
-    // here we only do light client refinement on the returned set.
-    // Precompute, per active PLACE token, the set of venue coord-keys that
-    // share its address text — so the filter matches the whole real venue.
-    const placeCoordSets = new Map();
-    for (const tok of searchTokens) {
-      if (tok.type !== "place" || placeCoordSets.has(tok.value)) continue;
-      const set = new Set();
-      for (const x of allEvents) {
-        if ((x.location || "") === tok.value) { const k = venueCoordKey(x); if (k) set.add(k); }
+  // Resolve the active date chip / custom range into ISO {from,to} bounds for
+  // client-side filtering on the saved page.
+  function savedDateBounds() {
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (activeDate === "range" && customRange) return { from: customRange.from || null, to: customRange.to || null };
+    const now = new Date(); const today = iso(now);
+    const add = (n) => { const d = new Date(now); d.setDate(d.getDate() + n); return iso(d); };
+    switch (activeDate) {
+      case "today":    return { from: today, to: today };
+      case "tomorrow": return { from: add(1), to: add(1) };
+      case "weekend": { // upcoming Fri–Sat
+        const dow = now.getDay(); const toFri = (5 - dow + 7) % 7;
+        return { from: add(toFri), to: add(toFri + 1) };
       }
-      placeCoordSets.set(tok.value, set);
+      case "week":  return { from: today, to: add(7) };
+      case "month": return { from: today, to: add(31) };
+      default:      return null; // "all"
     }
-    const visible = allEvents.filter((e) => {
-      // Saved-only view: show just the bookmarked events.
-      if (savedOnly && !isSaved(e.id)) return false;
-      // "מחייב הרשמה" = has a dedicated registration page (external_url)
-      // OR is an online event (zoom/meet) OR is a paid Smarticket event.
-      // City page URLs (bookingUrl for rg-muni without external_url) are
-      // NOT registration — they're just info pages.
-      const requiresReg = !!(e.externalUrl || e.onlineUrl ||
-        (e.source !== "rg-muni" && e.ticketsLeft != null));
-      if (activeType === "registration" && !requiresReg) return false;
-      if (activeType === "free"         && requiresReg)  return false;
-      if (activeType === "online"       && !e.onlineUrl) return false;
-      if (activeType === "low_stock") {
-        const t = e.ticketsLeft;
-        if (t == null || t <= 0 || t > 9) return false;
-      }
-      // Interest-tag filter (search hub chips): event must carry at least one
-      // of the selected tags. Client-side & exact so removing a pill restores
-      // results immediately.
-      if (serverSearch.tags.length) {
-        const et = e.tags || [];
-        if (!serverSearch.tags.some((t) => et.includes(t))) return false;
-      }
-      // Community filter: event must be restricted to a selected community.
-      if (serverSearch.communities.length) {
-        const ea = e.access || [];
-        if (!serverSearch.communities.some((c) => ea.includes(c))) return false;
-      }
-      // Profile tag chip filter.
-      if (activeTag && !(e.tags || []).includes(activeTag)) return false;
-      // Tag drill-down.
-      if (tagDrilldown && !(e.tags || []).includes(tagDrilldown)) return false;
-      // Umbrella drill-down.
-      if (umbrellaDrilldown && e.umbrella_slug !== umbrellaDrilldown.slug) return false;
-      // Token-based search: each chosen suggestion narrows (AND). Plain typed
-      // text does NOT filter on its own — only selected tokens do.
-      if (searchTokens.length) {
-        const ok = searchTokens.every((tok) => {
-          if (tok.type === "tag") return (e.tags || []).includes(tok.value);
-          if (tok.type === "place") {
-            // Match by REAL venue (rounded coords), not exact address text —
-            // so all address variants of the same place are included (one venue
-            // often has 3-5 slightly different location_key strings).
-            const set = placeCoordSets.get(tok.value);
-            const ec = venueCoordKey(e);
-            if (set && set.size && ec) return set.has(ec);
-            return (e.location || "").includes(tok.value); // fallback (no coords)
-          }
-          if (tok.type === "program") return tok.slug ? (e.umbrella_slug === tok.slug) : (e.umbrella_title || "").includes(tok.value);
-          return (e.name || "").includes(tok.value); // name
-        });
-        if (!ok) return false;
-      }
-      return true;
-    });
+  }
+  function applyFilters() {
+    // Saved view: show ALL bookmarks, unfiltered. We don't reuse the catalog's
+    // search/filters here (and the filters bar is hidden), so the catalog keeps
+    // its own filtering untouched.
+    if (savedView()) {
+      drillBar && (drillBar.style.display = "none");
+      if (activeFiltersBar) activeFiltersBar.style.display = "none";
+      const sorted = sortEvents(allEvents.filter((e) => isSaved(e.id)));
+      if (currentView === "list") renderGrid(sorted); else renderMap(sorted);
+      return;
+    }
+    // Catalog: filtering + sorting now run SERVER-side (so a paginated page is
+    // correct). A filter/sort change therefore re-fetches from page 0; the
+    // loaded set is painted by renderLoadedCatalog() (no client-side filtering).
+    loadEvents();
+  }
+
+  // Paint the already-loaded catalog set (server returned it already
+  // filtered+sorted). Infinite scroll appends more pages.
+  function renderLoadedCatalog() {
     updateDrillBar();
     updateActiveFiltersBar();
-    const sorted = sortEvents(visible);
-    if (currentView === "list") renderGrid(sorted);
-    else renderMap(sorted);
+    if (currentView === "list") renderGrid(allEvents, _catalogTotal);
+    else renderMap(allEvents);
   }
 
   // ── Drill-down bar (tag or umbrella) ─────────────────────────────────
@@ -917,6 +995,7 @@
 
   // Enter tag drill-down — called from card tag pills.
   window.drillTag = function (tag) {
+    if (savedView()) return; // filter-creating actions are disabled in the saved view
     // Unified with the search box: tapping a tag adds it as a search TOKEN
     // (top filter pill) — same filtering path as picking it in autocomplete.
     if (!tag) return;
@@ -934,6 +1013,50 @@
   const PAGE_SIZE = 12;
   let _renderPlan = [];   // flat list of {type:"header"|"card", …}
   let _renderIdx = 0;
+  let _renderLastDate = null; // last date header pushed (so appends continue cleanly)
+  // Append events to the render plan, inserting a date header when the date
+  // changes vs the previous item — used for both initial render and paging.
+  function appendToRenderPlan(events) {
+    for (const ev of events) {
+      if (ev.date !== _renderLastDate) {
+        _renderPlan.push({ type: "header", dateHe: ev.dateHe || ev.date });
+        _renderLastDate = ev.date;
+      }
+      _renderPlan.push({ type: "card", ev });
+    }
+  }
+  // Fetch the next server page and append it (catalog infinite scroll).
+  function setLoadMoreSpinner(on) {
+    let el = document.getElementById("loadMoreSpinner");
+    if (on) {
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "loadMoreSpinner";
+        el.className = "load-more-spinner";
+        el.innerHTML = '<div class="spinner"></div><span>טוען עוד…</span>';
+      }
+      cardGrid.appendChild(el); // move to bottom
+    } else if (el) {
+      el.remove();
+    }
+  }
+  async function loadMoreCatalog() {
+    if (_catalogLoadingMore || !_catalogHasMore || savedView()) return;
+    _catalogLoadingMore = true;
+    setLoadMoreSpinner(true);
+    try {
+      const body = await fetchScope(serverSearch.ignore_profile, { offset: String(allEvents.length) });
+      const more = body.events || [];
+      allEvents = allEvents.concat(more);
+      _catalogHasMore = !!body.hasMore;
+      if (body.total != null) _catalogTotal = body.total;
+      more.forEach((e) => eventsById.set(e.id, e));
+      appendToRenderPlan(more);
+      setLoadMoreSpinner(false);
+      renderNextChunk();
+    } catch (_) { /* keep what we have; a later scroll retries */ }
+    finally { _catalogLoadingMore = false; setLoadMoreSpinner(false); }
+  }
   let _scrollObserver = null;
 
   function showSkeletons(n = 4) {
@@ -948,7 +1071,7 @@
       </div>`).join("");
   }
 
-  function renderGrid(events) {
+  function renderGrid(events, totalOverride) {
     cardGrid.innerHTML = "";
     noResults.style.display = events.length ? "none" : "block";
     if (!events.length) {
@@ -969,18 +1092,16 @@
     // Flatten into a render plan: a date header before each new date, then
     // its cards — so chunked rendering still shows headers in order.
     _renderPlan = [];
-    let lastDate = null;
-    for (const ev of events) {
-      if (ev.date !== lastDate) {
-        _renderPlan.push({ type: "header", dateHe: ev.dateHe || ev.date });
-        lastDate = ev.date;
-      }
-      _renderPlan.push({ type: "card", ev });
-    }
+    _renderLastDate = null;
+    appendToRenderPlan(events);
     _renderIdx = 0;
 
-    const total = events.length;
-    const win = lastWindowLabel ? ` ${lastWindowLabel}` : "";
+    // With server pagination, `events` is only the loaded pages — show the FULL
+    // filtered count from the server (totalOverride) in the header.
+    const total = totalOverride != null ? totalOverride : events.length;
+    // Drop the default "הקרובים" window word — "98 אירועים" reads cleaner.
+    const winLabel = lastWindowLabel === "הקרובים" ? null : lastWindowLabel;
+    const win = winLabel ? ` ${winLabel}` : "";
     resultsMeta.innerHTML = "";
     const label = document.createElement("span");
     label.textContent = `${total} אירועים${win}`;
@@ -1024,14 +1145,20 @@
     // view we reveal the next chunk ("polling on scroll").
     const old = document.getElementById("scrollSentinel");
     if (old) old.remove();
-    if (_renderIdx < _renderPlan.length) {
+    // Keep a sentinel while there are more DOM chunks to reveal OR the server
+    // has more pages to fetch (catalog infinite scroll).
+    const moreToReveal = _renderIdx < _renderPlan.length;
+    const serverHasMore = !savedView() && _catalogHasMore;
+    if (moreToReveal || serverHasMore) {
       const sentinel = document.createElement("div");
       sentinel.id = "scrollSentinel";
       sentinel.style.height = "1px";
       cardGrid.appendChild(sentinel);
       if (!_scrollObserver) {
         _scrollObserver = new IntersectionObserver((entries) => {
-          if (entries.some((e) => e.isIntersecting)) renderNextChunk();
+          if (!entries.some((e) => e.isIntersecting)) return;
+          if (_renderIdx < _renderPlan.length) renderNextChunk(); // reveal loaded
+          else if (!savedView() && _catalogHasMore) loadMoreCatalog(); // fetch next page
         }, { rootMargin: "600px" });
       }
       _scrollObserver.observe(sentinel);
@@ -1337,7 +1464,7 @@
       interestedIds.add(eventId);
       btn.classList.add("active");
       sendSignal(eventId, "interest").catch(() => {});
-      tg?.HapticFeedback?.impactOccurred("light");
+      try { tg?.HapticFeedback?.impactOccurred?.("light"); } catch (_) {}
     }
   };
 
@@ -1385,7 +1512,7 @@
         body: JSON.stringify({ initData: INIT_DATA, eventId, reason }),
       });
     } catch (_) { /* ignore */ }
-    tg?.HapticFeedback?.impactOccurred("light");
+    try { tg?.HapticFeedback?.impactOccurred?.("light"); } catch (_) {}
     fadeOutCard(eventId);
   };
 
@@ -1420,7 +1547,7 @@
       if (btn.classList.contains("btn-watch")) {
         btn.textContent = watching ? "🔔 עוקבים — נעדכן אותך" : "🔔 כן, עדכנו אותי";
       }
-      tg?.HapticFeedback?.impactOccurred("light");
+      try { tg?.HapticFeedback?.impactOccurred?.("light"); } catch (_) {}
     } catch (_) { /* ignore */ } finally { btn.disabled = false; }
   };
 
@@ -1524,12 +1651,13 @@
           <div class="ss-body"></div>
           <div class="ss-foot">
             <button class="ss-apply btn btn-primary btn-block">החל סינון</button>
-            <a class="ss-profile" href="profile.html">⚙️ לכוונון מלא בפרופיל</a>
+            <button class="ss-profile" type="button">⚙️ לכוונון מלא בפרופיל</button>
           </div>
         </div>`;
       document.body.appendChild(ov);
       const close = () => { ov.classList.remove("open"); document.body.style.overflow = ""; };
       ov.querySelector(".ss-close").addEventListener("click", close);
+      ov.querySelector(".ss-profile").addEventListener("click", () => { close(); window.openProfileOverlay?.(); });
       ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
       ov.querySelector(".ss-body").addEventListener("click", (e) => {
         const chip = e.target.closest(".ss-chip");
@@ -1612,7 +1740,7 @@
       // Close IMMEDIATELY (optimistic) — don't wait for the network, or a slow
       // request leaves the sheet stuck open on "מחיל…". The writes run in the
       // background; the list refreshes once they settle.
-      tg?.HapticFeedback?.notificationOccurred?.("success");
+      try { tg?.HapticFeedback?.notificationOccurred?.("success"); } catch (_) {}
       close();
       fadeOutCard(eventId);
       scopeCache = { sig: "", me: null, all: null };
@@ -1773,7 +1901,10 @@
   // were. Fetches all occurrences only now (on demand).
   // mode: "window" (all results matching the search) | "all" (entire series).
   window.openSeriesScreen = async function (eventId, mode) {
-    const title = (eventsById.get(eventId) || eventsById.get(Number(eventId)) || {}).name || "כל המופעים";
+    // Prefer the umbrella/programme title (the "parent"), not the first child's
+    // name — the series screen represents the whole programme.
+    const ev = eventsById.get(eventId) || eventsById.get(Number(eventId)) || {};
+    const title = ev.umbrella_title || ev.name || "כל המופעים";
     let ov = document.getElementById("seriesModal");
     if (!ov) {
       ov = document.createElement("div");
@@ -1829,6 +1960,7 @@
   // server (incl. ones not in the current results) and merges them in, so
   // "opening the parent" shows everything, not just what was already loaded.
   window.filterUmbrella = async function (slug, title) {
+    if (savedView()) return; // filter-creating actions are disabled in the saved view
     // Unified with tags & the search box: tapping the umbrella ("📋 …") adds it
     // as a removable PROGRAM token in the top filter bar (carrying the slug for
     // precise matching) — no separate drill-down view / back bar.
@@ -1963,7 +2095,7 @@
 
   viewFab?.addEventListener("click", () => {
     setView(currentView === "list" ? "map" : "list");
-    tg?.HapticFeedback?.impactOccurred("light");
+    try { tg?.HapticFeedback?.impactOccurred?.("light"); } catch (_) {}
   });
 
   // ── Date filter chips ─────────────────────────────────────────────────
@@ -2084,7 +2216,7 @@
     serverSearch.ignore_profile = !serverSearch.ignore_profile; // off = כולל
     syncScopeChips();
     loadEvents();
-    tg?.HapticFeedback?.impactOccurred("light");
+    try { tg?.HapticFeedback?.impactOccurred?.("light"); } catch (_) {}
   });
   document.getElementById("keywordInput")?.addEventListener("input", (e) => {
     const v = e.target.value.trim();
@@ -2125,37 +2257,73 @@
   filterSheetClose?.addEventListener("click", closeFilterSheet);
   filterSheetApply?.addEventListener("click", () => { closeFilterSheet(); loadEvents(); });
 
-  // ── Saved-only view toggle (⭐ in the header) ─────────────────────────
-  const savedToggleBtn = document.getElementById("savedToggleBtn");
-  savedToggleBtn?.addEventListener("click", async () => {
-    savedOnly = !savedOnly;
-    savedToggleBtn.classList.toggle("active", savedOnly);
-    resultsMeta && (resultsMeta.dataset.savedOnly = savedOnly ? "1" : "");
-    if (savedOnly) {
-      // Pull any saved events that aren't in the currently-loaded set (outside
-      // the active window/scope) so the saved view is COMPLETE, not just what's
-      // on screen.
-      const have = new Set(allEvents.map((e) => e.id));
-      const missing = [...savedIds].filter((id) => !have.has(id));
-      if (missing.length) {
-        try {
-          const fetched = await Promise.all(missing.map((id) =>
-            fetch(`${API_PREFIX}/event?${new URLSearchParams({ initData: INIT_DATA, id, noseries: "1" })}`)
-              .then((r) => r.json()).then((j) => j.event).catch(() => null)));
-          const add = fetched.filter(Boolean).filter((e) => !have.has(e.id));
-          if (add.length) { allEvents = allEvents.concat(add); add.forEach((e) => eventsById.set(e.id, e)); }
-        } catch (_) { /* show whatever is loaded */ }
-      }
-    }
-    applyFilters();
+  // ── In-page "⭐ saved" view (no page reload) ──────────────────────────
+  // The ⭐ header button swaps the catalog data buffer for the bookmarked set
+  // and the header chrome — instant, with the catalog kept alive behind it so
+  // the back arrow restores scroll/filters with zero refetch.
+  const savedTitle = document.getElementById("savedTitle");
+  function setSavedChrome(on) {
+    // Saved view = a clean header: just the back arrow + title. Everything else
+    // (search, sort, filter, ⭐/👤, בשבילי) is hidden.
+    backBtn?.style.setProperty("display", on ? "" : "none");
+    savedTitle?.style.setProperty("display", on ? "" : "none");
+    savedLink?.style.setProperty("display", on ? "none" : "");
+    document.getElementById("profileBtn")?.style.setProperty("display", on ? "none" : "");
+    document.getElementById("forMeToggle")?.style.setProperty("display", on ? "none" : "");
+    document.querySelector(".search-wrap")?.style.setProperty("display", on ? "none" : "");
+    document.getElementById("sortToggleBtn")?.style.setProperty("display", on ? "none" : "");
+    document.getElementById("filterToggleBtn")?.style.setProperty("display", on ? "none" : "");
+    try { if (on) tg?.BackButton?.show?.(); else tg?.BackButton?.hide?.(); } catch (_) {}
+  }
+  function enterSavedView() {
+    if (inSavedView) return;
+    _catalogEventsBuffer = allEvents;          // keep the catalog set alive
+    _catalogSavedScrollY = window.scrollY;
+    // The saved view shows ALL bookmarks unfiltered. Filter-creating actions
+    // (tag pills, umbrella links, search tokens, drill-downs) are disabled while
+    // savedView() is true, so nothing leaks into the catalog — nothing to restore.
+    inSavedView = true; savedOnly = true;
+    setSavedChrome(true);
+    if (resultsMeta) resultsMeta.dataset.savedOnly = "1";
+    allEvents = [];                            // force loadSavedPage to paint the saved set
     window.scrollTo({ top: 0, behavior: "instant" });
+    // No cache yet → show the spinner instead of leaving stale catalog cards;
+    // loadSavedPage clears it once the saved set is ready.
+    if (!(readSavedEventsCache() || []).length) { catalog.style.display = "none"; spinner.style.display = "flex"; }
+    loadSavedPage();                           // instant from cache + silent revalidate
+  }
+  function exitSavedView() {
+    if (!inSavedView) return;
+    inSavedView = false; savedOnly = false;
+    setSavedChrome(false);
+    if (resultsMeta) resultsMeta.dataset.savedOnly = "";
+    allEvents = _catalogEventsBuffer || [];    // restore the catalog set
+    _catalogEventsBuffer = null;
+    applyFilters();
+    requestAnimationFrame(() => window.scrollTo({ top: _catalogSavedScrollY, behavior: "instant" }));
+  }
+  savedLink?.addEventListener("click", (e) => { e.preventDefault(); enterSavedView(); });
+  backBtn?.addEventListener("click", (e) => { e.preventDefault(); exitSavedView(); });
+  document.getElementById("profileBtn")?.addEventListener("click", (e) => { e.preventDefault(); window.openProfileOverlay?.(); });
+  // When the profile overlay closes after a save (catalog_dirty), refresh the
+  // catalog so home/interest changes are reflected — but only if not in the
+  // saved view (that has its own data).
+  window.addEventListener("profile:closed", () => {
+    let dirty = false;
+    try { dirty = sessionStorage.getItem("catalog_dirty") === "1"; } catch (_) {}
+    if (dirty && !inSavedView) {
+      try { sessionStorage.removeItem("catalog_dirty"); } catch (_) {}
+      scopeCache = { sig: null, me: null, all: null }; // force a real refetch
+      loadEvents();
+    }
   });
+  try { tg?.BackButton?.onClick?.(() => { if (inSavedView) exitSavedView(); }); } catch (_) {}
   filterBackdrop?.addEventListener("click", closeFilterSheet);
   // "נקה הכל" — reset every filter; keep the sheet open so the user sees
   // the cleared state (results refresh underneath).
   document.getElementById("filterSheetClear")?.addEventListener("click", () => {
     resetAllFilters();
-    tg?.HapticFeedback?.impactOccurred("light");
+    try { tg?.HapticFeedback?.impactOccurred?.("light"); } catch (_) {}
   });
 
   // ── Autocomplete search (token-based) ─────────────────────────────────
@@ -2167,9 +2335,19 @@
   const TYPE_ICON = { name: "🎫", program: "📋", tag: "🏷️", place: "📍" };
   const TYPE_LABEL = { name: "אירוע", program: "תוכנית", tag: "תגית", place: "מיקום" };
 
+  // Normalize for matching: lowercase, strip Hebrew gershayim/geresh + quotes,
+  // collapse whitespace — so «בר ״פסטה יין״» matches a plain «בר פסטה».
+  function normSearch(s) {
+    return (s || "").toLowerCase().replace(/[״׳"'`]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function matchesNeedle(value, words) {
+    const nv = normSearch(value);
+    return words.every((w) => nv.includes(w)); // AND over words, order-independent
+  }
   function buildSuggestions(q) {
-    const needle = q.trim().toLowerCase();
+    const needle = normSearch(q);
     if (!needle) return [];
+    const needleWords = needle.split(" ").filter(Boolean);
     const seen = new Set();      // dedupe by type+value
     const seenPlaceCoords = new Set(); // dedupe places by REAL venue (coords)
     const out = [];
@@ -2179,7 +2357,7 @@
       // siblings sharing a generic prefix don't collapse together.
       const key = type + "|" + (openId != null ? "#" + openId : value);
       if (seen.has(key)) return;
-      if (!value.toLowerCase().includes(needle)) return;
+      if (!matchesNeedle(value, needleWords)) return;
       // already an active token? skip.
       if (searchTokens.some((t) => t.type === type && t.value === value)) return;
       seen.add(key);
@@ -2192,7 +2370,7 @@
       // One physical venue has several address-text variants — suggest each
       // REAL place once (dedupe by rounded coords among places matching the
       // query) so the user isn't offered 3 near-identical rows for one building.
-      if (e.location && !isCityWide(e.location) && e.location.toLowerCase().includes(needle)) {
+      if (e.location && !isCityWide(e.location) && matchesNeedle(e.location, needleWords)) {
         const ck = venueCoordKey(e);
         if (!ck || !seenPlaceCoords.has(ck)) {
           if (ck) seenPlaceCoords.add(ck);
@@ -2220,6 +2398,7 @@
     searchSuggest.hidden = false;
   }
   function addToken(tok) {
+    if (savedView()) return; // no filter tokens in the saved view
     // A suggestion tied to a specific event (a collapsed series/umbrella sibling)
     // opens THAT event directly rather than filtering the grid to the parent.
     if (tok && tok.openId != null) {
@@ -2421,23 +2600,16 @@
     // Dedicated saved.html page — hide the בשבילי toggle and load bookmarks.
     document.getElementById("forMeToggle")?.style.setProperty("display", "none");
     loadSavedPage();
-  } else if (_sp === "profile") {
-    // Opened via t.me/<bot>?startapp=profile. start_param stays "profile" for
-    // the whole session, so redirect ONLY on the first load — otherwise tapping
-    // "← אירועים" back from the profile lands on the catalog, which would see
-    // start_param=profile and bounce straight back → an endless ping-pong.
-    let done = false;
-    try { done = !!sessionStorage.getItem("dl_profile_done"); } catch (_) {}
-    if (done) {
-      loadEvents(); // returned from the profile — stay on the catalog
-    } else {
-      try { sessionStorage.setItem("dl_profile_done", "1"); } catch (_) {}
-      location.replace("profile.html" + _search + _hash);
-    }
   } else {
     // Catalog. If an event was requested, open it as an in-app modal OVER the
     // catalog (single, reusable "← חזרה" popup) — NOT a separate window. A new
     // event just swaps the same popup.
+    // Deep-link to the profile overlay over the catalog — via ?startapp=profile
+    // (t.me deep link) or ?view=profile (web_app button URL). profile.js loads
+    // right after us, so defer one tick.
+    const _wantProfile = _sp === "profile" ||
+      new URLSearchParams(window.location.search).get("view") === "profile";
+    if (_wantProfile) setTimeout(() => window.openProfileOverlay?.(), 0);
     restoreCatalogState(); // returning from profile → restore filters + scroll
     // Returning from the profile: refetch ONLY if the profile actually changed
     // (it sets `catalog_dirty`); otherwise re-render the cached payload instantly

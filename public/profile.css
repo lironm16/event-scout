@@ -1,5 +1,18 @@
 /* Profile editor — reuses tokens from style.css (--bg,--bg2,--text,--hint,--accent,...) */
 
+/* In-page overlay: full-screen, scrollable, painted over the catalog. */
+.profile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: var(--bg, #fff);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-top: env(safe-area-inset-top);
+}
+.profile-overlay[hidden] { display: none; }
+body.profile-open { overflow: hidden; }
+
 .pf-header {
   padding: 18px 16px 8px;
   text-align: center;

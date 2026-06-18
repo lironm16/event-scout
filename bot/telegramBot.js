@@ -23,7 +23,7 @@ const { Telegraf, Markup } = require("telegraf");
 const { DateTime } = require("luxon");
 
 const { getProfile, saveProfile, profileToBrainShape } = require("./profileService");
-const { runMatchingForAllUsers } = require("./matchingService");
+const { runMatchingForAllUsers, clearEventsCache } = require("./matchingService");
 const {
   addWatcher,
   setTicketsNeeded,
@@ -32,6 +32,9 @@ const {
   isWatching,
   getWatchedEvents,
 } = require("../lib/watchService");
+const { isSavedEvent, toggleSavedEvent } = require("../lib/savedEventService");
+const { muteEventNotifications } = require("../lib/muteService");
+const { sendReviewPrompts } = require("../lib/reviewPrompts");
 const {
   addInterest,
   removeInterest,
@@ -744,6 +747,18 @@ async function runScrape() {
       console.error("[Enricher] enrichPendingEvents failed:", err.message);
     }
   }
+
+  // Fresh events were just scraped/enriched — drop the read cache so the next
+  // catalog request reflects them (instead of waiting out the TTL).
+  try { clearEventsCache(); } catch (_) {}
+
+  // ⭐ Prompt users to review SAVED events that have now passed (deduped — fires
+  // once per user per series, never nags).
+  try {
+    await sendReviewPrompts(bot.telegram);
+  } catch (err) {
+    console.error("[ReviewPrompts] failed:", err.message);
+  }
 }
 
 function scheduleNextScrape() {
@@ -1000,6 +1015,11 @@ async function sendEventCard(ctx, event, opts = {}) {
         : Markup.button.callback("🔔 עדכן אם מתפנה", watchCb),
     );
   }
+  // ⭐ Save — bookmarks the event (shared with the Mini App's saved list).
+  const alreadySaved = await isSavedEvent(ctx.from.id, event.id).catch(() => false);
+  quickRow.push(
+    Markup.button.callback(alreadySaved ? "⭐ נשמר" : "⭐ שמור", `sv:${event.id}`),
+  );
   if (!opts.hideNotRelevant) {
     // "אל תראה לי יותר" → reason picker (fb:reasons:<id>). Suppressed when
     // `hideNotRelevant` is set (e.g. a «כללי» result already outside the
@@ -1007,12 +1027,21 @@ async function sendEventCard(ctx, event, opts = {}) {
     quickRow.push(
       Markup.button.callback("🚫 אל תראה לי יותר", `fb:reasons:${event.id}`),
     );
+    // 🔕 Mute — stop bot notifications/pushes about this, WITHOUT hiding it from
+    // the Mini App catalog (distinct from "אל תראה לי יותר").
+    quickRow.push(
+      Markup.button.callback("🔕 בלי הודעות על זה", `mute:${event.id}`),
+    );
   }
 
   if (miniEventLink || miniEventWebUrl) {
-    // TEASER (Mini App configured): ONE primary CTA → the full event page
-    // in the Web App. Booking link, navigation, every occurrence/series and
-    // the online-join link all live there, so the card itself stays clean.
+    // TEASER (Mini App configured): keep the direct "🧭 ניווט" + "🔗 לאתר"
+    // actions, then a button BELOW them that opens the full event in the Web
+    // App. No series/occurrence buttons — those live inside the Web App.
+    const navBtns = buildNavButtons(event, navOpts);
+    const detailsBtn = buildDetailsButton(event);
+    const topRow = [...navBtns, detailsBtn].filter(Boolean);
+    if (topRow.length) rows.push(topRow);
     rows.push([
       // Prefer the web_app button (a distinct event.html?ev=<id> URL the page
       // reads directly) over the startapp deep link: startapp REUSES an
@@ -1022,6 +1051,9 @@ async function sendEventCard(ctx, event, opts = {}) {
         ? Markup.button.webApp("📖 לפרטים והרשמה", miniEventWebUrl)
         : Markup.button.url("📖 לפרטים והרשמה", miniEventLink),
     ]);
+    if (event.online_url) {
+      rows.push([Markup.button.url("📹 הצטרף למפגש", event.online_url)]);
+    }
     if (quickRow.length) rows.push(quickRow);
   } else {
     // FALLBACK (no Mini App URL — the bot is the only UI). "🧭 ניווט" +
@@ -1039,87 +1071,8 @@ async function sendEventCard(ctx, event, opts = {}) {
       rows.push([Markup.button.url("📹 הצטרף למפגש", event.online_url)]);
     }
 
-  // Series / umbrella button — TWO possible behaviours, mutually
-  // exclusive (the user picked one button max for visual restraint):
-  //
-  //   1. UMBRELLA child (sql/054 set umbrella_slug on the row): the
-  //      button shows ALL siblings of the umbrella — different
-  //      titles, venues, times. Example: a Shavuot child card shows
-  //      "📋 כל אירועי שבועות ברמת גן". This matches the user's
-  //      mental model — "show me everything happening as part of
-  //      this Shavuot programme", not "show me other dates of this
-  //      specific puppet show". The seq grouping (same name, age
-  //      range) is genuinely the WRONG view for umbrella children
-  //      whose name is unique per occurrence.
-  //
-  //   2. Recurring SERIES (no umbrella, but ≥2 same-name occurrences):
-  //      the classic "📋 כל המופעים (N)" button. Useful for things
-  //      like "משחקיית רגעים לידה עד שנה" that runs 8× this week.
-  //
-  // Why not both: cards already carry 3-4 buttons; a fifth would
-  // overflow on narrow screens. The umbrella relationship is more
-  // informative when present (it explains "this is part of a larger
-  // programme"), so it wins. For umbrella children that ALSO happen
-  // to have multiple same-name occurrences (rare in practice), the
-  // seq button is silently dropped — users who want that view can
-  // still tap the parent umbrella and find the duplicate dates
-  // surfaced per child anyway.
-  if (event.umbrella_slug) {
-    const rawTitle = event.umbrella_title || "האירועים מתחת לכותרת המלאה";
-    // Telegram inline buttons render comfortably up to ~30 chars
-    // before they wrap on small phones; truncate longer titles with
-    // a Hebrew-friendly ellipsis ("…"). 22 chars body + the 10-char
-    // "📋 כל אירועי " prefix = 32, within budget for typical screens.
-    const truncated =
-      rawTitle.length > 22 ? rawTitle.slice(0, 21) + "…" : rawTitle;
-    let umbTotal = Number.isFinite(opts.seriesOccurrenceCount)
-      ? opts.seriesOccurrenceCount
-      : 0;
-    if (umbTotal < 2) {
-      const { data: umbRows } = await fetchUmbrellaSiblingRows(event.umbrella_slug);
-      umbTotal = umbRows?.length || umbTotal || 1;
-    }
-    const umbCountLabel =
-      umbTotal > SERIES_CARD_COUNT_CAP
-        ? `${SERIES_CARD_COUNT_CAP}+`
-        : String(Math.max(umbTotal, 1));
-    const meCount = await resolveUmbrellaProfileMatchCountForCard(
-      ctx,
-      event.umbrella_slug,
-    );
-    const meCountLabel = formatSeriesListCountLabel(meCount);
-    rows.push([
-      Markup.button.callback(
-        `📋 כל אירועי ${truncated} (${umbCountLabel})`,
-        `umb:${event.umbrella_slug}`,
-      ),
-    ]);
-    // "בשבילי" stays VISIBLE even when 0 match the profile — but a
-    // tap can't open an empty list, so we route it to a no-op that
-    // just explains why (effectively a disabled button; Telegram has
-    // no native disabled state for inline buttons).
-    rows.push([
-      Markup.button.callback(
-        `✨ בשבילי מהסדרה (${meCountLabel})`,
-        meCount > 0 ? `umb:me:${event.umbrella_slug}` : "noop:nomine",
-      ),
-    ]);
-  } else if (additionalOccurrences > 0) {
-    const btnCount =
-      seriesCount > SERIES_CARD_COUNT_CAP ? `${SERIES_CARD_COUNT_CAP}+` : String(seriesCount);
-    rows.push([
-      Markup.button.callback(`📋 כל המופעים (${btnCount})`, `seq:${event.id}`),
-    ]);
-    const meCount = await resolveSeriesProfileMatchCountForCard(ctx, event.id);
-    const meSuffix = ` (${formatSeriesListCountLabel(meCount)})`;
-    // Visible-but-disabled when nothing in the series fits the profile.
-    rows.push([
-      Markup.button.callback(
-        `✨ מופעים בשבילי${meSuffix}`,
-        meCount > 0 ? `seq:me:${event.id}` : "noop:nomine",
-      ),
-    ]);
-  }
+  // Series / umbrella occurrence buttons ("📋 כל המופעים" / "✨ בשבילי") were
+  // removed from the card — series/occurrence browsing lives in the Web App.
 
     if (quickRow.length) rows.push(quickRow);
   }
@@ -7102,6 +7055,39 @@ bot.action(/^wt:(\d+)(?::(\d+))?$/, async (ctx) => {
     // Best-effort follow-up since the initial ack already showed
     // "🔔 רושמת..." — without this the user thinks it worked.
     await ctx.reply("⚠️ לא הצלחתי להוסיף למעקב — נסי שוב בעוד רגע").catch(() => {});
+  }
+});
+
+// ⭐ Save toggle — bookmarks the event (shared with the Mini App saved list).
+bot.action(/^sv:(\d+)$/, async (ctx) => {
+  const eventId = ctx.match[1];
+  await safeAck(ctx, "⭐");
+  try {
+    const nowSaved = await toggleSavedEvent(ctx.from.id, eventId);
+    const newBtn = { text: nowSaved ? "⭐ נשמר" : "⭐ שמור", callback_data: `sv:${eventId}` };
+    const mk = replaceInlineButton(ctx.callbackQuery?.message?.reply_markup, `sv:${eventId}`, newBtn);
+    if (mk) await ctx.editMessageReplyMarkup(mk).catch(() => {});
+    await safeAck(ctx, nowSaved ? "⭐ נשמר לשמורים" : "הוסר מהשמורים");
+  } catch (err) {
+    console.error(`[Bot] sv error (event=${eventId}):`, err.message);
+    await ctx.reply("⚠️ לא הצלחתי לשמור — נסי שוב בעוד רגע").catch(() => {});
+  }
+});
+
+// 🔕 Mute notifications about this event/series — does NOT hide it from the
+// Mini App catalog (distinct from "🚫 אל תראה לי יותר").
+bot.action(/^mute:(\d+)$/, async (ctx) => {
+  const eventId = ctx.match[1];
+  await safeAck(ctx, "🔕");
+  try {
+    await muteEventNotifications(ctx.from.id, eventId);
+    const newBtn = { text: "🔕 הושתק", callback_data: "noop" };
+    const mk = replaceInlineButton(ctx.callbackQuery?.message?.reply_markup, `mute:${eventId}`, newBtn);
+    if (mk) await ctx.editMessageReplyMarkup(mk).catch(() => {});
+    await safeAck(ctx, "🔕 לא אשלח לך עוד הודעות על זה (עדיין יופיע בקטלוג)");
+  } catch (err) {
+    console.error(`[Bot] mute error (event=${eventId}):`, err.message);
+    await ctx.reply("⚠️ לא הצלחתי להשתיק — נסי שוב בעוד רגע").catch(() => {});
   }
 });
 

@@ -597,7 +597,9 @@
       return;
     }
     try {
-      tg?.HapticFeedback?.impactOccurred?.("light");
+      // Haptics throw synchronously on unsupported clients (Telegram Desktop);
+      // unguarded here it would abort the save before the POST even fired.
+      try { tg?.HapticFeedback?.impactOccurred?.("light"); } catch (_) {}
       const res = await fetch(`${API_PREFIX}/profile`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -605,6 +607,7 @@
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
       const updated = await res.json();
+      writeProfileCache(updated); // keep the instant-render cache current
       applyPayload(updated);
       render();
       refreshDirty();
@@ -612,10 +615,10 @@
       // refetches on return instead of re-rendering its cached payload.
       try { sessionStorage.setItem("catalog_dirty", "1"); } catch (_) {}
       toast("✅ נשמר");
-      tg?.HapticFeedback?.notificationOccurred?.("success");
+      try { tg?.HapticFeedback?.notificationOccurred?.("success"); } catch (_) {}
     } catch (err) {
       toast("⚠️ שמירה נכשלה — נסו שוב");
-      tg?.HapticFeedback?.notificationOccurred?.("error");
+      try { tg?.HapticFeedback?.notificationOccurred?.("error"); } catch (_) {}
     }
   }
 
@@ -656,10 +659,13 @@
     toast("השינויים בוטלו");
   }
 
+  let _wired = false;
   function wireSaveButton() {
     // In-page animated bar (not the native MainButton) so save + cancel share
     // one row that slides up only when there are unsaved changes.
     if (tg?.MainButton) { try { tg.MainButton.hide(); } catch (_) {} }
+    if (_wired) { refreshDirty(); return; } // idempotent — listeners attach once
+    _wired = true;
     document.getElementById("pf-save").addEventListener("click", save);
     document.getElementById("pf-cancel").addEventListener("click", cancel);
     // Recompute dirtiness after any interaction. Most edits happen via
@@ -673,23 +679,69 @@
   }
 
   // ── boot ──────────────────────────────────────────────────────────
+  const PROFILE_CACHE_KEY = "profilePayload_v1";
+  function readProfileCache() { try { return JSON.parse(sessionStorage.getItem(PROFILE_CACHE_KEY) || "null"); } catch (_) { return null; } }
+  function writeProfileCache(p) { try { sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(p)); } catch (_) {} }
   async function boot() {
-    INIT_DATA = await ensureInitData();
     const root = document.getElementById("pf-root");
+    // 1) Paint instantly from the cached payload — no waiting on the network.
+    let painted = false;
+    const cached = readProfileCache();
+    if (cached) {
+      try { applyPayload(JSON.parse(JSON.stringify(cached))); render(); wireSaveButton(); painted = true; } catch (_) {}
+    }
+    // 2) Revalidate in the background; re-render only if the server differs and
+    //    the user hasn't started editing (so we never clobber unsaved edits).
+    INIT_DATA = await ensureInitData();
     if (!INIT_DATA) {
-      root.innerHTML = '<div class="pf-error">פתחו את הפרופיל מתוך טלגרם — מהכפתור «📋 פרופיל» בבוט.</div>';
+      if (!painted) root.innerHTML = '<div class="pf-error">פתחו את הפרופיל מתוך טלגרם — מהכפתור «📋 פרופיל» בבוט.</div>';
       return;
     }
     try {
       const res = await fetch(`${API_PREFIX}/profile?${new URLSearchParams({ initData: INIT_DATA })}`);
       if (!res.ok) throw new Error(res.status);
-      applyPayload(await res.json());
-      render();
-      wireSaveButton();
+      const payload = await res.json();
+      writeProfileCache(payload);
+      const changed = JSON.stringify(payload) !== JSON.stringify(cached);
+      if (!painted || (changed && !isDirty())) {
+        applyPayload(payload);
+        render();
+        wireSaveButton();
+      }
     } catch (err) {
-      root.innerHTML = '<div class="pf-error">לא הצלחנו לטעון את הפרופיל. סגרו ופִתחו שוב מהבוט.</div>';
+      if (!painted) root.innerHTML = '<div class="pf-error">לא הצלחנו לטעון את הפרופיל. סגרו ופִתחו שוב מהבוט.</div>';
     }
   }
 
-  boot();
+  // ── Overlay open/close (in-page, no reload) ───────────────────────────
+  // The profile is embedded in index.html as #profileOverlay and opened from
+  // the 👤 header button. boot() runs once (cache-first → instant); later opens
+  // just reveal the already-rendered overlay.
+  let _booted = false;
+  const overlayEl = () => document.getElementById("profileOverlay");
+  window.openProfileOverlay = function () {
+    const ov = overlayEl(); if (!ov) return;
+    ov.hidden = false;
+    document.body.classList.add("profile-open");
+    try { tg?.BackButton?.show?.(); } catch (_) {}
+    if (!_booted) { _booted = true; boot(); }
+  };
+  window.closeProfileOverlay = function () {
+    const ov = overlayEl(); if (ov) ov.hidden = true;
+    document.body.classList.remove("profile-open");
+    try { tg?.BackButton?.hide?.(); } catch (_) {}
+    // Let the catalog refresh itself if a save marked it dirty (home/interests
+    // changed → results should update).
+    try { window.dispatchEvent(new CustomEvent("profile:closed")); } catch (_) {}
+  };
+  if (overlayEl()) {
+    // Embedded in index.html → wait for the 👤 button (openProfileOverlay).
+    // Back affordances act only while the overlay is open.
+    document.getElementById("pfBack")?.addEventListener("click", (e) => { e.preventDefault(); window.closeProfileOverlay(); });
+    try { tg?.BackButton?.onClick?.(() => { const ov = overlayEl(); if (ov && !ov.hidden) window.closeProfileOverlay(); }); } catch (_) {}
+  } else {
+    // Standalone profile.html (fallback for old links) — boot immediately;
+    // its inline script already wires the back link + native BackButton.
+    boot();
+  }
 })();

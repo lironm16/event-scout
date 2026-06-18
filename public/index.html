@@ -8,12 +8,16 @@
   <!-- Leaflet for map view -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="style.css?v=20260616t" />
+  <link rel="stylesheet" href="style.css?v=20260617t" />
+  <link rel="stylesheet" href="profile.css?v=20260617t" />
 </head>
 <body>
 
 <header class="app-header">
   <div class="header-top">
+    <!-- Back arrow + title — shown only inside the in-page "saved" view -->
+    <a class="filter-toggle-btn" id="backBtn" title="חזרה לאירועים" href="#" style="display:none">←</a>
+    <span class="saved-title" id="savedTitle" style="display:none">⭐ השמורים שלי</span>
     <div class="search-wrap">
       <input
         class="search-input"
@@ -40,8 +44,8 @@
         <circle cx="15" cy="17" r="2.2" fill="currentColor" stroke="none"/>
       </svg>
     </button>
-    <a class="filter-toggle-btn" id="savedLink" href="saved.html" title="השמורים שלי">⭐</a>
-    <a class="filter-toggle-btn" id="profileBtn" href="profile.html" title="הפרופיל שלי">👤</a>
+    <button class="filter-toggle-btn" id="savedLink" type="button" title="השמורים שלי">⭐</button>
+    <button class="filter-toggle-btn" id="profileBtn" type="button" title="הפרופיל שלי">👤</button>
   </div>
 </header>
 
@@ -276,18 +280,27 @@
   </div>
 </div>
 
-<script>
-  // Carry the Telegram launch params (?…#tgWebAppData=…) onto the profile
-  // link so profile.html opens authenticated (initData preserved).
-  (function () {
-    var q = location.search + location.hash;
-    ["profileBtn", "savedLink"].forEach(function (id) {
-      var el = document.getElementById(id);
-      if (el) el.href = el.getAttribute("href") + q;
-    });
-  })();
-</script>
+<!-- Profile overlay — the profile is now an in-page view (no reload), opened
+     from the 👤 header button. Markup mirrors the old profile.html. -->
+<div id="profileOverlay" class="profile-overlay" hidden>
+  <header class="app-header">
+    <div class="header-top">
+      <a class="filter-toggle-btn" id="pfBack" href="#" title="חזרה לאירועים">←</a>
+      <span class="saved-title">👤 הפרופיל שלי</span>
+    </div>
+  </header>
+  <p class="pf-sub" style="text-align:center;padding:8px 16px 0">עדכנו את ההעדפות — ההמלצות יתעדכנו בהתאם</p>
+  <main id="pf-root" class="pf-root">
+    <div id="pf-loading" class="pf-loading">טוען…</div>
+  </main>
+  <div id="pf-toast" class="pf-toast" hidden></div>
+  <div id="pf-actions" class="pf-actions">
+    <button id="pf-save" class="pf-save" type="button">שמירה</button>
+    <button id="pf-cancel" class="pf-cancel" type="button">ביטול</button>
+  </div>
+</div>
 
-<script src="app.js?v=20260616t"></script>
+<script src="app.js?v=20260617t"></script>
+<script src="profile.js?v=20260617t"></script>
 </body>
 </html>

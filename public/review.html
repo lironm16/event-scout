@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>דירוג אירוע</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css?v=20260617r" />
+  <link rel="stylesheet" href="profile.css?v=20260617r" />
+  <style>
+    .rv-wrap { max-width: 640px; margin: 0 auto; padding: 16px 14px 96px; }
+    .rv-title { font-size: 1.15rem; font-weight: 800; margin: 4px 0 2px; }
+    .rv-sub { color: var(--hint); font-size: .95rem; margin-bottom: 16px; }
+    .rv-card { background: var(--bg2); border-radius: var(--card-r, 16px); box-shadow: var(--shadow-sm); padding: 16px; margin-bottom: 16px; }
+    .rv-stars { display: flex; flex-direction: row-reverse; justify-content: center; gap: 6px; font-size: 2.4rem; margin: 6px 0 14px; }
+    .rv-star { cursor: pointer; filter: grayscale(1); opacity: .45; transition: transform .08s, opacity .1s, filter .1s; }
+    .rv-star.on { filter: none; opacity: 1; }
+    .rv-star:active { transform: scale(.9); }
+    .rv-note { width: 100%; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent); border-radius: 12px; padding: 10px; font: inherit; background: var(--bg); color: var(--text); resize: vertical; min-height: 70px; }
+    .rv-submit { width: 100%; margin-top: 12px; padding: 13px; border: none; border-radius: 12px; background: var(--accent, #2f6fed); color: #fff; font-weight: 700; font-size: 1.02rem; }
+    .rv-submit:disabled { opacity: .5; }
+    .rv-others-title { font-weight: 700; margin: 4px 0 8px; }
+    .rv-review { border-top: 1px solid color-mix(in srgb, var(--hint) 14%, transparent); padding: 10px 0; }
+    .rv-review:first-child { border-top: none; }
+    .rv-r-head { display: flex; justify-content: space-between; font-size: .85rem; color: var(--hint); }
+    .rv-r-stars { color: #f6c945; letter-spacing: 1px; }
+    .rv-r-note { margin-top: 3px; line-height: 1.4; }
+    .rv-empty { color: var(--hint); text-align: center; padding: 16px; }
+    .rv-toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #1c7a3e; color: #fff; padding: 10px 18px; border-radius: 999px; font-weight: 700; opacity: 0; transition: opacity .2s; pointer-events: none; }
+    .rv-toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-top">
+      <a class="filter-toggle-btn" id="rvClose" href="#" title="סגירה">✕</a>
+      <span class="saved-title">⭐ דירוג</span>
+    </div>
+  </header>
+
+  <main class="rv-wrap">
+    <div id="rvLoading" class="rv-empty">טוען…</div>
+    <div id="rvBody" hidden>
+      <div class="rv-card">
+        <div class="rv-title" id="rvEventName"></div>
+        <div class="rv-sub" id="rvEventMeta"></div>
+        <div class="rv-stars" id="rvStars">
+          <span class="rv-star" data-v="5">⭐</span>
+          <span class="rv-star" data-v="4">⭐</span>
+          <span class="rv-star" data-v="3">⭐</span>
+          <span class="rv-star" data-v="2">⭐</span>
+          <span class="rv-star" data-v="1">⭐</span>
+        </div>
+        <textarea class="rv-note" id="rvNote" placeholder="מה היה? (רשות)" maxlength="800"></textarea>
+        <button class="rv-submit" id="rvSubmit" disabled>שליחת דירוג</button>
+      </div>
+      <div class="rv-card">
+        <div class="rv-others-title" id="rvAggTitle">ביקורות</div>
+        <div id="rvOthers"></div>
+      </div>
+    </div>
+  </main>
+
+  <div class="rv-toast" id="rvToast"></div>
+  <script src="review.js?v=20260617r"></script>
+</body>
+</html>

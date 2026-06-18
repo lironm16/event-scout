@@ -1,6 +1,7 @@
 const { GoogleGenerativeAI, SchemaType } = require("@google/generative-ai");
 const { createClient } = require("@supabase/supabase-js");
 const { todayISO, todayHumanEN, isAdminEntry, isEventInPast, currentTimeHHMM } = require("../lib/timeContext");
+const { getMutedKeys, isEventMuted } = require("../lib/muteService");
 const {
   formatHebrewDate,
   formatTimeRange,
@@ -449,6 +450,23 @@ async function getAvailableEvents({ accessScopes = ["open"] } = {}) {
  * @param {string}  [opts.dateFrom]   YYYY-MM-DD inclusive lower bound.
  * @param {string}  [opts.dateTo]     YYYY-MM-DD inclusive upper bound.
  */
+// In-memory memo so repeated identical reads (many users opening the same
+// default catalog view) share ONE Supabase fetch per TTL — the events change
+// only when the scraper runs, so short staleness is fine. This is the main
+// lever keeping Supabase egress flat regardless of user count.
+const _eventsCache = new Map(); // key -> { data, expires }
+const EVENTS_CACHE_TTL_MS = parseInt(process.env.EVENTS_CACHE_TTL_MS || "180000", 10); // 3 min
+function _eventsCacheKey(args) {
+  return JSON.stringify({
+    f: args.futureOnly !== false,
+    df: args.dateFrom || null,
+    dt: args.dateTo || null,
+    fmt: args.format || null,
+    sc: [...(args.accessScopes || ["open"])].sort(),
+  });
+}
+function clearEventsCache() { _eventsCache.clear(); }
+
 async function getAllEvents({
   futureOnly = true,
   dateFrom = null,
@@ -456,6 +474,10 @@ async function getAllEvents({
   format = null,
   accessScopes = ["open"],
 } = {}) {
+  const cacheKey = _eventsCacheKey({ futureOnly, dateFrom, dateTo, format, accessScopes });
+  const hit = _eventsCache.get(cacheKey);
+  if (hit && hit.expires > Date.now()) return hit.data;
+
   const select = await buildSelect();
   const extras = await getAvailableExtraCols();
   let query = supabase
@@ -480,7 +502,9 @@ async function getAllEvents({
   });
 
   const expanded = await expandLabels(flattened);
-  return applyFormatFilter(expanded, format);
+  const result = applyFormatFilter(expanded, format);
+  _eventsCache.set(cacheKey, { data: result, expires: Date.now() + EVENTS_CACHE_TTL_MS });
+  return result;
 }
 
 const { isGeminiAllowed } = require("../lib/geminiPolicy");
@@ -727,7 +751,14 @@ async function runMatchingForAllUsers(telegram) {
   for (const profile of profiles) {
     console.log(`\n[Matching] User: ${profile.telegram_id} (${profile.first_name || "unknown"})`);
 
-    const matches = await findMatchesForUser(profile, events);
+    let matches = await findMatchesForUser(profile, events);
+
+    // 🔕 Drop events the user muted for notifications (still visible in the
+    // Mini App catalog — mute ≠ suppress).
+    const mutedKeys = await getMutedKeys(profile.telegram_id).catch(() => new Set());
+    if (mutedKeys.size) {
+      matches = matches.filter((m) => !isEventMuted(eventsMap.get(m.event_id), mutedKeys));
+    }
 
     if (!matches.length) {
       console.log("  No matches found");
@@ -792,6 +823,7 @@ module.exports = {
   getActiveProfiles,
   getAvailableEvents,
   getAllEvents,
+  clearEventsCache,
   getEventById,
   buildMatchMessage,
   flattenEvent,
